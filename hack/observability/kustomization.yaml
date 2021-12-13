@@ -1,0 +1,6 @@
+resources:
+  - ../../config/default
+  - prometheus
+
+patchesStrategicMerge:
+  - opentelemetry/controller-manager-patch.yaml
