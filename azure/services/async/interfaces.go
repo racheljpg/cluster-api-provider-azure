@@ -20,13 +20,11 @@ import (
 	"context"
 
 	azureautorest "github.com/Azure/go-autorest/autorest/azure"
-	"github.com/go-logr/logr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
 // FutureScope is a scope that can perform store futures and conditions in Status.
 type FutureScope interface {
-	logr.Logger
 	azure.AsyncStatusUpdater
 }
 
@@ -34,16 +32,25 @@ type FutureScope interface {
 type FutureHandler interface {
 	// IsDone returns true if the operation is complete.
 	IsDone(ctx context.Context, future azureautorest.FutureAPI) (bool, error)
+	// Result returns the result of the operation.
+	Result(ctx context.Context, future azureautorest.FutureAPI, futureType string) (interface{}, error)
 }
 
 // Creator is a client that can create or update a resource asynchronously.
 type Creator interface {
 	FutureHandler
-	CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter) (azureautorest.FutureAPI, error)
+	CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, existingResource interface{}) (interface{}, azureautorest.FutureAPI, error)
+	Get(ctx context.Context, spec azure.ResourceSpecGetter) (interface{}, error)
 }
 
 // Deleter is a client that can delete a resource asynchronously.
 type Deleter interface {
 	FutureHandler
 	DeleteAsync(ctx context.Context, spec azure.ResourceSpecGetter) (azureautorest.FutureAPI, error)
+}
+
+// Reconciler is a generic interface used to perform asynchronous reconciliation of Azure resources.
+type Reconciler interface {
+	CreateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (interface{}, error)
+	DeleteResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) error
 }

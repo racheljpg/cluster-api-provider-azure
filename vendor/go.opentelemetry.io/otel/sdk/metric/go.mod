@@ -41,13 +41,13 @@ replace go.opentelemetry.io/otel/sdk/metric => ./
 replace go.opentelemetry.io/otel/trace => ../../trace
 
 require (
-	github.com/benbjohnson/clock v1.1.0 // do not upgrade to v1.1.x because it would require Go >= 1.15
+	github.com/benbjohnson/clock v1.2.0 // do not upgrade to v1.1.x because it would require Go >= 1.15
 	github.com/stretchr/testify v1.7.0
-	go.opentelemetry.io/otel v1.0.1
-	go.opentelemetry.io/otel/internal/metric v0.24.0
-	go.opentelemetry.io/otel/metric v0.24.0
-	go.opentelemetry.io/otel/sdk v1.0.1
-	go.opentelemetry.io/otel/sdk/export/metric v0.24.0
+	go.opentelemetry.io/otel v1.2.0
+	go.opentelemetry.io/otel/internal/metric v0.25.0
+	go.opentelemetry.io/otel/metric v0.25.0
+	go.opentelemetry.io/otel/sdk v1.2.0
+	go.opentelemetry.io/otel/sdk/export/metric v0.25.0
 )
 
 replace go.opentelemetry.io/otel/example/passthrough => ../../example/passthrough
@@ -73,3 +73,5 @@ replace go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp => ../
 replace go.opentelemetry.io/otel/bridge/opencensus/test => ../../bridge/opencensus/test
 
 replace go.opentelemetry.io/otel/example/fib => ../../example/fib
+
+replace go.opentelemetry.io/otel/schema => ../../schema

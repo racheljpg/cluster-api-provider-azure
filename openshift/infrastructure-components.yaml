@@ -10,7 +10,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -449,6 +449,7 @@ spec:
                 description: UserAssignedMSI or Service Principal
                 enum:
                 - ServicePrincipal
+                - ManualServicePrincipal
                 - UserAssignedMSI
                 type: string
             required:
@@ -523,7 +524,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -1879,7 +1880,7 @@ spec:
                             description: NatGateway associated with this subnet.
                             properties:
                               id:
-                                description: ID is the Azure resource ID of the nat
+                                description: ID is the Azure resource ID of the NAT
                                   gateway. READ-ONLY
                                 type: string
                               ip:
@@ -2349,7 +2350,7 @@ spec:
                           description: NatGateway associated with this subnet.
                           properties:
                             id:
-                              description: ID is the Azure resource ID of the nat
+                              description: ID is the Azure resource ID of the NAT
                                 gateway. READ-ONLY
                               type: string
                             ip:
@@ -2843,7 +2844,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -3331,7 +3332,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -5404,7 +5405,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -6404,9 +6405,15 @@ spec:
     subresources:
       status: {}
   - additionalPrinterColumns:
-    - description: AzureMachine ready status
-      jsonPath: .status.ready
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].message
+      name: Message
+      priority: 1
       type: string
     - description: Azure VM provisioning state
       jsonPath: .status.vmState
@@ -6930,7 +6937,7 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     cert-manager.io/inject-ca-from: capz-system/capz-serving-cert
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
     cluster.x-k8s.io/v1beta1: v1beta1
@@ -8107,7 +8114,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
@@ -8284,7 +8291,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
@@ -9023,7 +9030,7 @@ spec:
               of AzureManagedControlPlane.
             properties:
               initialized:
-                description: Initialized is true when the the control plane is available
+                description: Initialized is true when the control plane is available
                   for initial contact. This may occur before the control plane is
                   fully ready. In the AzureManagedControlPlane implementation, these
                   are identical.
@@ -9085,7 +9092,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.7.0
+    controller-gen.kubebuilder.io/version: v0.8.0
   creationTimestamp: null
   labels:
     cluster.x-k8s.io/provider: infrastructure-azure
@@ -9280,6 +9287,17 @@ spec:
             description: AzureManagedMachinePoolSpec defines the desired state of
               AzureManagedMachinePool.
             properties:
+              availabilityZones:
+                description: AvailabilityZones - Availability zones for nodes. Must
+                  use VirtualMachineScaleSets AgentPoolType.
+                items:
+                  type: string
+                type: array
+              maxPods:
+                description: MaxPods specifies the kubelet --max-pods configuration
+                  for the node pool.
+                format: int32
+                type: integer
               mode:
                 description: 'Mode - represents mode of an agent pool. Possible values
                   include: System, User.'
@@ -9303,6 +9321,17 @@ spec:
                 items:
                   type: string
                 type: array
+              scaling:
+                description: Scaling specifies the autoscaling parameters for the
+                  node pool.
+                properties:
+                  maxSize:
+                    format: int32
+                    type: integer
+                  minSize:
+                    format: int32
+                    type: integer
+                type: object
               sku:
                 description: SKU is the size of the VMs in the node pool.
                 type: string
@@ -9945,7 +9974,7 @@ spec:
               fieldPath: spec.nodeName
         - name: LOG_LEVEL
           value: DEBUG
-        image: mcr.microsoft.com/oss/azure/aad-pod-identity/nmi:v1.8.0
+        image: mcr.microsoft.com/oss/azure/aad-pod-identity/nmi:v1.8.5
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:

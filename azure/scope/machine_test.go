@@ -17,20 +17,21 @@ limitations under the License.
 package scope
 
 import (
+	"context"
 	"reflect"
 	"testing"
-
-	"k8s.io/klog/v2/klogr"
 
 	autorestazure "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
+	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/disks"
 )
 
 func TestMachineScope_Name(t *testing.T) {
@@ -1113,7 +1114,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image is specified and os specified is windows with version below 1.22, returns windows dockershim image",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1142,7 +1142,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image is specified and os specified is windows with version is 1.22+ with no annotation, returns windows containerd image",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1171,7 +1170,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image is specified and os specified is windows with version is 1.22+ with annotation dockershim, returns windows dockershim image",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1203,7 +1201,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image is specified and os specified is windows with version is less and 1.22 with annotation dockershim, returns windows dockershim image",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1235,7 +1232,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image is specified and os specified is windows with version is less and 1.22 with annotation containerd, returns error",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1264,7 +1260,6 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		{
 			name: "if no image and OS is specified, returns linux image",
 			machineScope: MachineScope{
-				Logger: klogr.New(),
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
@@ -1288,7 +1283,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotImage, err := tt.machineScope.GetVMImage()
+			gotImage, err := tt.machineScope.GetVMImage(context.TODO())
 			gotError := false
 			if err != nil {
 				gotError = true
@@ -1311,7 +1306,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 		want         []azure.NICSpec
 	}{
 		{
-			name: "Node Machine with no nat gateway and no public IP address",
+			name: "Node Machine with no NAT gateway and no public IP address",
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					Cluster: &clusterv1.Cluster{
@@ -1390,7 +1385,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			},
 		},
 		{
-			name: "Node Machine with nat gateway",
+			name: "Node Machine with NAT gateway",
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					Cluster: &clusterv1.Cluster{
@@ -1723,6 +1718,176 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			if !reflect.DeepEqual(gotNicSpecs, tt.want) {
 				t.Errorf("NICSpecs(), gotNicSpecs = %v, want %v", gotNicSpecs, tt.want)
 			}
+		})
+	}
+}
+
+func TestDiskSpecs(t *testing.T) {
+	testcases := []struct {
+		name         string
+		machineScope MachineScope
+		want         []azure.ResourceSpecGetter
+	}{
+		{
+			name: "only os disk",
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-azure-machine",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						OSDisk: infrav1.OSDisk{
+							DiskSizeGB: to.Int32Ptr(30),
+							OSType:     "Linux",
+						},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_OSDisk",
+					ResourceGroup: "my-rg",
+				},
+			},
+		},
+		{
+			name: "os and data disks",
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-azure-machine",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						OSDisk: infrav1.OSDisk{
+							DiskSizeGB: to.Int32Ptr(30),
+							OSType:     "Linux",
+						},
+						DataDisks: []infrav1.DataDisk{
+							{
+								NameSuffix: "etcddisk",
+							},
+						},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_OSDisk",
+					ResourceGroup: "my-rg",
+				},
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_etcddisk",
+					ResourceGroup: "my-rg",
+				},
+			},
+		}, {
+			name: "os and multiple data disks",
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-azure-machine",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						OSDisk: infrav1.OSDisk{
+							DiskSizeGB: to.Int32Ptr(30),
+							OSType:     "Linux",
+						},
+						DataDisks: []infrav1.DataDisk{
+							{
+								NameSuffix: "etcddisk",
+							},
+							{
+								NameSuffix: "otherdisk",
+							},
+						},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_OSDisk",
+					ResourceGroup: "my-rg",
+				},
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_etcddisk",
+					ResourceGroup: "my-rg",
+				},
+				&disks.DiskSpec{
+					Name:          "my-azure-machine_otherdisk",
+					ResourceGroup: "my-rg",
+				},
+			},
+		},
+	}
+
+	for _, tt := range testcases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			t.Parallel()
+			result := tt.machineScope.DiskSpecs()
+			g.Expect(result).To(BeEquivalentTo(tt.want))
 		})
 	}
 }
