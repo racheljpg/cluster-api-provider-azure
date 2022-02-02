@@ -17,13 +17,17 @@
 set -o errexit
 set -o nounset
 set -o pipefail
+set -o verbose
 
-KUBE_ROOT=$(dirname "${BASH_SOURCE}")/..
+KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 
 boilerDir="${KUBE_ROOT}/hack/boilerplate"
 boiler="${boilerDir}/boilerplate.py"
 
-files_need_boilerplate=($(${boiler} "$@"))
+files_need_boilerplate=()
+while IFS=$'\n' read -r line; do
+  files_need_boilerplate+=( "$line" )
+done < <("${boiler}" "$@")
 
 # Run boilerplate check
 if [[ ${#files_need_boilerplate[@]} -gt 0 ]]; then

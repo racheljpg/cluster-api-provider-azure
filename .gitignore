@@ -4,12 +4,14 @@
 *.dll
 *.so
 *.dylib
+bin
 
 # Test binary, build with `go test -c`
 *.test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage.*
 
 # Ansible
 *.retry
@@ -23,25 +25,53 @@
 envfile
 
 # kubeconfigs
-/kind.kubeconfig
-/minikube.kubeconfig
-/kubeconfig
+kind.kubeconfig
+minikube.kubeconfig
+kubeconfig
 
-# binaries
-/manager
-/clusterctl
-/clusterazureadm
-bin/
+# ssh keys
+.ssh*
 
 # Example and binary output directory
 /out
 
-# bazel
-/bazel-bin
-/bazel-cluster-api-provider-azure
-/bazel-genfiles
-/bazel-out
-/bazel-testlogs
-
 # vscode
 .vscode
+*.code-workspace
+
+# goland
+.idea
+
+# Ignore output manifests
+config/samples
+manager_image_patch.yaml-e
+manager_pull_policy.yaml-e
+
+# Bazel
+bazel-*
+
+# Tilt files.
+.tiltbuild
+/tilt.d
+tilt-settings.json
+tilt_config.json
+
+# e2e output
+test/e2e/junit.e2e_suite.*.xml
+test/e2e/capz-e2e-*.yaml
+test/e2e/config/azure-dev-envsubst.yaml
+test/e2e/logs/*
+_artifacts
+
+# E2E test templates
+test/e2e/data/infrastructure-azure/v1beta1/cluster-template*.yaml
+
+# boilerplate_test output
+hack/boilerplate/__pycache__
+hack/boilerplate/*.pyc
+
+# Helm chart caching
+.helm/
+
+# release notes
+_releasenotes

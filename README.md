@@ -1,202 +1,140 @@
-# Cluster API Provider Azure
+# Kubernetes Cluster API Provider Azure
 
-This repository hosts an implementation of a provider for Azure for the
-OpenShift [machine-api](https://github.com/openshift/cluster-api).
+[![Go Report Card](https://goreportcard.com/badge/kubernetes-sigs/cluster-api-provider-azure)](https://goreportcard.com/report/kubernetes-sigs/cluster-api-provider-azure)
 
-This provider runs as a machine-controller deployed by the
-[machine-api-operator](https://github.com/openshift/machine-api-operator)
+<img src="https://github.com/kubernetes/kubernetes/raw/master/logo/logo.png"  width="100">
 
-# Upstream Implementation
-Other branches of this repository may choose to track the upstream
-Kubernetes [Cluster-API Azure provider](https://github.com/kubernetes-sigs/cluster-api-provider-azure/)
+------
 
-In the future, we may align the master branch with the upstream project as it
-stabilizes within the community.
+Kubernetes-native declarative infrastructure for Azure.
 
-# How to deploy and run azure actuator
+## What is the Cluster API Provider Azure
 
-## Azure cloud resources
+The [Cluster API][cluster_api] brings declarative, Kubernetes-style APIs to cluster creation, configuration and management.
 
-1. **Configure RBAC rules so the actuator can CRUD resources**
+The API itself is shared across multiple cloud providers allowing for true Azure
+hybrid deployments of Kubernetes.
 
-    ```sh
-    $ az role definition update --role-definition azure-role.json
-    ```
+## Quick Start
 
-## Deploy machine API plane with minikube
+Check out the [Cluster API Quick Start][quickstart] to create your first Kubernetes cluster on Azure using Cluster API.
 
-1. **Install kvm**
+## Flavors
 
-    Depending on your virtualization manager you can choose a different [driver](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md).
-    In order to install kvm, you can run (as described in the [drivers](https://github.com/kubernetes/minikube/blob/master/docs/drivers.md#kvm2-driver) documentation):
+See the [flavors documentation][flavors_doc] to know which cluster templates are provided by CAPZ.
 
-    ```sh
-    $ sudo yum install libvirt-daemon-kvm qemu-kvm libvirt-daemon-config-network
-    $ systemctl start libvirtd
-    $ sudo usermod -a -G libvirt $(whoami)
-    $ newgrp libvirt
-    ```
+------
 
-    To install to kvm2 driver:
+## Support Policy
 
-    ```sh
-    curl -Lo docker-machine-driver-kvm2 https://storage.googleapis.com/minikube/releases/latest/docker-machine-driver-kvm2 \
-    && chmod +x docker-machine-driver-kvm2 \
-    && sudo cp docker-machine-driver-kvm2 /usr/local/bin/ \
-    && rm docker-machine-driver-kvm2
-    ```
+This provider's versions are compatible with the following versions of Cluster API:
 
-2. **Deploying the cluster**
+|  | Cluster API `v1alpha2` (`v0.2.x`) | Cluster API `v1alpha3` (`v0.3.x`) | Cluster API `v1alpha4` (`v0.4.x`) |
+|---|---|---|---|
+|Azure Provider `v0.3.x` | ✓ |  |  |
+|Azure Provider `v0.4.x` |  | ✓ |  |
+|Azure Provider `v0.5.x` |  |  | ✓ |
 
-    To install minikube `v1.1.0`, you can run:
+This provider's versions are able to install and manage the following versions of Kubernetes:
 
-    ```sg
-    $ curl -Lo minikube https://storage.googleapis.com/minikube/releases/v1.1.0/minikube-linux-amd64 && chmod +x minikube && sudo mv minikube /usr/local/bin/
-    ```
+|  | Azure Provider `v0.3.x` | Azure Provider `v0.4.x` | Azure Provider `v0.5.x` |
+|---|---|---|---|
+| Kubernetes 1.15 | ✓ |  |  |
+| Kubernetes 1.16 | ✓ | ✓ |  |
+| Kubernetes 1.17 |  | ✓ |  |
+| Kubernetes 1.18 |  | ✓ | ✓ |
+| Kubernetes 1.19 |  | ✓ | ✓ |
+| Kubernetes 1.20 |  | ✓ | ✓ |
+| Kubernetes 1.21 |  | ✓ | ✓ |
+| Kubernetes 1.22 |  |   | ✓ |
 
-    To deploy the cluster:
+Each version of Cluster API for Azure will attempt to support at least two Kubernetes versions e.g., Cluster API for Azure `v0.1` may support Kubernetes 1.13 and Kubernetes 1.14.
 
-    ```
-    $ minikube start --vm-driver kvm2 --kubernetes-version v1.13.1 --v 5
-    $ eval $(minikube docker-env)
-    ```
+**NOTE:** As the versioning for this project is tied to the versioning of Cluster API, future modifications to this policy may be made to more closely align with other providers in the Cluster API ecosystem.
 
-3. **Deploying machine API controllers**
+------
 
-    For development purposes the azure machine controller itself will run out of the machine API stack.
-    Otherwise, docker images needs to be built, pushed into a docker registry and deployed withing the stack.
+## Documentation
 
-    To deploy the stack:
-    ```
-    kustomize build config | kubectl apply --validate=false -f -
-    ```
+Please see our [Book](https://capz.sigs.k8s.io) for in-depth user documentation.
 
-4. **Deploy secret with Azure credentials**
+Additional docs can be found in the `/docs` directory, and the [index is here](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/docs/README.md).
 
-   Azure actuator assumes existence of a secret file (references in machine object) with base64 encoded credentials:
 
-   ```yaml
-   apiVersion: v1
-   kind: Secret
-   metadata:
-     name: test
-     namespace: default
-   type: Opaque
-   data:
-     azure_client_id: FILLIN
-     azure_client_secret: FILLIN
-     azure_region: ZWFzdHVzMg==   # eastus2 in base64
-     azure_resource_prefix: b3M0LWNvbW1vbg== # os4-common in base64
-     azure_resourcegroup: b3M0LWNvbW1vbg==
-     azure_subscription_id: FILLIN
-     azure_tenant_id: FILLIN
-   ```
+## Getting involved and contributing
 
-   ```sh
-   $ kubectl apply -f secret.yaml
-   ```
+Are you interested in contributing to cluster-api-provider-azure? We, the
+maintainers and community, would love your suggestions, contributions, and help!
+Also, the maintainers can be contacted at any time to learn more about how to get
+involved.
 
-## Test locally built azure actuator
+To set up your environment checkout the [development guide](https://capz.sigs.k8s.io/developers/development.html).
 
-1. **Tear down machine-controller**
+In the interest of getting more new people involved, we tag issues with
+[`good first issue`][good_first_issue].
+These are typically issues that have smaller scope but are good ways to start
+to get acquainted with the codebase.
 
-   Deployed machine API plane (`machine-api-controllers` deployment) is (among other
-   controllers) running `machine-controller`. In order to run locally built one,
-   simply edit `machine-api-controllers` deployment and remove `machine-controller` container from it.
+We also encourage ALL active community participants to act as if they are
+maintainers, even if you don't have "official" write permissions. This is a
+community effort, we are here to serve the Kubernetes community. If you have an
+active interest and you want to get involved, you have real power! Don't assume
+that the only people who can get things done around here are the "maintainers".
 
-1. **Build and run azure actuator outside of the cluster**
+We also would love to add more "official" maintainers, so show us what you can
+do!
 
-   ```sh
-   $ go build -o bin/machine-controller-manager sigs.k8s.io/cluster-api-provider-azure/cmd/manager
-   ```
+This repository uses the Kubernetes bots.  See a full list of the commands [here][prow].
 
-   ```sh
-   $ .bin/machine-controller-manager --kubeconfig ~/.kube/config --logtostderr -v 5 -alsologtostderr
-   ```
-    If running in cointainer with podman and encountering permission issues, see [hacking-guide](https://github.com/openshift/machine-api-operator/blob/master/docs/dev/hacking-guide.md#troubleshooting-make-targets).
+### Office hours
 
-1. **Deploy k8s apiserver through machine manifest**:
+The community holds office hours every two weeks, with sessions open to all users and
+developers.
 
-   To deploy user data secret with kubernetes apiserver initialization (under [config/master-user-data-secret.yaml](config/master-user-data-secret.yaml)):
+Office hours are hosted on a zoom video chat every other Thursday
+at 08:00 (PT) / 11:00 (ET) / 16:00 (UTC),
+and are published on the [Kubernetes community meetings calendar][gcal].
 
-   ```yaml
-   $ kubectl apply -f config/master-user-data-secret.yaml
-   ```
+### Other ways to communicate with the contributors
 
-   To deploy kubernetes master machine (under [config/master-machine.yaml](config/master-machine.yaml)):
+Please check in with us in the [#cluster-api-azure][slack] channel on Slack.
 
-   ```yaml
-   $ kubectl apply -f config/master-machine.yaml
-   ```
+## Github issues
 
-1. **Pull kubeconfig from created master machine**
+### Bugs
 
-   All virtual machines created by machine templates under `config` can be
-   accessed by using `config/sshkey` private key.
+If you think you have found a bug please follow the instructions below.
 
-   The master public IP can be accessed from Azure Portal. Once done, you
-   can collect the kube config by running:
+- Please spend a small amount of time giving due diligence to the issue tracker. Your issue might be a duplicate.
+- Get the logs from the cluster controllers. Please paste this into your issue.
+- Open a [bug report][bug_report].
+- Remember users might be searching for your issue in the future, so please give it a meaningful title to helps others.
+- Feel free to reach out to the cluster-api community on [kubernetes slack][slack_info].
 
-   ```
-   $ ssh -i config/sshkey capi@PUBLICIP 'sudo cat /root/.kube/config' > kubeconfig
-   $ kubectl --kubeconfig=kubeconfig config set-cluster kubernetes --server=https://PUBLICIP:8443
-   ```
+### Tracking new features
 
-   Once done, you can access the cluster via `kubectl`. E.g.
+We also use the issue tracker to track features. If you have an idea for a feature, or think you can help Cluster API Provider Azure become even more awesome, then follow the steps below.
 
-   ```sh
-   $ kubectl --kubeconfig=kubeconfig get nodes
-   ```
+- Open a [feature request][feature_request].
+- Remember users might be searching for your issue in the future, so please
+  give it a meaningful title to helps others.
+- Clearly define the use case, using concrete examples. EG: I type `this` and
+  cluster-api-provider-azure does `that`.
+- Some of our larger features will require some design. If you would like to
+  include a technical design for your feature please include it in the issue.
+- After the new feature is well understood, and the design agreed upon we can
+  start coding the feature. We would love for you to code it. So please open
+  up a **WIP** *(work in progress)* pull request, and happy coding.
 
-## Deploy k8s cluster in Azure with machine API plane deployed
+<!-- References -->
 
-1. **Generate bootstrap user data**
-
-   To generate bootstrap script for machine api plane, simply run:
-
-   ```sh
-   $ ./examples/generate-bootstrap.sh
-   ```
-
-   The script requires `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` environment variables to be set.
-   It generates `config/bootstrap.yaml` secret for master machine
-   under `config/master-machine.yaml`.
-
-   The generated bootstrap secret contains user data responsible for:
-   - deployment of kube-apiserver
-   - deployment of machine API plane with azure machine controllers
-   - generating worker machine user data script secret deploying a node
-   - deployment of worker machineset
-
-1. **Deploy machine API plane through machine manifest**:
-
-   First, deploy generated bootstrap secret:
-
-   ```yaml
-   $ kubectl apply -f config/bootstrap.yaml
-   ```
-
-   Then, deploy master machine (under [config/master-machine.yaml](config/master-machine.yaml)):
-
-   ```yaml
-   $ kubectl apply -f config/master-machine.yaml
-   ```
-
-1. **Pull kubeconfig from created master machine**
-
-   All virtual machines created by machine templates under `config` can be
-   accessed by using `config/sshkey` private key.
-
-   The master public IP can be accessed from Azure Portal. Once done, you
-   can collect the kube config by running:
-
-   ```
-   $ ssh -i config/sshkey capi@PUBLICIP 'sudo cat /root/.kube/config' > kubeconfig
-   $ kubectl --kubeconfig=kubeconfig config set-cluster kubernetes --server=https://PUBLICIP:8443
-   ```
-
-   Once done, you can access the cluster via `kubectl`. E.g.
-
-   ```sh
-   $ kubectl --kubeconfig=kubeconfig get nodes
-   ```
+[slack]: https://kubernetes.slack.com/messages/CEX9HENG7
+[good_first_issue]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues?q=is%3Aissue+is%3Aopen+sort%3Aupdated-desc+label%3A%22good+first+issue%22
+[gcal]: https://calendar.google.com/calendar/embed?src=cgnt364vd8s86hr2phapfjc6uk%40group.calendar.google.com
+[prow]: https://go.k8s.io/bot-commands
+[bug_report]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/new?template=bug_report.md
+[feature_request]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/new?template=feature_request.md
+[slack_info]: https://github.com/kubernetes/community/tree/master/communication#slack
+[cluster_api]: https://github.com/kubernetes-sigs/cluster-api
+[quickstart]: https://cluster-api.sigs.k8s.io/user/quick-start.html
+[flavors_doc]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/templates/flavors/README.md

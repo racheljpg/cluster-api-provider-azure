@@ -1,5 +1,15 @@
-generatedconfigs/
-.env
-kubeconfig
-minikube.kubeconfig
-.travis.yml
+# Ignore everything
+**
+
+# Allow only these
+!/api/**
+!/azure/**
+!/controllers/**
+!/exp/**
+!/feature/**
+!/pkg/**
+!/version/**
+!/util/**
+!/main.go
+!/go.mod
+!/go.sum

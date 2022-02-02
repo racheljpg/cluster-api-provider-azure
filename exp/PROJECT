@@ -1,0 +1,10 @@
+domain: x-k8s.io
+repo: sigs.k8s.io/cluster-api-provider-azure/exp
+version: "2"
+resources:
+- group: infrastructure
+  kind: AzureMachinePool
+  version: v1alpha3
+- group: infrastructure
+  kind: AzureMachinePool
+  version: v1alpha4

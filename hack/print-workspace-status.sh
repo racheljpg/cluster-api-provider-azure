@@ -34,12 +34,15 @@ if GIT_VERSION=$(git describe --tags --abbrev=14 2>/dev/null); then
     #
     # TODO: We continue calling this "git version" because so many
     # downstream consumers are expecting it there.
+    # shellcheck disable=SC2001
     DASHES_IN_VERSION=$(echo "${GIT_VERSION}" | sed "s/[^-]//g")
     if [[ "${DASHES_IN_VERSION}" == "---" ]] ; then
         # We have distance to subversion (v1.1.0-subversion-1-gCommitHash)
+        # shellcheck disable=SC2001
         GIT_VERSION=$(echo "${GIT_VERSION}" | sed "s/-\([0-9]\{1,\}\)-g\([0-9a-f]\{14\}\)$/.\1\-\2/")
     elif [[ "${DASHES_IN_VERSION}" == "--" ]] ; then
         # We have distance to base tag (v1.1.0-1-gCommitHash)
+        # shellcheck disable=SC2001
         GIT_VERSION=$(echo "${GIT_VERSION}" | sed "s/-g\([0-9a-f]\{14\}\)$/-\1/")
     fi
     if [[ "${GIT_TREE_STATE}" == "dirty" ]]; then
@@ -66,12 +69,11 @@ if GIT_VERSION=$(git describe --tags --abbrev=14 2>/dev/null); then
     fi
 fi
 
-GIT_BRANCH=$(git branch | grep \* | cut -d ' ' -f2)
+GIT_BRANCH=$(git branch | grep '\*' | cut -d ' ' -f2)
 GIT_RELEASE_TAG=$(git describe --abbrev=0 --tags)
-GIT_RELEASE_COMMIT=$(git rev-list -n 1  ${GIT_RELEASE_TAG} | head -c 14)
+GIT_RELEASE_COMMIT=$(git rev-list -n 1  "${GIT_RELEASE_TAG}" | head -c 14)
 
 cat <<EOF
-STABLE_DOCKER_REPO ${DOCKER_REPO_OVERRIDE:-gcr.io/cluster-api}
 GIT_COMMIT ${GIT_COMMIT-}
 GIT_TREE_STATE ${GIT_TREE_STATE-}
 GIT_MAJOR ${GIT_MAJOR-}
