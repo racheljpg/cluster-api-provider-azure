@@ -1,0 +1,25 @@
+# See the OWNERS_ALIASES docs: https://git.k8s.io/community/contributors/guide/owners.md#owners_aliases
+
+aliases:
+  sig-cluster-lifecycle-leads:
+    - fabriziopandini
+    - justinsb
+    - neolit123
+    - timothysc
+  cluster-api-admins:
+    - CecileRobertMichon
+    - vincepri
+  cluster-api-maintainers:
+    - CecileRobertMichon
+    - enxebre
+    - fabriziopandini
+    - vincepri
+  cluster-api-azure-maintainers:
+    - alexeldeib
+    - CecileRobertMichon
+    - devigned
+    - nader-ziada
+    - shysank
+  cluster-api-azure-reviewers:
+    - juan-lee
+    - mboersma

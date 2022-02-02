@@ -107,6 +107,124 @@ func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "Cannot add AvailabilityZones after creating agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "2", "3"},
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Cannot remove AvailabilityZones after creating agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "2", "3"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Cannot change AvailabilityZones of the agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "2"},
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "2", "3"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AvailabilityZones order can be different",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "3", "2"},
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:              "System",
+					SKU:               "StandardD2S_V3",
+					OSDiskSizeGB:      to.Int32Ptr(512),
+					AvailabilityZones: []string{"1", "2", "3"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Cannot change MaxPods of the agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(24),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(25),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Unchanged MaxPods in an agentpool should not result in an error",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(30),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(30),
+				},
+			},
+			wantErr: false,
+		},
 	}
 	var client client.Client
 	for _, tc := range tests {
@@ -114,6 +232,66 @@ func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
 			err := tc.new.ValidateUpdate(tc.old, client)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name     string
+		ammp     *AzureManagedMachinePool
+		wantErr  bool
+		errorLen int
+	}{
+		{
+			name: "valid",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					MaxPods: to.Int32Ptr(30),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid - optional configuration not present",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "too many MaxPods",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					MaxPods: to.Int32Ptr(251),
+				},
+			},
+			wantErr:  true,
+			errorLen: 1,
+		},
+		{
+			name: "too few MaxPods",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					MaxPods: to.Int32Ptr(9),
+				},
+			},
+			wantErr:  true,
+			errorLen: 1,
+		},
+	}
+	var client client.Client
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.ammp.ValidateCreate(client)
+			if tc.wantErr {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err).To(HaveLen(tc.errorLen))
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
 			}

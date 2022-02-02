@@ -82,6 +82,8 @@ const (
 	ResourceGroupReadyCondition clusterv1.ConditionType = "ResourceGroupReady"
 	// VNetReadyCondition means the virtual network exists and is ready to be used.
 	VNetReadyCondition clusterv1.ConditionType = "VNetReady"
+	// VnetPeeringReadyCondition means the virtual network peerings exist and are ready to be used.
+	VnetPeeringReadyCondition clusterv1.ConditionType = "VnetPeeringReady"
 	// SecurityGroupsReadyCondition means the security groups exist and are ready to be used.
 	SecurityGroupsReadyCondition clusterv1.ConditionType = "SecurityGroupsReady"
 	// RouteTablesReadyCondition means the route tables exist and are ready to be used.
@@ -104,6 +106,8 @@ const (
 	AvailabilitySetReadyCondition clusterv1.ConditionType = "AvailabilitySetReady"
 	// RoleAssignmentReadyCondition means the role assignment exists and is ready to be used.
 	RoleAssignmentReadyCondition clusterv1.ConditionType = "RoleAssignmentReady"
+	// DisksReadyCondition means the disks exist and are ready to be used.
+	DisksReadyCondition clusterv1.ConditionType = "DisksReady"
 
 	// CreatingReason means the resource is being created.
 	CreatingReason = "Creating"
