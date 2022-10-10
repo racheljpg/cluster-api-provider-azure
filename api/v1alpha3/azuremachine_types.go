@@ -20,7 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha3"
+	clusterv1alpha3 "sigs.k8s.io/cluster-api/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/errors"
 )
 
@@ -42,7 +42,7 @@ type AzureMachineSpec struct {
 	// as defined in Cluster API. This relates to an Azure Availability Zone
 	FailureDomain *string `json:"failureDomain,omitempty"`
 
-	// DEPRECATED: use FailureDomain instead
+	// Deprecated: use FailureDomain instead
 	AvailabilityZone AvailabilityZone `json:"availabilityZone,omitempty"`
 
 	// Image is used to provide details of an image to use during VM creation.
@@ -79,7 +79,7 @@ type AzureMachineSpec struct {
 	// DataDisk specifies the parameters that are used to add one or more data disks to the machine
 	DataDisks []DataDisk `json:"dataDisks,omitempty"`
 
-	// DEPRECATED: to support old clients, will be removed in v1alpha4/v1beta1
+	// Deprecated: to support old clients, will be removed in v1alpha4/v1beta1
 	Location string `json:"location"`
 
 	SSHPublicKey string `json:"sshPublicKey"`
@@ -176,7 +176,7 @@ type AzureMachineStatus struct {
 
 	// Conditions defines current service state of the AzureMachine.
 	// +optional
-	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+	Conditions clusterv1alpha3.Conditions `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -208,12 +208,12 @@ type AzureMachineList struct {
 }
 
 // GetConditions returns the list of conditions for an AzureMachine API object.
-func (m *AzureMachine) GetConditions() clusterv1.Conditions {
+func (m *AzureMachine) GetConditions() clusterv1alpha3.Conditions {
 	return m.Status.Conditions
 }
 
 // SetConditions will set the given conditions on an AzureMachine object.
-func (m *AzureMachine) SetConditions(conditions clusterv1.Conditions) {
+func (m *AzureMachine) SetConditions(conditions clusterv1alpha3.Conditions) {
 	m.Status.Conditions = conditions
 }
 

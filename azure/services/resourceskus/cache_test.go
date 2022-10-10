@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -58,7 +58,7 @@ func TestCacheGet(t *testing.T) {
 					Name: to.StringPtr("other"),
 				},
 			},
-			err: "resource sku with name 'foo' and category 'bar' not found in location 'test'",
+			err: "reconcile error that cannot be recovered occurred: resource sku with name 'foo' and category 'bar' not found in location 'test'. Object will not be requeued",
 		},
 	}
 

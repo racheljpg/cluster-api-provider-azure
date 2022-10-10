@@ -17,7 +17,7 @@ limitations under the License.
 package converters
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -99,9 +99,11 @@ func SDKImageToImage(sdkImageRef *compute.ImageReference, isThirdPartyImage bool
 	return infrav1.Image{
 		ID: sdkImageRef.ID,
 		Marketplace: &infrav1.AzureMarketplaceImage{
-			Publisher:       to.String(sdkImageRef.Publisher),
-			Offer:           to.String(sdkImageRef.Offer),
-			SKU:             to.String(sdkImageRef.Sku),
+			ImagePlan: infrav1.ImagePlan{
+				Publisher: to.String(sdkImageRef.Publisher),
+				Offer:     to.String(sdkImageRef.Offer),
+				SKU:       to.String(sdkImageRef.Sku),
+			},
 			Version:         to.String(sdkImageRef.Version),
 			ThirdPartyImage: isThirdPartyImage,
 		},

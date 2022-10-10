@@ -21,7 +21,6 @@ import (
 
 	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/gomega"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 )
@@ -40,7 +39,7 @@ func TestDefaultingWebhook(t *testing.T) {
 			Version:           "1.17.5",
 		},
 	}
-	amcp.Default()
+	amcp.Default(nil)
 	g.Expect(*amcp.Spec.NetworkPlugin).To(Equal("azure"))
 	g.Expect(*amcp.Spec.LoadBalancerSKU).To(Equal("Standard"))
 	g.Expect(*amcp.Spec.NetworkPolicy).To(Equal("calico"))
@@ -64,7 +63,8 @@ func TestDefaultingWebhook(t *testing.T) {
 	amcp.Spec.VirtualNetwork.Name = "fooVnetName"
 	amcp.Spec.VirtualNetwork.Subnet.Name = "fooSubnetName"
 	amcp.Spec.SKU.Tier = PaidManagedControlPlaneTier
-	amcp.Default()
+
+	amcp.Default(nil)
 	g.Expect(*amcp.Spec.NetworkPlugin).To(Equal(netPlug))
 	g.Expect(*amcp.Spec.LoadBalancerSKU).To(Equal(lbSKU))
 	g.Expect(*amcp.Spec.NetworkPolicy).To(Equal(netPol))
@@ -113,7 +113,7 @@ func TestValidatingWebhook(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			name: "not following the kuberntes Version pattern",
+			name: "not following the Kubernetes Version pattern",
 			amcp: AzureManagedControlPlane{
 				Spec: AzureManagedControlPlaneSpec{
 					DNSServiceIP: pointer.StringPtr("192.168.0.0"),
@@ -241,11 +241,10 @@ func TestValidatingWebhook(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
-
 			if tt.expectErr {
-				g.Expect(tt.amcp.ValidateCreate()).NotTo(Succeed())
+				g.Expect(tt.amcp.ValidateCreate(nil)).NotTo(Succeed())
 			} else {
-				g.Expect(tt.amcp.ValidateCreate()).To(Succeed())
+				g.Expect(tt.amcp.ValidateCreate(nil)).To(Succeed())
 			}
 		})
 	}
@@ -279,32 +278,62 @@ func TestAzureManagedControlPlane_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:     "invalid DNSServiceIP",
-			amcp:     createAzureManagedControlPlane(t, "192.168.0.0.3", "v1.18.0", generateSSHPublicKey(true)),
+			amcp:     createAzureManagedControlPlane("192.168.0.0.3", "v1.18.0", generateSSHPublicKey(true)),
 			wantErr:  true,
 			errorLen: 1,
 		},
 		{
 			name:     "invalid sshKey",
-			amcp:     createAzureManagedControlPlane(t, "192.168.0.0", "v1.18.0", generateSSHPublicKey(false)),
+			amcp:     createAzureManagedControlPlane("192.168.0.0", "v1.18.0", generateSSHPublicKey(false)),
 			wantErr:  true,
 			errorLen: 1,
 		},
 		{
 			name:     "invalid sshKey with a simple text and invalid DNSServiceIP",
-			amcp:     createAzureManagedControlPlane(t, "192.168.0.0.3", "v1.18.0", "invalid_sshkey_honk"),
+			amcp:     createAzureManagedControlPlane("192.168.0.0.3", "v1.18.0", "invalid_sshkey_honk"),
 			wantErr:  true,
 			errorLen: 2,
 		},
 		{
 			name:     "invalid version",
-			amcp:     createAzureManagedControlPlane(t, "192.168.0.0", "honk.version", generateSSHPublicKey(true)),
+			amcp:     createAzureManagedControlPlane("192.168.0.0", "honk.version", generateSSHPublicKey(true)),
+			wantErr:  true,
+			errorLen: 1,
+		},
+		{
+			name: "invalid name with microsoft",
+			amcp: &AzureManagedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "microsoft-cluster",
+				},
+				Spec: AzureManagedControlPlaneSpec{
+					SSHPublicKey: generateSSHPublicKey(true),
+					DNSServiceIP: to.StringPtr("192.168.0.0"),
+					Version:      "v1.23.5",
+				},
+			},
+			wantErr:  true,
+			errorLen: 1,
+		},
+		{
+			name: "invalid name with windows",
+			amcp: &AzureManagedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "a-windows-cluster",
+				},
+				Spec: AzureManagedControlPlaneSpec{
+					SSHPublicKey: generateSSHPublicKey(true),
+					DNSServiceIP: to.StringPtr("192.168.0.0"),
+					Version:      "v1.23.5",
+				},
+			},
 			wantErr:  true,
 			errorLen: 1,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.amcp.ValidateCreate()
+			err := tc.amcp.ValidateCreate(nil)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(HaveLen(tc.errorLen))
@@ -326,26 +355,26 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 	}{
 		{
 			name:    "AzureManagedControlPlane with valid SSHPublicKey",
-			oldAMCP: createAzureManagedControlPlane(t, "192.168.0.0", "v1.18.0", ""),
-			amcp:    createAzureManagedControlPlane(t, "192.168.0.0", "v1.18.0", generateSSHPublicKey(true)),
+			oldAMCP: createAzureManagedControlPlane("192.168.0.0", "v1.18.0", ""),
+			amcp:    createAzureManagedControlPlane("192.168.0.0", "v1.18.0", generateSSHPublicKey(true)),
 			wantErr: false,
 		},
 		{
 			name:    "AzureManagedControlPlane with invalid SSHPublicKey",
-			oldAMCP: createAzureManagedControlPlane(t, "192.168.0.0", "v1.18.0", ""),
-			amcp:    createAzureManagedControlPlane(t, "192.168.0.0", "v1.18.0", generateSSHPublicKey(false)),
+			oldAMCP: createAzureManagedControlPlane("192.168.0.0", "v1.18.0", ""),
+			amcp:    createAzureManagedControlPlane("192.168.0.0", "v1.18.0", generateSSHPublicKey(false)),
 			wantErr: true,
 		},
 		{
 			name:    "AzureManagedControlPlane with invalid serviceIP",
-			oldAMCP: createAzureManagedControlPlane(t, "", "v1.18.0", ""),
-			amcp:    createAzureManagedControlPlane(t, "192.168.0.0.3", "v1.18.0", generateSSHPublicKey(true)),
+			oldAMCP: createAzureManagedControlPlane("", "v1.18.0", ""),
+			amcp:    createAzureManagedControlPlane("192.168.0.0.3", "v1.18.0", generateSSHPublicKey(true)),
 			wantErr: true,
 		},
 		{
 			name:    "AzureManagedControlPlane with invalid version",
-			oldAMCP: createAzureManagedControlPlane(t, "", "v1.18.0", ""),
-			amcp:    createAzureManagedControlPlane(t, "192.168.0.0", "1.999.9", generateSSHPublicKey(true)),
+			oldAMCP: createAzureManagedControlPlane("", "v1.18.0", ""),
+			amcp:    createAzureManagedControlPlane("192.168.0.0", "1.999.9", generateSSHPublicKey(true)),
 			wantErr: true,
 		},
 		{
@@ -632,7 +661,6 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 				Spec: AzureManagedControlPlaneSpec{
 					Version: "v1.18.0",
 					AADProfile: &AADProfile{
-
 						Managed: false,
 						AdminGroupObjectIDs: []string{
 							"616077a8-5db7-4c98-b856-b34619afg75h",
@@ -724,10 +752,35 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "AzureManagedControlPlane Name is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-cluster",
+				},
+				Spec: AzureManagedControlPlaneSpec{
+					DNSServiceIP: to.StringPtr("192.168.0.0"),
+					Version:      "v1.18.0",
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "new-test-cluster",
+				},
+				Spec: AzureManagedControlPlaneSpec{
+					DNSServiceIP: to.StringPtr("192.168.0.0"),
+					Version:      "v1.18.0",
+					APIServerAccessProfile: &APIServerAccessProfile{
+						AuthorizedIPRanges: []string{"192.168.0.1/32"},
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.amcp.ValidateUpdate(tc.oldAMCP)
+			err := tc.amcp.ValidateUpdate(tc.oldAMCP, nil)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -737,7 +790,7 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 	}
 }
 
-func createAzureManagedControlPlane(t *testing.T, serviceIP, version, sshKey string) *AzureManagedControlPlane {
+func createAzureManagedControlPlane(serviceIP, version, sshKey string) *AzureManagedControlPlane {
 	return &AzureManagedControlPlane{
 		Spec: AzureManagedControlPlaneSpec{
 			SSHPublicKey: sshKey,

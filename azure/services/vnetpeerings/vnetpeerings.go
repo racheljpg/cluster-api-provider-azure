@@ -50,6 +50,11 @@ func New(scope VnetPeeringScope) *Service {
 	}
 }
 
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
+}
+
 // Reconcile gets/creates/updates a peering.
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "vnetpeerings.Service.Reconcile")
@@ -58,11 +63,16 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
+	specs := s.Scope.VnetPeeringSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
+
 	// We go through the list of VnetPeeringSpecs to reconcile each one, independently of the result of the previous one.
-	// If multiple errors occur, we return the most pressing one
-	// order of precedence is: error creating -> creating in progress -> created (no error)
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error creating) -> operationNotDoneError (i.e. creating in progress) -> no error (i.e. created)
 	var result error
-	for _, peeringSpec := range s.Scope.VnetPeeringSpecs() {
+	for _, peeringSpec := range specs {
 		if _, err := s.CreateResource(ctx, peeringSpec, serviceName); err != nil {
 			if !azure.IsOperationNotDoneError(err) || result == nil {
 				result = err
@@ -82,12 +92,16 @@ func (s *Service) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	var result error
+	specs := s.Scope.VnetPeeringSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
 
 	// We go through the list of VnetPeeringSpecs to delete each one, independently of the result of the previous one.
-	// If multiple errors occur, we return the most pressing one
-	// order of precedence is: error deleting -> deleting in progress -> deleted (no error)
-	for _, peeringSpec := range s.Scope.VnetPeeringSpecs() {
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error deleting) -> operationNotDoneError (i.e. deleting in progress) -> no error (i.e. deleted)
+	var result error
+	for _, peeringSpec := range specs {
 		if err := s.DeleteResource(ctx, peeringSpec, serviceName); err != nil {
 			if !azure.IsOperationNotDoneError(err) || result == nil {
 				result = err
@@ -96,4 +110,9 @@ func (s *Service) Delete(ctx context.Context) error {
 	}
 	s.Scope.UpdateDeleteStatus(infrav1.VnetPeeringReadyCondition, serviceName, result)
 	return result
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO VNet peering.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

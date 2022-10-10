@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -24,44 +25,56 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
+	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/blang/semver"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/config"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	helmAction "helm.sh/helm/v3/pkg/action"
+	helmLoader "helm.sh/helm/v3/pkg/chart/loader"
+	helmCli "helm.sh/helm/v3/pkg/cli"
+	helmVals "helm.sh/helm/v3/pkg/cli/values"
+	helmGetter "helm.sh/helm/v3/pkg/getter"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	typedappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1"
 	typedbatchv1 "k8s.io/client-go/kubernetes/typed/batch/v1"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"k8s.io/utils/pointer"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	expv1beta1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/controllers/noderefutil"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
+	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/test/framework/kubernetesversions"
-	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	sshPort = "22"
+	sshPort                               = "22"
+	deleteOperationTimeout                = 20 * time.Minute
+	retryableOperationTimeout             = 30 * time.Second
+	retryableOperationSleepBetweenRetries = 3 * time.Second
 )
 
 // deploymentsClientAdapter adapts a Deployment to work with WaitForDeploymentsAvailable.
@@ -105,6 +118,22 @@ func WaitForDeploymentsAvailable(ctx context.Context, input WaitForDeploymentsAv
 		return false
 	}, intervals...).Should(BeTrue(), func() string { return DescribeFailedDeployment(ctx, input) })
 	Logf("Deployment %s/%s is now available, took %v", namespace, name, time.Since(start))
+}
+
+// GetWaitForDeploymentsAvailableInput is a convenience func to compose a WaitForDeploymentsAvailableInput
+func GetWaitForDeploymentsAvailableInput(ctx context.Context, clusterProxy framework.ClusterProxy, name, namespace string, specName string) WaitForDeploymentsAvailableInput {
+	Expect(clusterProxy).NotTo(BeNil())
+	cl := clusterProxy.GetClient()
+	var d = &appsv1.Deployment{}
+	Eventually(func() error {
+		return cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, d)
+	}, e2eConfig.GetIntervals(specName, "wait-deployment")...).Should(Succeed())
+	clientset := clusterProxy.GetClientSet()
+	return WaitForDeploymentsAvailableInput{
+		Deployment: d,
+		Clientset:  clientset,
+		Getter:     cl,
+	}
 }
 
 // DescribeFailedDeployment returns detailed output to help debug a deployment failure in e2e.
@@ -167,7 +196,52 @@ func DescribeFailedJob(ctx context.Context, input WaitForJobCompleteInput) strin
 		namespace, name))
 	b.WriteString(fmt.Sprintf("\nJob:\n%s\n", prettyPrint(input.Job)))
 	b.WriteString(describeEvents(ctx, input.Clientset, namespace, name))
+	b.WriteString(getJobPodLogs(ctx, input))
 	return b.String()
+}
+
+func getJobPodLogs(ctx context.Context, input WaitForJobCompleteInput) string {
+	podsClient := input.Clientset.CoreV1().Pods(input.Job.GetNamespace())
+	pods, err := podsClient.List(ctx, metav1.ListOptions{LabelSelector: fmt.Sprintf("job-name=%s", input.Job.GetName())})
+	if err != nil {
+		return err.Error()
+	}
+	logs := make(map[string]string, len(pods.Items))
+	for _, pod := range pods.Items {
+		logs[pod.Name] = getPodLogs(ctx, input.Clientset, pod)
+	}
+	b := strings.Builder{}
+	args := input.Job.Spec.Template.Spec.Containers[0].Args
+	b.WriteString(fmt.Sprintf("Output of \"kubescape %s\":\n", strings.Join(args, " ")))
+	var lastLog string
+	for podName, log := range logs {
+		b.WriteString(fmt.Sprintf("\nLogs for pod %s:\n", podName))
+		if logsAreSimilar(lastLog, log) {
+			b.WriteString("(Omitted because of similarity to previous pod's logs.)")
+		} else {
+			b.WriteString(log)
+		}
+		lastLog = log
+	}
+	return b.String()
+}
+
+// logsAreSimilar compares two multi-line strings and returns true if at least 90% of the lines match.
+func logsAreSimilar(a, b string) bool {
+	if a == "" {
+		return false
+	}
+	a1 := strings.Split(a, "\n")
+	b1 := strings.Split(b, "\n")
+	for i := len(a1) - 1; i >= 0; i-- {
+		for _, v := range b1 {
+			if a1[i] == v {
+				a1 = append(a1[:i], a1[i+1:]...)
+				break
+			}
+		}
+	}
+	return float32(len(a1))/float32(len(b1)) < 0.1
 }
 
 // servicesClientAdapter adapts a Service to work with WaitForServicesAvailable.
@@ -201,7 +275,7 @@ func WaitForServiceAvailable(ctx context.Context, input WaitForServiceAvailableI
 		key := client.ObjectKey{Namespace: namespace, Name: name}
 		if err := input.Getter.Get(ctx, key, input.Service); err == nil {
 			ingress := input.Service.Status.LoadBalancer.Ingress
-			if ingress != nil && len(ingress) > 0 {
+			if len(ingress) > 0 {
 				for _, i := range ingress {
 					if net.ParseIP(i.IP) == nil {
 						return false
@@ -271,13 +345,13 @@ func getAvailabilityZonesForRegion(location string, size string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	file, err := ioutil.ReadFile(filepath.Join(wd, "data/availableZonesPerLocation.json"))
+	file, err := os.ReadFile(filepath.Join(wd, "data", "availableZonesPerLocation.json"))
 	if err != nil {
 		return nil, err
 	}
 	var data map[string][]string
 
-	if err = json.Unmarshal(file, &data); err != nil {
+	if err := json.Unmarshal(file, &data); err != nil {
 		return nil, err
 	}
 	key := fmt.Sprintf("%s_%s", location, size)
@@ -289,8 +363,9 @@ func getAvailabilityZonesForRegion(location string, size string) ([]string, erro
 // including which Ginkgo node it's running on.
 //
 // Example output:
-//   INFO: "With 1 worker node" started at Tue, 22 Sep 2020 13:19:08 PDT on Ginkgo node 2 of 3
-//   INFO: "With 1 worker node" ran for 18m34s on Ginkgo node 2 of 3
+//
+//	INFO: "With 1 worker node" started at Tue, 22 Sep 2020 13:19:08 PDT on Ginkgo node 2 of 3
+//	INFO: "With 1 worker node" ran for 18m34s on Ginkgo node 2 of 3
 func logCheckpoint(specTimes map[string]time.Time) {
 	text := CurrentGinkgoTestDescription().TestText
 	start, started := specTimes[text]
@@ -315,189 +390,57 @@ func getClusterName(prefix, specName string) string {
 	}
 	fmt.Fprintf(GinkgoWriter, "INFO: Cluster name is %s\n", clusterName)
 
-	Expect(os.Setenv(AzureResourceGroup, clusterName)).NotTo(HaveOccurred())
-	Expect(os.Setenv(AzureVNetName, fmt.Sprintf("%s-vnet", clusterName))).NotTo(HaveOccurred())
+	Expect(os.Setenv(AzureResourceGroup, clusterName)).To(Succeed())
+	Expect(os.Setenv(AzureVNetName, fmt.Sprintf("%s-vnet", clusterName))).To(Succeed())
 	return clusterName
 }
 
-// nodeSSHInfo provides information to establish an SSH connection to a VM or VMSS instance.
-type nodeSSHInfo struct {
-	Endpoint  string // Endpoint is the control plane hostname or IP address for initial connection.
-	Hostname  string // Hostname is the name or IP address of the destination VM or VMSS instance.
-	Port      string // Port is the TCP port used for the SSH connection.
-	IsWindows bool   // IsWindows give information so we can use the correct commands on the VM
-}
-
-// getClusterSSHInfo returns the information needed to establish a SSH connection through a
-// control plane endpoint to each node in the cluster.
-func getClusterSSHInfo(ctx context.Context, mgmtClusterProxy framework.ClusterProxy, namespace, clusterName string) ([]nodeSSHInfo, error) {
-	var (
-		sshInfo               []nodeSSHInfo
-		mgmtClusterClient     = mgmtClusterProxy.GetClient()
-		workloadClusterClient = mgmtClusterProxy.GetWorkloadCluster(ctx, namespace, clusterName).GetClient()
-	)
-	// Collect the info for each VM / Machine.
-	machines, err := getMachinesInCluster(ctx, mgmtClusterClient, namespace, clusterName)
-	if err != nil {
-		return sshInfo, errors.Wrap(err, "failed to get machines in the cluster")
-	}
-	for i := range machines.Items {
-		m := &machines.Items[i]
-		cluster, err := util.GetClusterFromMetadata(ctx, mgmtClusterClient, m.ObjectMeta)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get cluster from metadata")
-		}
-
-		am, err := getAzureMachine(ctx, mgmtClusterClient, m)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get azuremachine from machine info")
-		}
-
-		sshInfo = append(sshInfo, nodeSSHInfo{
-			Endpoint:  cluster.Spec.ControlPlaneEndpoint.Host,
-			Hostname:  m.Spec.InfrastructureRef.Name,
-			Port:      sshPort,
-			IsWindows: isAzureMachineWindows(am),
-		})
-	}
-
-	// Collect the info for each instance in a VMSS / MachinePool.
-	machinePools, err := getMachinePoolsInCluster(ctx, mgmtClusterClient, namespace, clusterName)
-	if err != nil {
-		return sshInfo, errors.Wrap(err, "failed to find machine pools in cluster")
-	}
-
-	for i := range machinePools.Items {
-		p := &machinePools.Items[i]
-		cluster, err := util.GetClusterFromMetadata(ctx, mgmtClusterClient, p.ObjectMeta)
-		if err != nil {
-			return sshInfo, errors.Wrap(err, "failed to get cluster from metadata")
-		}
-
-		nodes, err := getReadyNodes(ctx, workloadClusterClient, p.Status.NodeRefs)
-		if err != nil {
-			return sshInfo, errors.Wrap(err, "failed to get ready nodes")
-		}
-
-		if p.Spec.Replicas != nil && len(nodes) < int(*p.Spec.Replicas) {
-			message := fmt.Sprintf("machine pool %s/%s expected replicas %d, but only found %d ready nodes", p.Namespace, p.Name, *p.Spec.Replicas, len(nodes))
-			Log(message)
-			return sshInfo, errors.New(message)
-		}
-
-		for _, node := range nodes {
-			s := node.Labels["kubernetes.io/os"]
-			isWindows := false
-			if s == "windows" {
-				isWindows = true
-			}
-			sshInfo = append(sshInfo, nodeSSHInfo{
-				Endpoint:  cluster.Spec.ControlPlaneEndpoint.Host,
-				Hostname:  node.Name,
-				Port:      sshPort,
-				IsWindows: isWindows,
-			})
-		}
-	}
-
-	return sshInfo, nil
-}
-
-func getReadyNodes(ctx context.Context, c client.Client, refs []corev1.ObjectReference) ([]corev1.Node, error) {
-	var nodes []corev1.Node
-	for _, ref := range refs {
-		var node corev1.Node
-		if err := c.Get(ctx, client.ObjectKey{
-			Namespace: ref.Namespace,
-			Name:      ref.Name,
-		}, &node); err != nil {
-			if apierrors.IsNotFound(err) {
-				// If 404, continue. Likely the node refs have not caught up to infra providers
-				continue
-			}
-
-			return nodes, err
-		}
-
-		if !noderefutil.IsNodeReady(&node) {
-			Logf("node is not ready and won't be counted for ssh info %s/%s", node.Namespace, node.Name)
-			continue
-		}
-
-		nodes = append(nodes, node)
-	}
-
-	return nodes, nil
-}
-
-// getMachinesInCluster returns a list of all machines in the given cluster.
-// This is adapted from CAPI's test/framework/cluster_proxy.go.
-func getMachinesInCluster(ctx context.Context, c framework.Lister, namespace, name string) (*clusterv1.MachineList, error) {
-	if name == "" {
-		return nil, nil
-	}
-
-	machineList := &clusterv1.MachineList{}
-	labels := map[string]string{clusterv1.ClusterLabelName: name}
-
-	if err := c.List(ctx, machineList, client.InNamespace(namespace), client.MatchingLabels(labels)); err != nil {
-		return nil, err
-	}
-
-	return machineList, nil
-}
-
-// getMachinePoolsInCluster returns a list of all machine pools in the given cluster.
-func getMachinePoolsInCluster(ctx context.Context, c framework.Lister, namespace, name string) (*clusterv1exp.MachinePoolList, error) {
-	if name == "" {
-		return nil, nil
-	}
-
-	machinePoolList := &clusterv1exp.MachinePoolList{}
-	labels := map[string]string{clusterv1.ClusterLabelName: name}
-
-	if err := c.List(ctx, machinePoolList, client.InNamespace(namespace), client.MatchingLabels(labels)); err != nil {
-		return nil, err
-	}
-
-	return machinePoolList, nil
-}
-
-func isAzureMachineWindows(am *v1beta1.AzureMachine) bool {
+func isAzureMachineWindows(am *infrav1.AzureMachine) bool {
 	return am.Spec.OSDisk.OSType == azure.WindowsOS
 }
 
-func isAzureMachinePoolWindows(amp *expv1beta1.AzureMachinePool) bool {
+func isAzureMachinePoolWindows(amp *infrav1exp.AzureMachinePool) bool {
 	return amp.Spec.Template.OSDisk.OSType == azure.WindowsOS
 }
 
-// execOnHost runs the specified command directly on a node's host, using an SSH connection
-// proxied through a control plane host.
-func execOnHost(controlPlaneEndpoint, hostname, port string, f io.StringWriter, command string,
-	args ...string) error {
+// getProxiedSSHClient creates a SSH client object that connects to a target node
+// proxied through a control plane node.
+func getProxiedSSHClient(controlPlaneEndpoint, hostname, port string) (*ssh.Client, error) {
 	config, err := newSSHConfig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Init a client connection to a control plane node via the public load balancer
 	lbClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", controlPlaneEndpoint, port), config)
 	if err != nil {
-		return errors.Wrapf(err, "dialing public load balancer at %s", controlPlaneEndpoint)
+		return nil, errors.Wrapf(err, "dialing public load balancer at %s", controlPlaneEndpoint)
 	}
 
 	// Init a connection from the control plane to the target node
 	c, err := lbClient.Dial("tcp", fmt.Sprintf("%s:%s", hostname, port))
 	if err != nil {
-		return errors.Wrapf(err, "dialing from control plane to target node at %s", hostname)
+		return nil, errors.Wrapf(err, "dialing from control plane to target node at %s", hostname)
 	}
 
 	// Establish an authenticated SSH conn over the client -> control plane -> target transport
 	conn, chans, reqs, err := ssh.NewClientConn(c, hostname, config)
 	if err != nil {
-		return errors.Wrap(err, "getting a new SSH client connection")
+		return nil, errors.Wrap(err, "getting a new SSH client connection")
 	}
 	client := ssh.NewClient(conn, chans, reqs)
+	return client, nil
+}
+
+// execOnHost runs the specified command directly on a node's host, using a SSH connection
+// proxied through a control plane host and copies the output to a file.
+func execOnHost(controlPlaneEndpoint, hostname, port string, f io.StringWriter, command string,
+	args ...string) error {
+	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port)
+	if err != nil {
+		return err
+	}
+
 	session, err := client.NewSession()
 	if err != nil {
 		return errors.Wrap(err, "opening SSH session")
@@ -515,6 +458,43 @@ func execOnHost(controlPlaneEndpoint, hostname, port string, f io.StringWriter, 
 	}
 	if _, err = f.WriteString(stdoutBuf.String()); err != nil {
 		return errors.Wrap(err, "writing output to file")
+	}
+
+	return nil
+}
+
+// sftpCopyFile copies a file from a node to the specified destination, using a SSH connection
+// proxied through a control plane node.
+func sftpCopyFile(controlPlaneEndpoint, hostname, port, sourcePath, destPath string) error {
+	Logf("Attempting to copy file %s on node %s to %s", sourcePath, hostname, destPath)
+
+	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port)
+	if err != nil {
+		return err
+	}
+
+	sftp, err := sftp.NewClient(client)
+	if err != nil {
+		return errors.Wrapf(err, "getting a new sftp client connection")
+	}
+	defer sftp.Close()
+
+	// copy file
+	sourceFile, err := sftp.Open(sourcePath)
+	if err != nil {
+		return errors.Wrapf(err, "opening file %s on node %s", sourcePath, hostname)
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return errors.Wrapf(err, "creating file %s on locally", sourcePath)
+	}
+	defer destFile.Close()
+
+	_, err = sourceFile.WriteTo(destFile)
+	if err != nil {
+		return errors.Wrapf(err, "writing to %s", destPath)
 	}
 
 	return nil
@@ -550,7 +530,7 @@ func newSSHConfig() (*ssh.ClientConfig, error) {
 		return nil, err
 	}
 	sshConfig := ssh.ClientConfig{
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // Non-production code
 		User:            azure.DefaultUserName,
 		Auth:            []ssh.AuthMethod{pubkey},
 	}
@@ -559,7 +539,7 @@ func newSSHConfig() (*ssh.ClientConfig, error) {
 
 // publicKeyFile parses and returns the public key from the specified private key file.
 func publicKeyFile(file string) (ssh.AuthMethod, error) {
-	buffer, err := ioutil.ReadFile(file)
+	buffer, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}
@@ -568,6 +548,14 @@ func publicKeyFile(file string) (ssh.AuthMethod, error) {
 		return nil, err
 	}
 	return ssh.PublicKeys(signer), nil
+}
+
+// validateStableReleaseString validates the string format that declares "get be the latest stable release for this <Major>.<Minor>"
+// it should be called wherever we process a stable version string expression like "stable-1.22"
+func validateStableReleaseString(stableVersion string) (isStable bool, matches []string) {
+	stableReleaseFormat := regexp.MustCompile(`^stable-(0|[1-9]\d*)\.(0|[1-9]\d*)$`)
+	matches = stableReleaseFormat.FindStringSubmatch(stableVersion)
+	return len(matches) > 0, matches
 }
 
 // resolveCIVersion resolves kubernetes version labels (e.g. latest, latest-1.xx) to the corresponding CI version numbers.
@@ -589,7 +577,11 @@ func resolveCIVersion(label string) (string, error) {
 // latestCIVersion returns the latest CI version of a given label in the form of latest-1.xx.
 func latestCIVersion(label string) (string, error) {
 	ciVersionURL := fmt.Sprintf("https://dl.k8s.io/ci/%s.txt", label)
-	resp, err := http.Get(ciVersionURL)
+	req, err := http.NewRequestWithContext(context.TODO(), http.MethodGet, ciVersionURL, http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -604,7 +596,7 @@ func latestCIVersion(label string) (string, error) {
 
 // resolveKubetestRepoListPath will set the correct repo list for Windows:
 // - if WIN_REPO_URL is set use the custom file downloaded via makefile
-// - if CI version is "latest" will use repo-list.yaml
+// - if CI version is "latest" do not set repo list since they are not needed K8s v1.25+
 // - if CI version is  "latest-1.xx" will compare values and use correct repoList
 // - if standard version will compare values and use correct repoList
 // - if unable to determine version falls back to using latest
@@ -614,7 +606,7 @@ func resolveKubetestRepoListPath(version string, path string) (string, error) {
 	}
 
 	if version == "latest" {
-		return filepath.Join(path, "repo-list.yaml"), nil
+		return "", nil
 	}
 
 	version = strings.TrimPrefix(version, "latest-")
@@ -623,16 +615,136 @@ func resolveKubetestRepoListPath(version string, path string) (string, error) {
 		return "", err
 	}
 
-	versionCutoff, err := semver.Make("1.21.0")
+	v125, err := semver.Make("1.25.0-alpha.0.0")
 	if err != nil {
 		return "", err
 	}
 
-	if currentVersion.LT(versionCutoff) {
-		return filepath.Join(path, "repo-list-k8sprow.yaml"), nil
+	if currentVersion.GT(v125) {
+		return "", nil
 	}
 
+	// - prior to K8s v1.21 repo-list-k8sprow.yaml should be used
+	//   since all test images need to come from k8sprow.azurecr.io
+	// - starting with K8s v1.25 repo lists repo list is not needed
+	// - use repo-list.yaml for everything in between which has only
+	//   some images in k8sprow.azurecr.io
+
 	return filepath.Join(path, "repo-list.yaml"), nil
+}
+
+// resolveKubernetesVersions looks at Kubernetes versions set as variables in the e2e config and sets them to a valid k8s version
+// that has an existing capi offer image available. For example, if the version is "stable-1.22", the function will set it to the latest 1.22 version that has a published reference image.
+func resolveKubernetesVersions(config *clusterctl.E2EConfig) {
+	ubuntuVersions := getVersionsInOffer(context.TODO(), os.Getenv(AzureLocation), capiImagePublisher, capiOfferName)
+	windowsVersions := getVersionsInOffer(context.TODO(), os.Getenv(AzureLocation), capiImagePublisher, capiWindowsOfferName)
+
+	// find the intersection of ubuntu and windows versions available, since we need an image for both.
+	var versions semver.Versions
+	for k, v := range ubuntuVersions {
+		if _, ok := windowsVersions[k]; ok {
+			versions = append(versions, v)
+		}
+	}
+
+	if config.HasVariable(capi_e2e.KubernetesVersion) {
+		resolveKubernetesVersion(config, versions, capi_e2e.KubernetesVersion)
+	}
+	if config.HasVariable(capi_e2e.KubernetesVersionUpgradeFrom) {
+		resolveKubernetesVersion(config, versions, capi_e2e.KubernetesVersionUpgradeFrom)
+	}
+	if config.HasVariable(capi_e2e.KubernetesVersionUpgradeTo) {
+		resolveKubernetesVersion(config, versions, capi_e2e.KubernetesVersionUpgradeTo)
+	}
+}
+
+func resolveKubernetesVersion(config *clusterctl.E2EConfig, versions semver.Versions, varName string) {
+	oldVersion := config.GetVariable(varName)
+	v := getLatestSkuForMinor(oldVersion, versions)
+	if _, ok := os.LookupEnv(varName); ok {
+		Expect(os.Setenv(varName, v)).To(Succeed())
+	}
+	config.Variables[varName] = v
+	Logf("Resolved %s (set to %s) to %s", varName, oldVersion, v)
+}
+
+// newImagesClient returns a new VM images client using environmental settings for auth.
+func newImagesClient() compute.VirtualMachineImagesClient {
+	settings, err := auth.GetSettingsFromEnvironment()
+	Expect(err).NotTo(HaveOccurred())
+	subscriptionID := settings.GetSubscriptionID()
+	authorizer, err := settings.GetAuthorizer()
+	Expect(err).NotTo(HaveOccurred())
+	imagesClient := compute.NewVirtualMachineImagesClient(subscriptionID)
+	imagesClient.Authorizer = authorizer
+
+	return imagesClient
+}
+
+// getVersionsInOffer returns a map of Kubernetes versions as strings to semver.Versions.
+func getVersionsInOffer(ctx context.Context, location, publisher, offer string) map[string]semver.Version {
+	Logf("Finding image skus and versions for offer %s/%s in %s", publisher, offer, location)
+	var versions map[string]semver.Version
+	capiSku := regexp.MustCompile(`^[\w-]+-gen[12]$`)
+	capiVersion := regexp.MustCompile(`^(\d)(\d{1,2})\.(\d{1,2})\.\d{8}$`)
+	oldCapiSku := regexp.MustCompile(`^k8s-(0|[1-9][0-9]*)dot(0|[1-9][0-9]*)dot(0|[1-9][0-9]*)-[a-z]*.*$`)
+	imagesClient := newImagesClient()
+	skus, err := imagesClient.ListSkus(ctx, location, publisher, offer)
+	Expect(err).NotTo(HaveOccurred())
+
+	if skus.Value != nil {
+		versions = make(map[string]semver.Version, len(*skus.Value))
+		for _, sku := range *skus.Value {
+			res, err := imagesClient.List(ctx, location, publisher, offer, *sku.Name, "", nil, "")
+			Expect(err).NotTo(HaveOccurred())
+			// Don't use SKUs without existing images. See https://github.com/Azure/azure-cli/issues/20115.
+			if res.Value != nil && len(*res.Value) > 0 {
+				// New SKUs don't contain the Kubernetes version and are named like "ubuntu-2004-gen1".
+				if match := capiSku.FindStringSubmatch(*sku.Name); len(match) > 0 {
+					for _, vmImage := range *res.Value {
+						// Versions are named like "121.13.20220601", for Kubernetes v1.21.13 published on June 1, 2022.
+						match = capiVersion.FindStringSubmatch(*vmImage.Name)
+						stringVer := fmt.Sprintf("%s.%s.%s", match[1], match[2], match[3])
+						versions[stringVer] = semver.MustParse(stringVer)
+					}
+					continue
+				}
+				// Old SKUs before 1.21.12, 1.22.9, or 1.23.6 are named like "k8s-1dot21dot2-ubuntu-2004".
+				if match := oldCapiSku.FindStringSubmatch(*sku.Name); len(match) > 0 {
+					stringVer := fmt.Sprintf("%s.%s.%s", match[1], match[2], match[3])
+					versions[stringVer] = semver.MustParse(stringVer)
+				}
+			}
+		}
+	}
+
+	return versions
+}
+
+// getLatestSkuForMinor gets the latest available patch version in the provided list of sku versions that corresponds to the provided k8s version.
+func getLatestSkuForMinor(version string, skus semver.Versions) string {
+	isStable, match := validateStableReleaseString(version)
+	if isStable {
+		// if the version is in the format "stable-1.21", we find the latest 1.21.x version.
+		major, err := strconv.ParseUint(match[1], 10, 64)
+		Expect(err).NotTo(HaveOccurred())
+		minor, err := strconv.ParseUint(match[2], 10, 64)
+		Expect(err).NotTo(HaveOccurred())
+		semver.Sort(skus)
+		for i := len(skus) - 1; i >= 0; i-- {
+			if skus[i].Major == major && skus[i].Minor == minor {
+				version = "v" + skus[i].String()
+				break
+			}
+		}
+	} else if v, err := semver.ParseTolerant(version); err == nil {
+		if len(v.Pre) == 0 {
+			// if the version is in the format "v1.21.2", we make sure we have an existing image for it.
+			Expect(skus).To(ContainElement(v), fmt.Sprintf("Provided Kubernetes version %s does not have a corresponding VM image in the capi offer", version))
+		}
+	}
+	// otherwise, we just return the version as-is. This allows for versions in other formats, such as "latest" or "latest-1.21".
+	return version
 }
 
 // getPodLogs returns the logs of a pod, or an error in string format.
@@ -649,4 +761,89 @@ func getPodLogs(ctx context.Context, clientset *kubernetes.Clientset, pod corev1
 		return fmt.Sprintf("error copying logs for pod %s: %v", pod.Name, err)
 	}
 	return b.String()
+}
+
+// InstallHelmChart takes a helm repo URL, a chart name, and release name, and installs a helm release onto the E2E workload cluster.
+func InstallHelmChart(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, repoURL, chartName, releaseName string, values []string) {
+	clusterProxy := input.ClusterProxy.GetWorkloadCluster(ctx, input.ConfigCluster.Namespace, input.ConfigCluster.ClusterName)
+	kubeConfigPath := clusterProxy.GetKubeconfigPath()
+	settings := helmCli.New()
+	settings.KubeConfig = kubeConfigPath
+	actionConfig := new(helmAction.Configuration)
+	ns := "default"
+	err := actionConfig.Init(settings.RESTClientGetter(), ns, "secret", Logf)
+	Expect(err).To(BeNil())
+	i := helmAction.NewInstall(actionConfig)
+	if repoURL != "" {
+		i.RepoURL = repoURL
+	}
+	i.ReleaseName = releaseName
+	i.Namespace = ns
+	Eventually(func() error {
+		cp, err := i.ChartPathOptions.LocateChart(chartName, helmCli.New())
+		if err != nil {
+			return err
+		}
+		p := helmGetter.All(settings)
+		valueOpts := &helmVals.Options{}
+		valueOpts.Values = values
+		vals, err := valueOpts.MergeValues(p)
+		if err != nil {
+			return err
+		}
+		chartRequested, err := helmLoader.Load(cp)
+		if err != nil {
+			return err
+		}
+		release, err := i.RunWithContext(ctx, chartRequested, vals)
+		if err != nil {
+			return err
+		}
+		Logf(release.Info.Description)
+		return nil
+	}, input.WaitForControlPlaneIntervals...).Should(Succeed())
+}
+
+// WaitForDaemonset retries during E2E until a daemonset's pods are all Running.
+func WaitForDaemonset(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, cl client.Client, name, namespace string) {
+	Eventually(func() bool {
+		ds := &appsv1.DaemonSet{}
+		if err := cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, ds); err != nil {
+			return false
+		}
+		if ds.Status.DesiredNumberScheduled == ds.Status.NumberReady {
+			return true
+		}
+		return false
+	}, input.WaitForControlPlaneIntervals...).Should(Equal(true))
+}
+
+func defaultConfigCluster(clusterName, namespace string) clusterctl.ConfigClusterInput {
+	return clusterctl.ConfigClusterInput{
+		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+		ClusterctlConfigPath:     clusterctlConfigPath,
+		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+		InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
+		Flavor:                   clusterctl.DefaultFlavor,
+		Namespace:                namespace,
+		ClusterName:              clusterName,
+		KubernetesVersion:        e2eConfig.GetVariable(capi_e2e.KubernetesVersion),
+		ControlPlaneMachineCount: pointer.Int64Ptr(3),
+		WorkerMachineCount:       pointer.Int64Ptr(0),
+	}
+}
+
+func createClusterWithControlPlaneWaiters(ctx context.Context, configCluster clusterctl.ConfigClusterInput,
+	cpWaiters clusterctl.ControlPlaneWaiters,
+	result *clusterctl.ApplyClusterTemplateAndWaitResult) (*clusterv1.Cluster,
+	*controlplanev1.KubeadmControlPlane) {
+	clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
+		ClusterProxy:                 bootstrapClusterProxy,
+		ConfigCluster:                configCluster,
+		WaitForClusterIntervals:      e2eConfig.GetIntervals("", "wait-cluster"),
+		WaitForControlPlaneIntervals: e2eConfig.GetIntervals("", "wait-control-plane"),
+		WaitForMachineDeployments:    e2eConfig.GetIntervals("", "wait-worker-nodes"),
+		ControlPlaneWaiters:          cpWaiters,
+	}, result)
+	return result.Cluster, result.ControlPlane
 }

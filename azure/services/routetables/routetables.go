@@ -19,101 +19,122 @@ package routetables
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
-
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
+const serviceName = "routetables"
+
 // RouteTableScope defines the scope interface for route table service.
 type RouteTableScope interface {
-	azure.ClusterDescriber
-	azure.NetworkDescriber
-	RouteTableSpecs() []azure.RouteTableSpec
+	azure.Authorizer
+	azure.AsyncStatusUpdater
+	RouteTableSpecs() []azure.ResourceSpecGetter
+	IsVnetManaged() bool
 }
 
 // Service provides operations on azure resources.
 type Service struct {
 	Scope RouteTableScope
-	client
+	async.Reconciler
 }
 
 // New creates a new service.
-func New(scope *scope.ClusterScope) *Service {
+func New(scope RouteTableScope) *Service {
+	client := newClient(scope)
 	return &Service{
-		Scope:  scope,
-		client: newClient(scope),
+		Scope:      scope,
+		Reconciler: async.New(scope, client, client),
 	}
 }
 
-// Reconcile gets/creates/updates a route table.
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
+}
+
+// Reconcile gets/creates/updates route tables.
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "routetables.Service.Reconcile")
 	defer done()
 
-	if !s.Scope.Vnet().IsManaged(s.Scope.ClusterName()) {
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
+
+	var resErr error
+
+	if managed, err := s.IsManaged(ctx); err == nil && !managed {
 		log.V(4).Info("Skipping route tables reconcile in custom vnet mode")
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "failed to check if route tables are managed")
+	}
+
+	specs := s.Scope.RouteTableSpecs()
+	if len(specs) == 0 {
 		return nil
 	}
 
-	for _, routeTableSpec := range s.Scope.RouteTableSpecs() {
-		existingRouteTable, err := s.Get(ctx, s.Scope.ResourceGroup(), routeTableSpec.Name)
-		if !azure.ResourceNotFound(err) {
-			if err != nil {
-				return errors.Wrapf(err, "failed to get route table %s in %s", routeTableSpec.Name, s.Scope.ResourceGroup())
+	// We go through the list of route tables to reconcile each one, independently of the result of the previous one.
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error creating) -> operationNotDoneError (i.e. creating in progress) -> no error (i.e. created)
+	for _, rtSpec := range specs {
+		if _, err := s.CreateResource(ctx, rtSpec, serviceName); err != nil {
+			if !azure.IsOperationNotDoneError(err) || resErr == nil {
+				resErr = err
 			}
-
-			// route table already exists
-			// currently don't support specifying your own routes via spec
-			routeTableSpec.Subnet.RouteTable.Name = to.String(existingRouteTable.Name)
-			routeTableSpec.Subnet.RouteTable.ID = to.String(existingRouteTable.ID)
-			s.Scope.SetSubnet(routeTableSpec.Subnet)
-
-			continue
 		}
-
-		log.V(2).Info("creating Route Table", "route table", routeTableSpec.Name)
-		err = s.client.CreateOrUpdate(
-			ctx,
-			s.Scope.ResourceGroup(),
-			routeTableSpec.Name,
-			network.RouteTable{
-				Location:                   to.StringPtr(s.Scope.Location()),
-				RouteTablePropertiesFormat: &network.RouteTablePropertiesFormat{},
-			},
-		)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create route table %s in resource group %s", routeTableSpec.Name, s.Scope.ResourceGroup())
-		}
-		log.V(2).Info("successfully created route table", "route table", routeTableSpec.Name)
 	}
-	return nil
+
+	s.Scope.UpdatePutStatus(infrav1.RouteTablesReadyCondition, serviceName, resErr)
+	return resErr
 }
 
-// Delete deletes the route table with the provided name.
+// Delete deletes route tables.
 func (s *Service) Delete(ctx context.Context) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "routetables.Service.Delete")
 	defer done()
 
-	if !s.Scope.Vnet().IsManaged(s.Scope.ClusterName()) {
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
+
+	// Only delete the route tables if their lifecycle is managed by this controller.
+	// route tables are managed if and only if the vnet is managed.
+	if managed, err := s.IsManaged(ctx); err == nil && !managed {
 		log.V(4).Info("Skipping route table deletion in custom vnet mode")
 		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "failed to check if route tables are managed")
 	}
-	for _, routeTableSpec := range s.Scope.RouteTableSpecs() {
-		log.V(2).Info("deleting route table", "route table", routeTableSpec.Name)
-		err := s.client.Delete(ctx, s.Scope.ResourceGroup(), routeTableSpec.Name)
-		if err != nil && azure.ResourceNotFound(err) {
-			// already deleted
-			continue
-		}
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete route table %s in resource group %s", routeTableSpec.Name, s.Scope.ResourceGroup())
-		}
 
-		log.V(2).Info("successfully deleted route table", "route table", routeTableSpec.Name)
+	specs := s.Scope.RouteTableSpecs()
+	if len(specs) == 0 {
+		return nil
 	}
-	return nil
+
+	// We go through the list of RouteTableSpecs to delete each one, independently of the result of the previous one.
+	// If multiple errors occur, we return the most pressing one
+	// order of precedence is: error deleting -> deleting in progress -> deleted (no error)
+	var result error
+	for _, rtSpec := range specs {
+		if err := s.DeleteResource(ctx, rtSpec, serviceName); err != nil {
+			if !azure.IsOperationNotDoneError(err) || result == nil {
+				result = err
+			}
+		}
+	}
+	s.Scope.UpdateDeleteStatus(infrav1.RouteTablesReadyCondition, serviceName, result)
+	return result
+}
+
+// IsManaged returns true if the route tables' lifecycles are managed.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	_, _, done := tele.StartSpanWithLogger(ctx, "routetables.Service.IsManaged")
+	defer done()
+
+	return s.Scope.IsVnetManaged(), nil
 }

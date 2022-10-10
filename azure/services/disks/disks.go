@@ -50,6 +50,11 @@ func New(scope DiskScope) *Service {
 	}
 }
 
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
+}
+
 // Reconcile on disk is currently no-op. OS disks should only be deleted and will create with the VM automatically.
 func (s *Service) Reconcile(ctx context.Context) error {
 	_, _, done := tele.StartSpanWithLogger(ctx, "disks.Service.Reconcile")
@@ -67,12 +72,16 @@ func (s *Service) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	var result error
+	specs := s.Scope.DiskSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
 
 	// We go through the list of DiskSpecs to delete each one, independently of the result of the previous one.
-	// If multiple errors occur, we return the most pressing one
-	// order of precedence is: error deleting -> deleting in progress -> deleted (no error)
-	for _, diskSpec := range s.Scope.DiskSpecs() {
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error creating) -> operationNotDoneError (i.e. creating in progress) -> no error (i.e. created)
+	var result error
+	for _, diskSpec := range specs {
 		if err := s.DeleteResource(ctx, diskSpec, serviceName); err != nil {
 			if !azure.IsOperationNotDoneError(err) || result == nil {
 				result = err
@@ -81,4 +90,9 @@ func (s *Service) Delete(ctx context.Context) error {
 	}
 	s.Scope.UpdateDeleteStatus(infrav1.DisksReadyCondition, serviceName, result)
 	return result
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO disk.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

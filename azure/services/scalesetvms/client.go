@@ -22,11 +22,10 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -104,7 +103,7 @@ func (ac *azureClient) GetResultIfDone(ctx context.Context, future *infrav1.Futu
 			VirtualMachineScaleSetVMsDeleteFuture: future,
 		}
 	default:
-		return compute.VirtualMachineScaleSetVM{}, errors.Errorf("unknown furture type %q", future.Type)
+		return compute.VirtualMachineScaleSetVM{}, errors.Errorf("unknown future type %q", future.Type)
 	}
 
 	done, err := genericFuture.DoneWithContext(ctx, ac.scalesetvms)

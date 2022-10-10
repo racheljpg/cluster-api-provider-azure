@@ -1,22 +1,23 @@
 run:
   deadline: 5m
-  skip-dirs:
-    - mock*
   skip-files:
-  - "zz_generated.*\\.go$"
-  - ".*conversion.*\\.go$"
+  - 'zz_generated\.(\w*)\.go$'
+  build-tags:
+    - e2e
 linters:
   disable-all: true
   enable:
     - asciicheck
     - bodyclose
-    - deadcode
+    - containedctx
     - depguard
     - dogsled
     - errcheck
     - errorlint
     - exportloopref
+    - gci
     - goconst
+    - gocritic
     - gocyclo
     - godot
     - gofmt
@@ -30,24 +31,24 @@ linters:
     - misspell
     - nakedret
     - nilerr
+    - noctx
     - nolintlint
     - prealloc
+    - predeclared
     - revive
     - rowserrcheck
     - staticcheck
-    - structcheck
+    - stylecheck
+    - thelper
     - typecheck
     - unconvert
+    - unparam
     - unused
-    - varcheck
     - whitespace
   # Run with --fast=false for more extensive checks
   fast: true
 
 linters-settings:
-  ifshort:
-    # Maximum length of variable declaration measured in number of characters, after which linter won't suggest using short syntax.
-    max-decl-chars: 50
   importas:
     no-unaliased: true
     alias:
@@ -65,6 +66,37 @@ linters-settings:
       # Controller Runtime
       - pkg: sigs.k8s.io/controller-runtime
         alias: ctrl
+      # CAPI
+      - pkg: sigs.k8s.io/cluster-api/api/v1alpha3
+        alias: clusterv1alpha3
+      - pkg: sigs.k8s.io/cluster-api/api/v1alpha4
+        alias: clusterv1alpha4
+      - pkg: sigs.k8s.io/cluster-api/api/v1beta1
+        alias: clusterv1
+      # CAPI exp
+      - pkg: sigs.k8s.io/cluster-api/exp/api/v1alpha3
+        alias: expv1alpha3
+      - pkg: sigs.k8s.io/cluster-api/exp/api/v1alpha4
+        alias: expv1alpha4
+      - pkg: sigs.k8s.io/cluster-api/exp/api/v1beta1
+        alias: expv1
+      # CAPZ
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3
+        alias: infrav1alpha3
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/api/v1alpha4
+        alias: infrav1alpha4
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/api/v1beta1
+        alias: infrav1
+      # CAPZ exp
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3
+        alias: infrav1alpha3exp
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha4
+        alias: infrav1alpha4exp
+      - pkg: sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1
+        alias: infrav1exp
+  gocritic:
+    enabled-tags:
+      - "experimental"
   godot:
     #   declarations - for top level declaration comments (default);
     #   toplevel     - for top level comments;
@@ -77,24 +109,38 @@ linters-settings:
     excludes:
     - G307 # Deferring unsafe method "Close" on type "\*os.File"
     - G108 # Profiling endpoint is automatically exposed on /debug/pprof
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - disableStutteringCheck
   staticcheck:
-    go: "1.16"
+    go: "1.18"
+  stylecheck:
+    go: "1.18"
+  unused:
+    go: "1.18"
 
 issues:
   exclude-rules:
-    - path: internal/test/
+    - path: '(\w*)conversion.go'
+      text: "use underscores in Go names|receiver name (.+) should be consistent|methods on the same type should have the same receiver name"
+    - path: 'mock(\w+)/doc.go$'
+      text: "use underscores in package names|don't use an underscore in package name"
+    - path: api/v1alpha3/azureclusteridentity_types.go
+      text: "methods on the same type should have the same receiver name"
+    - path: ^test/
       linters:
-        - golint
-    - path: cloudtest\.go
-      linters:
-        - golint
-    - path: api/v1alpha3/types\.go
-      linters:
-        - golint
-    - path: _test\.go
-      linters:
-        - unused
+        - dogsled
+        - goconst
+        - godot
+        - prealloc
+    - path: ^test/
+      text: exported (.+) should have comment( \(or a comment on this block\))? or be unexported
+    - source: \"github.com/onsi/(ginkgo|gomega)\"
+      text: "should not use dot imports"
   include:
-  - EXC0002 # include "missing comments" issues from golint
+  - EXC0012  # revive: check for comments
+  - EXC0014  # revive: check for comments
   max-issues-per-linter: 0
   max-same-issues: 0

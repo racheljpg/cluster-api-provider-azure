@@ -35,7 +35,7 @@ export AZURE_RESOURCE_GROUP="${CLUSTER_NAME}"
 # this example uses an sdk authentication file and parses the subscriptionId with jq
 # this file may be created using
 #
-# `az ad sp create-for-rbac --role Contributor --sdk-auth > sp.json`
+# `az ad sp create-for-rbac --role Contributor --scopes="/subscriptions/${AZURE_SUBSCRIPTION_ID}" --sdk-auth > sp.json`
 #
 # when logged in with a service principal, it's also available using
 #
@@ -102,14 +102,13 @@ spec:
   version: v1.21.2
   networkPolicy: azure # or calico
   networkPlugin: azure # or kubenet
-  sku: Free # or Paid
+  sku:
+    tier: Free # or Paid
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: AzureManagedCluster
 metadata:
   name: my-cluster
-spec:
-  subscriptionID: 00000000-0000-0000-0000-000000000000 # fake uuid
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachinePool
@@ -134,7 +133,7 @@ metadata:
   name: agentpool0
 spec:
   mode: System
-  osDiskSizeGB: 512
+  osDiskSizeGB: 30
   sku: Standard_D2s_v3
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
@@ -160,7 +159,7 @@ metadata:
   name: agentpool1
 spec:
   mode: User
-  osDiskSizeGB: 1024
+  osDiskSizeGB: 40
   sku: Standard_D2s_v4
 ```
 
@@ -241,7 +240,7 @@ spec:
   version: v1.21.2
   aadProfile:
     managed: true
-    adminGroupObjectIDs: 
+    adminGroupObjectIDs:
     - 917056a9-8eb5-439c-g679-b34901ade75h # fake admin groupId
 ```
 
@@ -256,11 +255,30 @@ metadata:
   name: agentpool0
 spec:
   mode: System
-  osDiskSizeGB: 512
+  osDiskSizeGB: 30
   sku: Standard_D2s_v3
   scaling:
     minSize: 2
     maxSize: 10
+```
+
+### AKS Node Labels to an Agent Pool
+
+You can configure the `NodeLabels` value for each AKS node pool (`AzureManagedMachinePool`) that you define in your spec.
+
+Below an example `nodeLabels` configuration is assigned to `agentpool0`, specifying that each node in the pool will add a label `dedicated : kafka`
+
+```
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  name: agentpool0
+spec:
+  mode: System
+  osDiskSizeGB: 512
+  sku: Standard_D2s_v3
+  nodeLabels:
+    dedicated: kafka 
 ```
 
 ### AKS Node Pool MaxPods configuration
@@ -276,9 +294,87 @@ metadata:
   name: agentpool0
 spec:
   mode: System
+  osDiskSizeGB: 30
+  sku: Standard_D2s_v3
+  maxPods: 32
+```
+
+### AKS Node Pool OsDiskType configuration
+
+You can configure the `OsDiskType` value for each AKS node pool (`AzureManagedMachinePool`) that you define in your spec (see [here](https://docs.microsoft.com/en-us/azure/aks/cluster-configuration#ephemeral-os) for the official AKS documentation). There are two options to choose from: `"Managed"` (the default) or `"Ephemeral"`.
+
+Below an example `osDiskType` configuration is assigned to `agentpool0`, specifying that each node in the pool will use a local, ephemeral OS disk for faster disk I/O at the expense of possible data loss:
+
+```
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  name: agentpool0
+spec:
+  mode: System
+  osDiskSizeGB: 30
+  sku: Standard_D2s_v3
+  osDiskType: "Ephemeral"
+```
+
+### AKS Node Pool Taints
+
+You can configure the `Taints` value for each AKS node pool (`AzureManagedMachinePool`) that you define in your spec.
+
+Below is an example of `taints` configuration for the `agentpool0`:
+
+```
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  name: agentpool0
+spec:
+  mode: System
   osDiskSizeGB: 512
   sku: Standard_D2s_v3
-  maxPods: 24
+  taints:
+    - effect: no-schedule
+      key: dedicated
+      value: kafka
+```
+
+### AKS Node Pool OS Type
+If your cluster uses the Azure network plugin (`AzureManagedControlPlane.networkPlugin`) you can set the operating system
+for your User nodepools. The `osType` field is immutable and only can be set at creation time, it defaults to `Linux` and
+can be either `Linux` or `Windows`.
+
+```
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  name: agentpool0
+spec:
+  mode: User
+  osDiskSizeGB: 30
+  sku: Standard_D2s_v3
+  osDiskType: "Ephemeral"
+  osType: Windows
+```
+
+
+### Enable AKS features with custom headers (--aks-custom-headers)
+To enable some AKS cluster / node pool features you need to pass special headers to the cluster / node pool create request. 
+For example, to [add a node pool for GPU nodes](https://docs.microsoft.com/en-us/azure/aks/gpu-cluster#add-a-node-pool-for-gpu-nodes),
+you need to pass a custom header `UseGPUDedicatedVHD=true` (with `--aks-custom-headers UseGPUDedicatedVHD=true` argument). 
+To do this with CAPZ, you need to add special annotations to AzureManagedCluster (for cluster 
+features) or AzureManagedMachinePool (for node pool features). These annotations should have a prefix `infrastructure.cluster.x-k8s.io/custom-header-` followed 
+by the name of the AKS feature. For example, to create a node pool with GPU support, you would add the following 
+annotation to AzureManagedMachinePool:
+```
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  ...
+  annotations:
+    "infrastructure.cluster.x-k8s.io/custom-header-UseGPUDedicatedVHD": "true"
+  ...
+spec:
+  ...
 ```
 
 ### Use a public Standard Load Balancer
@@ -334,6 +430,34 @@ spec:
     privateDNSZone: None # System, None. Allowed only when enablePrivateCluster is true
     enablePrivateClusterPublicFQDN: false # Allowed only when enablePrivateCluster is true
 ```
+
+## Immutable fields for Managed Clusters (AKS)
+
+Some fields from the family of Managed Clusters CRD are immutable. Which means 
+those can only be set during the creation time. 
+
+Following is the list of immutable fields for managed clusters:
+
+| CRD                       | jsonPath                     | Comment                   |
+|---------------------------|------------------------------|---------------------------|
+| AzureManagedControlPlane  | .name                        |                           |
+| AzureManagedControlPlane  | .spec.subscriptionID         |                           |
+| AzureManagedControlPlane  | .spec.resourceGroupName      |                           |
+| AzureManagedControlPlane  | .spec.nodeResourceGroupName  |                           |
+| AzureManagedControlPlane  | .spec.location               |                           |
+| AzureManagedControlPlane  | .spec.sshPublicKey           |                           |
+| AzureManagedControlPlane  | .spec.dnsServiceIP           |                           |
+| AzureManagedControlPlane  | .spec.networkPlugin          |                           |
+| AzureManagedControlPlane  | .spec.networkPolicy          |                           |
+| AzureManagedControlPlane  | .spec.loadBalancerSKU        |                           |
+| AzureManagedControlPlane  | .spec.apiServerAccessProfile | except AuthorizedIPRanges |
+| AzureManagedMachinePool   | .spec.sku                    |                           |
+| AzureManagedMachinePool   | .spec.osDiskSizeGB           |                           |
+| AzureManagedMachinePool   | .spec.osDiskType             |                           |
+| AzureManagedMachinePool   | .spec.taints                 |                           |
+| AzureManagedMachinePool   | .spec.availabilityZones      |                           |
+| AzureManagedMachinePool   | .spec.maxPods                |                           |
+| AzureManagedMachinePool   | .spec.osType                 |                           |
 
 ## Features
 

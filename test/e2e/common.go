@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -21,11 +22,11 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2020-10-01/resources"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
@@ -38,7 +39,9 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	e2e_namespace "sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/namespace"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	kubeadmv1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
+	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util/kubeconfig"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -54,19 +57,27 @@ const (
 	AzureCPSubnetCidr              = "AZURE_CP_SUBNET_CIDR"
 	AzureVNetCidr                  = "AZURE_PRIVATE_VNET_CIDR"
 	AzureNodeSubnetCidr            = "AZURE_NODE_SUBNET_CIDR"
+	AzureBastionSubnetCidr         = "AZURE_BASTION_SUBNET_CIDR"
 	MultiTenancyIdentityName       = "MULTI_TENANCY_IDENTITY_NAME"
 	ClusterIdentityName            = "CLUSTER_IDENTITY_NAME"
 	ClusterIdentityNamespace       = "CLUSTER_IDENTITY_NAMESPACE"
-	ClusterIdentitySecretName      = "AZURE_CLUSTER_IDENTITY_SECRET_NAME"
-	ClusterIdentitySecretNamespace = "AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE"
-	AzureClientSecret              = "AZURE_CLIENT_SECRET"
-	AzureClientId                  = "AZURE_CLIENT_ID"
+	ClusterIdentitySecretName      = "AZURE_CLUSTER_IDENTITY_SECRET_NAME"      //nolint:gosec // Not a secret itself, just its name
+	ClusterIdentitySecretNamespace = "AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE" //nolint:gosec // Not a secret itself, just its name
+	AzureClientSecret              = "AZURE_CLIENT_SECRET"                     //nolint:gosec // Not a secret itself, just its name
+	AzureClientID                  = "AZURE_CLIENT_ID"
+	AzureSubscriptionID            = "AZURE_SUBSCRIPTION_ID"
+	AzureUserIdentity              = "USER_IDENTITY"
+	AzureIdentityResourceGroup     = "CI_RG"
 	JobName                        = "JOB_NAME"
 	Timestamp                      = "TIMESTAMP"
 	AKSKubernetesVersion           = "AKS_KUBERNETES_VERSION"
+	SecurityScanFailThreshold      = "SECURITY_SCAN_FAIL_THRESHOLD"
+	SecurityScanContainer          = "SECURITY_SCAN_CONTAINER"
 	ManagedClustersResourceType    = "managedClusters"
 	capiImagePublisher             = "cncf-upstream"
 	capiOfferName                  = "capi"
+	capiWindowsOfferName           = "capi-windows"
+	aksClusterNameSuffix           = "aks"
 )
 
 func Byf(format string, a ...interface{}) {
@@ -110,15 +121,16 @@ func setupSpecNamespace(ctx context.Context, namespaceName string, clusterProxy 
 }
 
 type cleanupInput struct {
-	SpecName          string
-	ClusterProxy      framework.ClusterProxy
-	ArtifactFolder    string
-	Namespace         *corev1.Namespace
-	CancelWatches     context.CancelFunc
-	Cluster           *clusterv1.Cluster
-	IntervalsGetter   func(spec, key string) []interface{}
-	SkipCleanup       bool
-	AdditionalCleanup func()
+	SpecName               string
+	ClusterProxy           framework.ClusterProxy
+	ArtifactFolder         string
+	Namespace              *corev1.Namespace
+	CancelWatches          context.CancelFunc
+	Cluster                *clusterv1.Cluster
+	IntervalsGetter        func(spec, key string) []interface{}
+	SkipCleanup            bool
+	AdditionalCleanup      func()
+	SkipResourceGroupCheck bool
 }
 
 func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
@@ -134,7 +146,7 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
 		input.ClusterProxy.CollectWorkloadClusterLogs(ctx, input.Cluster.Namespace, input.Cluster.Name, filepath.Join(input.ArtifactFolder, "clusters", input.Cluster.Name))
 	}
 
-	Byf("Dumping all the Cluster API resources in the %q namespace", input.Namespace.Name)
+	Logf("Dumping all the Cluster API resources in the %q namespace", input.Namespace.Name)
 	// Dump all Cluster API related resources to artifacts before deleting them.
 	framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
 		Lister:    input.ClusterProxy.GetClient(),
@@ -146,28 +158,35 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
 		return
 	}
 
-	Byf("Deleting all clusters in the %s namespace", input.Namespace.Name)
+	Logf("Deleting all clusters in the %s namespace", input.Namespace.Name)
 	// While https://github.com/kubernetes-sigs/cluster-api/issues/2955 is addressed in future iterations, there is a chance
 	// that cluster variable is not set even if the cluster exists, so we are calling DeleteAllClustersAndWait
 	// instead of DeleteClusterAndWait
+	deleteTimeoutConfig := "wait-delete-cluster"
+	if strings.Contains(input.Cluster.Name, aksClusterNameSuffix) {
+		deleteTimeoutConfig = "wait-delete-cluster-aks"
+	}
 	framework.DeleteAllClustersAndWait(ctx, framework.DeleteAllClustersAndWaitInput{
 		Client:    input.ClusterProxy.GetClient(),
 		Namespace: input.Namespace.Name,
-	}, input.IntervalsGetter(input.SpecName, "wait-delete-cluster")...)
+	}, input.IntervalsGetter(input.SpecName, deleteTimeoutConfig)...)
 
-	Byf("Deleting namespace used for hosting the %q test spec", input.SpecName)
+	Logf("Deleting namespace used for hosting the %q test spec", input.SpecName)
 	framework.DeleteNamespace(ctx, framework.DeleteNamespaceInput{
 		Deleter: input.ClusterProxy.GetClient(),
 		Name:    input.Namespace.Name,
 	})
 
 	if input.AdditionalCleanup != nil {
-		Byf("Running additional cleanup for the %q test spec", input.SpecName)
+		Logf("Running additional cleanup for the %q test spec", input.SpecName)
 		input.AdditionalCleanup()
 	}
 
-	Byf("Checking if any resources are left over in Azure for spec %q", input.SpecName)
-	ExpectResourceGroupToBe404(ctx)
+	Logf("Checking if any resources are left over in Azure for spec %q", input.SpecName)
+
+	if !input.SkipResourceGroupCheck {
+		ExpectResourceGroupToBe404(ctx)
+	}
 }
 
 // ExpectResourceGroupToBe404 performs a GET request to Azure to determine if the cluster resource group still exists.
@@ -187,8 +206,11 @@ func ExpectResourceGroupToBe404(ctx context.Context) {
 func redactLogs() {
 	By("Redacting sensitive information from logs")
 	Expect(e2eConfig.Variables).To(HaveKey(RedactLogScriptPath))
+	//nolint:gosec // Ignore warning about running a command constructed from user input
 	cmd := exec.Command(e2eConfig.GetVariable(RedactLogScriptPath))
-	cmd.Run()
+	if err := cmd.Run(); err != nil {
+		LogWarningf("Redact logs command failed: %v", err)
+	}
 }
 
 func createRestConfig(ctx context.Context, tmpdir, namespace, clusterName string) *rest.Config {
@@ -200,10 +222,53 @@ func createRestConfig(ctx context.Context, tmpdir, namespace, clusterName string
 	Expect(err).NotTo(HaveOccurred())
 
 	kubeConfigPath := path.Join(tmpdir, clusterName+".kubeconfig")
-	Expect(ioutil.WriteFile(kubeConfigPath, kubeConfigData, 0640)).To(Succeed())
+	Expect(os.WriteFile(kubeConfigPath, kubeConfigData, 0o600)).To(Succeed())
 
 	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	Expect(err).NotTo(HaveOccurred())
 
 	return config
+}
+
+// EnsureControlPlaneInitialized waits for the cluster KubeadmControlPlane object to be initialized
+// and then installs cloud-provider-azure components via Helm.
+// Fulfills the clusterctl.Waiter type so that it can be used as ApplyClusterTemplateAndWaitInput data
+// in the flow of a clusterctl.ApplyClusterTemplateAndWait E2E test scenario.
+func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, result *clusterctl.ApplyClusterTemplateAndWaitResult) {
+	getter := input.ClusterProxy.GetClient()
+	cluster := framework.GetClusterByName(ctx, framework.GetClusterByNameInput{
+		Getter:    getter,
+		Name:      input.ConfigCluster.ClusterName,
+		Namespace: input.ConfigCluster.Namespace,
+	})
+	kubeadmControlPlane := &kubeadmv1.KubeadmControlPlane{}
+	key := crclient.ObjectKey{
+		Namespace: cluster.Spec.ControlPlaneRef.Namespace,
+		Name:      cluster.Spec.ControlPlaneRef.Name,
+	}
+	Eventually(func() error {
+		return getter.Get(ctx, key, kubeadmControlPlane)
+	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "Failed to get KubeadmControlPlane object %s/%s", cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+	if kubeadmControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager.ExtraArgs["cloud-provider"] == "external" {
+		InstallCloudProviderAzureHelmChart(ctx, input)
+	}
+	controlPlane := discoveryAndWaitForControlPlaneInitialized(ctx, input, result)
+	InstallAzureDiskCSIDriverHelmChart(ctx, input)
+	result.ControlPlane = controlPlane
+}
+
+// CheckTestBeforeCleanup checks to see if the current running Ginkgo test failed, and prints
+// a status message regarding cleanup.
+func CheckTestBeforeCleanup() {
+	if CurrentGinkgoTestDescription().Failed {
+		Logf("FAILED!")
+	}
+	Logf("Cleaning up after \"%s\" spec", CurrentGinkgoTestDescription().FullTestText)
+}
+
+func discoveryAndWaitForControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, result *clusterctl.ApplyClusterTemplateAndWaitResult) *kubeadmv1.KubeadmControlPlane {
+	return framework.DiscoveryAndWaitForControlPlaneInitialized(ctx, framework.DiscoveryAndWaitForControlPlaneInitializedInput{
+		Lister:  input.ClusterProxy.GetClient(),
+		Cluster: result.Cluster,
+	}, input.WaitForControlPlaneIntervals...)
 }

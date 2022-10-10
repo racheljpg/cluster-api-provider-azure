@@ -21,15 +21,13 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/util/uuid"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	utilSSH "sigs.k8s.io/cluster-api-provider-azure/util/ssh"
 )
 
 // SetDefaultSSHPublicKey sets the default SSHPublicKey for an AzureMachinePool.
 func (amp *AzureMachinePool) SetDefaultSSHPublicKey() error {
-	sshKeyData := amp.Spec.Template.SSHPublicKey
-	if sshKeyData == "" {
+	if sshKeyData := amp.Spec.Template.SSHPublicKey; sshKeyData == "" {
 		_, publicRsaKey, err := utilSSH.GenerateSSHKey()
 		if err != nil {
 			return err
@@ -37,7 +35,6 @@ func (amp *AzureMachinePool) SetDefaultSSHPublicKey() error {
 
 		amp.Spec.Template.SSHPublicKey = base64.StdEncoding.EncodeToString(ssh.MarshalAuthorizedKey(publicRsaKey))
 	}
-
 	return nil
 }
 

@@ -19,12 +19,15 @@ package v1beta1
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 const (
+	// ManagedClusterFinalizer allows Reconcile to clean up Azure resources associated with the AzureManagedControlPlane before
+	// removing it from the apiserver.
+	ManagedClusterFinalizer = "azuremanagedcontrolplane.infrastructure.cluster.x-k8s.io"
+
 	// PrivateDNSZoneModeSystem represents mode System for azuremanagedcontrolplane.
 	PrivateDNSZoneModeSystem string = "System"
 
@@ -42,7 +45,7 @@ type AzureManagedControlPlaneSpec struct {
 	ResourceGroupName string `json:"resourceGroupName"`
 
 	// NodeResourceGroupName is the name of the resource group
-	// containining cluster IaaS resources. Will be populated to default
+	// containing cluster IaaS resources. Will be populated to default
 	// in webhook.
 	// +optional
 	NodeResourceGroupName string `json:"nodeResourceGroupName,omitempty"`
@@ -98,6 +101,10 @@ type AzureManagedControlPlaneSpec struct {
 	// +optional
 	AADProfile *AADProfile `json:"aadProfile,omitempty"`
 
+	// AddonProfiles are the profiles of managed cluster add-on.
+	// +optional
+	AddonProfiles []AddonProfile `json:"addonProfiles,omitempty"`
+
 	// SKU is the SKU of the AKS to be provisioned.
 	// +optional
 	SKU *SKU `json:"sku,omitempty"`
@@ -120,6 +127,19 @@ type AADProfile struct {
 	// AdminGroupObjectIDs - AAD group object IDs that will have admin role of the cluster.
 	// +kubebuilder:validation:Required
 	AdminGroupObjectIDs []string `json:"adminGroupObjectIDs"`
+}
+
+// AddonProfile represents a managed cluster add-on.
+type AddonProfile struct {
+	// Name - The name of the managed cluster add-on.
+	Name string `json:"name"`
+
+	// Config - Key-value pairs for configuring the add-on.
+	// +optional
+	Config map[string]string `json:"config,omitempty"`
+
+	// Enabled - Whether the add-on is enabled or not.
+	Enabled bool `json:"enabled"`
 }
 
 // AzureManagedControlPlaneSkuTier - Tier of a managed cluster SKU.
@@ -210,6 +230,10 @@ type AzureManagedControlPlaneStatus struct {
 	// +optional
 	Initialized bool `json:"initialized,omitempty"`
 
+	// Conditions defines current service state of the AzureManagedControlPlane.
+	// +optional
+	Conditions clusterv1.Conditions `json:"conditions,omitempty"`
+
 	// LongRunningOperationStates saves the states for Azure long-running operations so they can be continued on the
 	// next reconciliation loop.
 	// +optional
@@ -237,6 +261,16 @@ type AzureManagedControlPlaneList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []AzureManagedControlPlane `json:"items"`
+}
+
+// GetConditions returns the list of conditions for an AzureManagedControlPlane API object.
+func (m *AzureManagedControlPlane) GetConditions() clusterv1.Conditions {
+	return m.Status.Conditions
+}
+
+// SetConditions will set the given conditions on an AzureManagedControlPlane object.
+func (m *AzureManagedControlPlane) SetConditions(conditions clusterv1.Conditions) {
+	m.Status.Conditions = conditions
 }
 
 // GetFutures returns the list of long running operation states for an AzureManagedControlPlane API object.

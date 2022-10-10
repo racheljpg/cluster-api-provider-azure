@@ -25,20 +25,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 )
 
 func Test_newAzureMachinePoolService(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	cluster := newAzureCluster("foo")
+	cluster := newAzureCluster("fakeCluster")
 	cluster.Spec.ResourceGroup = "resourceGroup"
 	cluster.Spec.Location = "test-location"
 	cluster.Spec.ResourceGroup = "my-rg"
@@ -52,11 +51,11 @@ func Test_newAzureMachinePoolService(t *testing.T) {
 	clusterMock.EXPECT().BaseURI().AnyTimes()
 	clusterMock.EXPECT().Authorizer().AnyTimes()
 	clusterMock.EXPECT().Location().Return(cluster.Spec.Location)
-	clusterMock.EXPECT().HashKey().Return("foo")
+	clusterMock.EXPECT().HashKey().Return("fakeCluster")
 
 	mps := &scope.MachinePoolScope{
 		ClusterScoper: clusterMock,
-		MachinePool:   newMachinePool("foo", "poolName"),
+		MachinePool:   newMachinePool("fakeCluster", "poolName"),
 		AzureMachinePool: &infrav1exp.AzureMachinePool{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "poolName",
@@ -68,7 +67,7 @@ func Test_newAzureMachinePoolService(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(subject).NotTo(BeNil())
-	g.Expect(subject.virtualMachinesScaleSetSvc).NotTo(BeNil())
+	g.Expect(subject.services).NotTo(BeEmpty())
 	g.Expect(subject.skuCache).NotTo(BeNil())
 }
 
@@ -76,17 +75,17 @@ func newScheme(g *GomegaWithT) *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	for _, f := range []func(*runtime.Scheme) error{
 		clusterv1.AddToScheme,
-		clusterv1exp.AddToScheme,
+		expv1.AddToScheme,
 		infrav1.AddToScheme,
 		infrav1exp.AddToScheme,
 	} {
-		g.Expect(f(scheme)).ToNot(HaveOccurred())
+		g.Expect(f(scheme)).To(Succeed())
 	}
 	return scheme
 }
 
-func newMachinePool(clusterName, poolName string) *clusterv1exp.MachinePool {
-	return &clusterv1exp.MachinePool{
+func newMachinePool(clusterName, poolName string) *expv1.MachinePool {
+	return &expv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
 				clusterv1.ClusterLabelName: clusterName,
@@ -94,7 +93,7 @@ func newMachinePool(clusterName, poolName string) *clusterv1exp.MachinePool {
 			Name:      poolName,
 			Namespace: "default",
 		},
-		Spec: clusterv1exp.MachinePoolSpec{
+		Spec: expv1.MachinePoolSpec{
 			Replicas: to.Int32Ptr(2),
 		},
 	}
@@ -112,7 +111,7 @@ func newAzureMachinePool(clusterName, poolName string) *infrav1exp.AzureMachineP
 	}
 }
 
-func newMachinePoolWithInfrastructureRef(clusterName, poolName string) *clusterv1exp.MachinePool {
+func newMachinePoolWithInfrastructureRef(clusterName, poolName string) *expv1.MachinePool {
 	m := newMachinePool(clusterName, poolName)
 	m.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
 		Kind:       "AzureMachinePool",
@@ -123,7 +122,7 @@ func newMachinePoolWithInfrastructureRef(clusterName, poolName string) *clusterv
 	return m
 }
 
-func newManagedMachinePoolWithInfrastructureRef(clusterName, poolName string) *clusterv1exp.MachinePool {
+func newManagedMachinePoolWithInfrastructureRef(clusterName, poolName string) *expv1.MachinePool {
 	m := newMachinePool(clusterName, poolName)
 	m.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
 		Kind:       "AzureManagedMachinePool",

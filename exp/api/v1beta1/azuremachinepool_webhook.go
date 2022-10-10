@@ -26,6 +26,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
+	capifeature "sigs.k8s.io/cluster-api/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
@@ -43,8 +45,7 @@ var _ webhook.Defaulter = &AzureMachinePool{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type.
 func (amp *AzureMachinePool) Default() {
-	err := amp.SetDefaultSSHPublicKey()
-	if err != nil {
+	if err := amp.SetDefaultSSHPublicKey(); err != nil {
 		ctrl.Log.WithName("AzureMachinePoolLogger").Error(err, "SetDefaultSshPublicKey failed")
 	}
 	amp.SetIdentityDefaults()
@@ -71,6 +72,15 @@ func (amp *AzureMachinePool) ValidateDelete() error {
 
 // Validate the Azure Machine Pool and return an aggregate error.
 func (amp *AzureMachinePool) Validate(old runtime.Object) error {
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the web hook
+	// must prevent creating new objects new case the feature flag is disabled.
+	if !feature.Gates.Enabled(capifeature.MachinePool) {
+		return field.Forbidden(
+			field.NewPath("spec"),
+			"can be set only if the MachinePool feature flag is enabled",
+		)
+	}
+
 	validators := []func() error{
 		amp.ValidateImage,
 		amp.ValidateTerminateNotificationTimeout,
@@ -109,11 +119,11 @@ func (amp *AzureMachinePool) ValidateTerminateNotificationTimeout() error {
 		return nil
 	}
 	if *amp.Spec.Template.TerminateNotificationTimeout < 5 {
-		return errors.New("Minimum timeout 5 is allowed for TerminateNotificationTimeout")
+		return errors.New("minimum timeout 5 is allowed for TerminateNotificationTimeout")
 	}
 
 	if *amp.Spec.Template.TerminateNotificationTimeout > 15 {
-		return errors.New("Maximum timeout 15 is allowed for TerminateNotificationTimeout")
+		return errors.New("maximum timeout 15 is allowed for TerminateNotificationTimeout")
 	}
 
 	return nil

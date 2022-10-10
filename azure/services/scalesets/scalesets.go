@@ -22,18 +22,20 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/generators"
 	"sigs.k8s.io/cluster-api-provider-azure/util/slice"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
+
+const serviceName = "scalesets"
 
 type (
 	// ScaleSetScope defines the scope interface for a scale sets service.
@@ -45,7 +47,7 @@ type (
 		SaveVMImageToStatus(*infrav1.Image)
 		MaxSurge() (int, error)
 		ScaleSetSpec() azure.ScaleSetSpec
-		VMSSExtensionSpecs() []azure.ExtensionSpec
+		VMSSExtensionSpecs() []azure.ResourceSpecGetter
 		SetAnnotation(string, string)
 		SetProviderID(string)
 		SetVMSSState(*azure.VMSS)
@@ -59,13 +61,18 @@ type (
 	}
 )
 
-// NewService creates a new service.
-func NewService(scope ScaleSetScope, skuCache *resourceskus.Cache) *Service {
+// New creates a new service.
+func New(scope ScaleSetScope, skuCache *resourceskus.Cache) *Service {
 	return &Service{
 		Client:           NewClient(scope),
 		Scope:            scope,
 		resourceSKUCache: skuCache,
 	}
+}
+
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
 }
 
 // Reconcile idempotently gets, creates, and updates a scale set.
@@ -83,10 +90,11 @@ func (s *Service) Reconcile(ctx context.Context) (retErr error) {
 	scaleSetSpec := s.Scope.ScaleSetSpec()
 
 	// check if there is an ongoing long running operation
-	var (
-		future      = s.Scope.GetLongRunningOperationState(s.Scope.ScaleSetSpec().Name, scope.ScalesetsServiceName)
-		fetchedVMSS *azure.VMSS
-	)
+	var fetchedVMSS *azure.VMSS
+	future := s.Scope.GetLongRunningOperationState(s.Scope.ScaleSetSpec().Name, serviceName, infrav1.PutFuture)
+	if future == nil {
+		future = s.Scope.GetLongRunningOperationState(s.Scope.ScaleSetSpec().Name, serviceName, infrav1.PatchFuture)
+	}
 
 	defer func() {
 		// save the updated state of the VMSS for the MachinePoolScope to use for updating K8s state
@@ -98,7 +106,12 @@ func (s *Service) Reconcile(ctx context.Context) (retErr error) {
 		}
 
 		if fetchedVMSS != nil {
-			s.Scope.SetProviderID(azure.ProviderIDPrefix + fetchedVMSS.ID)
+			// Transform the VMSS resource representation to conform to the cloud-provider-azure representation
+			providerID, err := azureutil.ConvertResourceGroupNameToLower(azure.ProviderIDPrefix + fetchedVMSS.ID)
+			if err != nil {
+				log.Error(err, "failed to parse VMSS ID", "ID", fetchedVMSS.ID)
+			}
+			s.Scope.SetProviderID(providerID)
 			s.Scope.SetVMSSState(fetchedVMSS)
 		}
 	}()
@@ -138,8 +151,14 @@ func (s *Service) Reconcile(ctx context.Context) (retErr error) {
 		}
 	}
 
-	// if we get to here, we have completed any long running VMSS operations (creates / updates)
-	s.Scope.DeleteLongRunningOperationState(s.Scope.ScaleSetSpec().Name, scope.ScalesetsServiceName)
+	// If we get to here, we have completed any long running VMSS operations (creates / updates)
+	s.Scope.DeleteLongRunningOperationState(s.Scope.ScaleSetSpec().Name, serviceName, infrav1.PutFuture)
+	s.Scope.DeleteLongRunningOperationState(s.Scope.ScaleSetSpec().Name, serviceName, infrav1.PatchFuture)
+
+	// This also means that the VMSS extensions were successfully installed
+	// Note: we want to handle UpdatePutStatus when VMSSExtensions have an error when scalesets become an async service
+	s.Scope.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+
 	return nil
 }
 
@@ -166,7 +185,7 @@ func (s *Service) Delete(ctx context.Context) error {
 	}()
 
 	// check if there is an ongoing long running operation
-	future := s.Scope.GetLongRunningOperationState(vmssSpec.Name, scope.ScalesetsServiceName)
+	future := s.Scope.GetLongRunningOperationState(vmssSpec.Name, serviceName, infrav1.DeleteFuture)
 	if future != nil {
 		// if the operation is not complete this will return an error
 		_, err := s.GetResultIfDone(ctx, future)
@@ -175,7 +194,10 @@ func (s *Service) Delete(ctx context.Context) error {
 		}
 
 		// ScaleSet has been deleted
-		s.Scope.DeleteLongRunningOperationState(vmssSpec.Name, scope.ScalesetsServiceName)
+		s.Scope.DeleteLongRunningOperationState(vmssSpec.Name, serviceName, infrav1.DeleteFuture)
+		// Note: we want to handle UpdateDeleteStatus when VMSSExtensions have an error when scalesets become an async service
+		s.Scope.UpdateDeleteStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+
 		return nil
 	}
 
@@ -199,7 +221,10 @@ func (s *Service) Delete(ctx context.Context) error {
 	}
 
 	// future is either nil, or the result of the future is complete
-	s.Scope.DeleteLongRunningOperationState(vmssSpec.Name, scope.ScalesetsServiceName)
+	s.Scope.DeleteLongRunningOperationState(vmssSpec.Name, serviceName, infrav1.DeleteFuture)
+	// Note: we want to handle UpdateDeleteStatus when VMSSExtensions have an error when scalesets become an async service
+	s.Scope.UpdateDeleteStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+
 	return nil
 }
 
@@ -287,7 +312,7 @@ func (s *Service) validateSpec(ctx context.Context) error {
 
 	sku, err := s.resourceSKUCache.Get(ctx, spec.Size, resourceskus.VirtualMachines)
 	if err != nil {
-		return azure.WithTerminalError(errors.Wrapf(err, "failed to get SKU %s in compute api", spec.Size))
+		return errors.Wrapf(err, "failed to get SKU %s in compute api", spec.Size)
 	}
 
 	// Checking if the requested VM size has at least 2 vCPUS
@@ -319,17 +344,30 @@ func (s *Service) validateSpec(ctx context.Context) error {
 		return azure.WithTerminalError(errors.Errorf("encryption at host is not supported for VM type %s", spec.Size))
 	}
 
-	// check the support for ultra disks based on location and vm size
-	for _, disks := range spec.DataDisks {
-		location := s.Scope.Location()
-		zones, err := s.resourceSKUCache.GetZones(ctx, location)
-		if err != nil {
-			return azure.WithTerminalError(errors.Wrapf(err, "failed to get the zones for location %s", location))
-		}
+	// Fetch location and zone to check for their support of ultra disks.
+	location := s.Scope.Location()
+	zones, err := s.resourceSKUCache.GetZones(ctx, location)
+	if err != nil {
+		return azure.WithTerminalError(errors.Wrapf(err, "failed to get the zones for location %s", location))
+	}
 
-		for _, zone := range zones {
-			if disks.ManagedDisk != nil && disks.ManagedDisk.StorageAccountType == string(compute.StorageAccountTypesUltraSSDLRS) && !sku.HasLocationCapability(resourceskus.UltraSSDAvailable, location, zone) {
-				return azure.WithTerminalError(fmt.Errorf("vm size %s does not support ultra disks in location %s. select a different vm size or disable ultra disks", spec.Size, location))
+	for _, zone := range zones {
+		hasLocationCapability := sku.HasLocationCapability(resourceskus.UltraSSDAvailable, location, zone)
+		err := fmt.Errorf("vm size %s does not support ultra disks in location %s. select a different vm size or disable ultra disks", spec.Size, location)
+
+		// Check support for ultra disks as data disks.
+		for _, disks := range spec.DataDisks {
+			if disks.ManagedDisk != nil &&
+				disks.ManagedDisk.StorageAccountType == string(compute.StorageAccountTypesUltraSSDLRS) &&
+				!hasLocationCapability {
+				return azure.WithTerminalError(err)
+			}
+		}
+		// Check support for ultra disks as persistent volumes.
+		if spec.AdditionalCapabilities != nil && spec.AdditionalCapabilities.UltraSSDEnabled != nil {
+			if *spec.AdditionalCapabilities.UltraSSDEnabled &&
+				!hasLocationCapability {
+				return azure.WithTerminalError(err)
 			}
 		}
 	}
@@ -364,7 +402,10 @@ func (s *Service) buildVMSSFromSpec(ctx context.Context, vmssSpec azure.ScaleSet
 		vmssSpec.AcceleratedNetworking = &accelNet
 	}
 
-	extensions := s.generateExtensions()
+	extensions, err := s.generateExtensions()
+	if err != nil {
+		return compute.VirtualMachineScaleSet{}, err
+	}
 
 	storageProfile, err := s.generateStorageProfile(ctx, vmssSpec, sku)
 	if err != nil {
@@ -376,7 +417,7 @@ func (s *Service) buildVMSSFromSpec(ctx context.Context, vmssSpec azure.ScaleSet
 		return compute.VirtualMachineScaleSet{}, err
 	}
 
-	priority, evictionPolicy, billingProfile, err := converters.GetSpotVMOptions(vmssSpec.SpotVMOptions)
+	priority, evictionPolicy, billingProfile, err := converters.GetSpotVMOptions(vmssSpec.SpotVMOptions, vmssSpec.OSDisk.DiffDiskSettings)
 	if err != nil {
 		return compute.VirtualMachineScaleSet{}, errors.Wrapf(err, "failed to get Spot VM options")
 	}
@@ -424,13 +465,13 @@ func (s *Service) buildVMSSFromSpec(ctx context.Context, vmssSpec azure.ScaleSet
 				NetworkProfile: &compute.VirtualMachineScaleSetNetworkProfile{
 					NetworkInterfaceConfigurations: &[]compute.VirtualMachineScaleSetNetworkConfiguration{
 						{
-							Name: to.StringPtr(vmssSpec.Name + "-netconfig"),
+							Name: to.StringPtr(vmssSpec.Name),
 							VirtualMachineScaleSetNetworkConfigurationProperties: &compute.VirtualMachineScaleSetNetworkConfigurationProperties{
 								Primary:            to.BoolPtr(true),
 								EnableIPForwarding: to.BoolPtr(true),
 								IPConfigurations: &[]compute.VirtualMachineScaleSetIPConfiguration{
 									{
-										Name: to.StringPtr(vmssSpec.Name + "-ipconfig"),
+										Name: to.StringPtr(vmssSpec.Name),
 										VirtualMachineScaleSetIPConfigurationProperties: &compute.VirtualMachineScaleSetIPConfigurationProperties{
 											Subnet: &compute.APIEntityReference{
 												ID: to.StringPtr(azure.SubnetID(s.Scope.SubscriptionID(), vmssSpec.VNetResourceGroup, vmssSpec.VNetName, vmssSpec.SubnetName)),
@@ -472,11 +513,21 @@ func (s *Service) buildVMSSFromSpec(ctx context.Context, vmssSpec azure.ScaleSet
 		}
 	}
 
+	// Provisionally detect whether there is any Data Disk defined which uses UltraSSDs.
+	// If that's the case, enable the UltraSSD capability.
 	for _, dataDisk := range vmssSpec.DataDisks {
 		if dataDisk.ManagedDisk != nil && dataDisk.ManagedDisk.StorageAccountType == string(compute.StorageAccountTypesUltraSSDLRS) {
 			vmss.VirtualMachineScaleSetProperties.AdditionalCapabilities = &compute.AdditionalCapabilities{
 				UltraSSDEnabled: to.BoolPtr(true),
 			}
+		}
+	}
+
+	// Set Additional Capabilities if any is present on the spec.
+	if vmssSpec.AdditionalCapabilities != nil {
+		// Set UltraSSDEnabled if a specific value is set on the spec for it.
+		if vmssSpec.AdditionalCapabilities.UltraSSDEnabled != nil {
+			vmss.AdditionalCapabilities.UltraSSDEnabled = vmssSpec.AdditionalCapabilities.UltraSSDEnabled
 		}
 	}
 
@@ -537,22 +588,22 @@ func (s *Service) getVirtualMachineScaleSetIfDone(ctx context.Context, future *i
 	return converters.SDKToVMSS(vmss, vmssInstances), nil
 }
 
-func (s *Service) generateExtensions() []compute.VirtualMachineScaleSetExtension {
+func (s *Service) generateExtensions() ([]compute.VirtualMachineScaleSetExtension, error) {
 	extensions := make([]compute.VirtualMachineScaleSetExtension, len(s.Scope.VMSSExtensionSpecs()))
 	for i, extensionSpec := range s.Scope.VMSSExtensionSpecs() {
 		extensionSpec := extensionSpec
-		extensions[i] = compute.VirtualMachineScaleSetExtension{
-			Name: &extensionSpec.Name,
-			VirtualMachineScaleSetExtensionProperties: &compute.VirtualMachineScaleSetExtensionProperties{
-				Publisher:          to.StringPtr(extensionSpec.Publisher),
-				Type:               to.StringPtr(extensionSpec.Name),
-				TypeHandlerVersion: to.StringPtr(extensionSpec.Version),
-				Settings:           nil,
-				ProtectedSettings:  extensionSpec.ProtectedSettings,
-			},
+		parameters, err := extensionSpec.Parameters(nil)
+		if err != nil {
+			return nil, err
 		}
+		vmssextension, ok := parameters.(compute.VirtualMachineScaleSetExtension)
+		if !ok {
+			return nil, errors.Errorf("%T is not a compute.VirtualMachineScaleSetExtension", parameters)
+		}
+		extensions[i] = vmssextension
 	}
-	return extensions
+
+	return extensions, nil
 }
 
 // generateStorageProfile generates a pointer to a compute.VirtualMachineScaleSetStorageProfile which can utilized for VM creation.
@@ -587,6 +638,10 @@ func (s *Service) generateStorageProfile(ctx context.Context, vmssSpec azure.Sca
 		if vmssSpec.OSDisk.ManagedDisk.DiskEncryptionSet != nil {
 			storageProfile.OsDisk.ManagedDisk.DiskEncryptionSet = &compute.DiskEncryptionSetParameters{ID: to.StringPtr(vmssSpec.OSDisk.ManagedDisk.DiskEncryptionSet.ID)}
 		}
+	}
+
+	if vmssSpec.OSDisk.CachingType != "" {
+		storageProfile.OsDisk.Caching = compute.CachingTypes(vmssSpec.OSDisk.CachingType)
 	}
 
 	dataDisks := make([]compute.VirtualMachineScaleSetDataDisk, len(vmssSpec.DataDisks))
@@ -734,4 +789,9 @@ func getSecurityProfile(vmssSpec azure.ScaleSetSpec, sku resourceskus.SKU) (*com
 	return &compute.SecurityProfile{
 		EncryptionAtHost: to.BoolPtr(*vmssSpec.SecurityProfile.EncryptionAtHost),
 	}, nil
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO scale set.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

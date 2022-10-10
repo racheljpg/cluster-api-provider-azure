@@ -29,9 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infraexpv1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterexpv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -67,19 +67,23 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 			},
 		},
 		Spec: infrav1.AzureClusterSpec{
-			SubscriptionID: "123",
+			AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+				SubscriptionID: "123",
+			},
 			NetworkSpec: infrav1.NetworkSpec{
 				Subnets: infrav1.Subnets{
 					{
 						Name: "node",
-						Role: infrav1.SubnetNode,
+						SubnetClassSpec: infrav1.SubnetClassSpec{
+							Role: infrav1.SubnetNode,
+						},
 					},
 				},
 			},
 		},
 	}
 
-	machinePool := &clusterexpv1.MachinePool{
+	machinePool := &expv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "my-machine-pool",
 			Labels: map[string]string{
@@ -95,7 +99,7 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 		},
 	}
 
-	azureMachinePool := &infraexpv1.AzureMachinePool{
+	azureMachinePool := &infrav1exp.AzureMachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "my-azure-machine-pool",
 			OwnerReferences: []metav1.OwnerReference{
@@ -134,6 +138,42 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 			},
 			fail: true,
 			err:  "azureclusters.infrastructure.cluster.x-k8s.io \"my-azure-cluster\" not found",
+		},
+		"infra ref is nil": {
+			objects: []runtime.Object{
+				&clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-cluster",
+					},
+					Spec: clusterv1.ClusterSpec{
+						InfrastructureRef: nil,
+					},
+				},
+				azureCluster,
+				machinePool,
+				azureMachinePool,
+			},
+			fail: false,
+		},
+		"infra ref is not an azure cluster": {
+			objects: []runtime.Object{
+				&clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-cluster",
+					},
+					Spec: clusterv1.ClusterSpec{
+						InfrastructureRef: &corev1.ObjectReference{
+							APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+							Kind:       "FooCluster",
+							Name:       "my-foo-cluster",
+						},
+					},
+				},
+				azureCluster,
+				machinePool,
+				azureMachinePool,
+			},
+			fail: false,
 		},
 	}
 

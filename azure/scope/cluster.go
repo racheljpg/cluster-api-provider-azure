@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -28,18 +29,25 @@ import (
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	"k8s.io/utils/net"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/bastionhosts"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/loadbalancers"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/natgateways"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privatedns"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/publicips"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/routetables"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/securitygroups"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vnetpeerings"
+	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
+	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/natgateways"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vnetpeerings"
-	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
-	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 // ClusterScopeParams defines the input parameters used to create a new Scope.
@@ -48,6 +56,7 @@ type ClusterScopeParams struct {
 	Client       client.Client
 	Cluster      *clusterv1.Cluster
 	AzureCluster *infrav1.AzureCluster
+	Cache        *ClusterCache
 }
 
 // NewClusterScope creates a new Scope from the supplied parameters.
@@ -79,6 +88,10 @@ func NewClusterScope(ctx context.Context, params ClusterScopeParams) (*ClusterSc
 		}
 	}
 
+	if params.Cache == nil {
+		params.Cache = &ClusterCache{}
+	}
+
 	helper, err := patch.NewHelper(params.AzureCluster, params.Client)
 	if err != nil {
 		return nil, errors.Errorf("failed to init patch helper: %v", err)
@@ -90,6 +103,7 @@ func NewClusterScope(ctx context.Context, params ClusterScopeParams) (*ClusterSc
 		Cluster:      params.Cluster,
 		AzureCluster: params.AzureCluster,
 		patchHelper:  helper,
+		cache:        params.Cache,
 	}, nil
 }
 
@@ -97,10 +111,16 @@ func NewClusterScope(ctx context.Context, params ClusterScopeParams) (*ClusterSc
 type ClusterScope struct {
 	Client      client.Client
 	patchHelper *patch.Helper
+	cache       *ClusterCache
 
 	AzureClients
 	Cluster      *clusterv1.Cluster
 	AzureCluster *infrav1.AzureCluster
+}
+
+// ClusterCache stores ClusterCache data locally so we don't have to hit the API multiple times within the same reconcile loop.
+type ClusterCache struct {
+	isVnetManaged *bool
 }
 
 // BaseURI returns the Azure ResourceManagerEndpoint.
@@ -114,48 +134,91 @@ func (s *ClusterScope) Authorizer() autorest.Authorizer {
 }
 
 // PublicIPSpecs returns the public IP specs.
-func (s *ClusterScope) PublicIPSpecs() []azure.PublicIPSpec {
-	var publicIPSpecs []azure.PublicIPSpec
+func (s *ClusterScope) PublicIPSpecs() []azure.ResourceSpecGetter {
+	var publicIPSpecs []azure.ResourceSpecGetter
 
 	// Public IP specs for control plane lb
-	var controlPlaneOutboundIPSpecs []azure.PublicIPSpec
+	var controlPlaneOutboundIPSpecs []azure.ResourceSpecGetter
 	if s.IsAPIServerPrivate() {
 		// Public IP specs for control plane outbound lb
 		if s.ControlPlaneOutboundLB() != nil {
-			controlPlaneOutboundIPSpecs = s.getOutboundLBPublicIPSpecs(s.ControlPlaneOutboundLB(), azure.GenerateControlPlaneOutboundIPName)
+			for _, ip := range s.ControlPlaneOutboundLB().FrontendIPs {
+				controlPlaneOutboundIPSpecs = append(controlPlaneOutboundIPSpecs, &publicips.PublicIPSpec{
+					Name:           ip.PublicIP.Name,
+					ResourceGroup:  s.ResourceGroup(),
+					ClusterName:    s.ClusterName(),
+					DNSName:        "",    // Set to default value
+					IsIPv6:         false, // Set to default value
+					Location:       s.Location(),
+					FailureDomains: s.FailureDomains(),
+					AdditionalTags: s.AdditionalTags(),
+				})
+			}
 		}
 	} else {
-		controlPlaneOutboundIPSpecs = []azure.PublicIPSpec{{
-			Name:    s.APIServerPublicIP().Name,
-			DNSName: s.APIServerPublicIP().DNSName,
-			IsIPv6:  false, // currently azure requires a ipv4 lb rule to enable ipv6
-		}}
+		controlPlaneOutboundIPSpecs = []azure.ResourceSpecGetter{
+			&publicips.PublicIPSpec{
+				Name:           s.APIServerPublicIP().Name,
+				ResourceGroup:  s.ResourceGroup(),
+				DNSName:        s.APIServerPublicIP().DNSName,
+				IsIPv6:         false, // Currently azure requires an IPv4 lb rule to enable IPv6
+				ClusterName:    s.ClusterName(),
+				Location:       s.Location(),
+				FailureDomains: s.FailureDomains(),
+				AdditionalTags: s.AdditionalTags(),
+				IPTags:         s.APIServerPublicIP().IPTags,
+			},
+		}
 	}
 	publicIPSpecs = append(publicIPSpecs, controlPlaneOutboundIPSpecs...)
 
 	// Public IP specs for node outbound lb
 	if s.NodeOutboundLB() != nil {
-		nodeOutboundIPSpecs := s.getOutboundLBPublicIPSpecs(s.NodeOutboundLB(), azure.GenerateNodeOutboundIPName)
-		publicIPSpecs = append(publicIPSpecs, nodeOutboundIPSpecs...)
+		for _, ip := range s.NodeOutboundLB().FrontendIPs {
+			publicIPSpecs = append(publicIPSpecs, &publicips.PublicIPSpec{
+				Name:           ip.PublicIP.Name,
+				ResourceGroup:  s.ResourceGroup(),
+				ClusterName:    s.ClusterName(),
+				DNSName:        "",    // Set to default value
+				IsIPv6:         false, // Set to default value
+				Location:       s.Location(),
+				FailureDomains: s.FailureDomains(),
+				AdditionalTags: s.AdditionalTags(),
+			})
+		}
 	}
 
 	// Public IP specs for node NAT gateways
-	var nodeNatGatewayIPSpecs []azure.PublicIPSpec
+	var nodeNatGatewayIPSpecs []azure.ResourceSpecGetter
 	for _, subnet := range s.NodeSubnets() {
 		if subnet.IsNatGatewayEnabled() {
-			nodeNatGatewayIPSpecs = append(nodeNatGatewayIPSpecs, azure.PublicIPSpec{
-				Name:    subnet.NatGateway.NatGatewayIP.Name,
-				DNSName: subnet.NatGateway.NatGatewayIP.DNSName,
+			nodeNatGatewayIPSpecs = append(nodeNatGatewayIPSpecs, &publicips.PublicIPSpec{
+				Name:           subnet.NatGateway.NatGatewayIP.Name,
+				ResourceGroup:  s.ResourceGroup(),
+				DNSName:        subnet.NatGateway.NatGatewayIP.DNSName,
+				IsIPv6:         false, // Public IP is IPv4 by default
+				ClusterName:    s.ClusterName(),
+				Location:       s.Location(),
+				FailureDomains: s.FailureDomains(),
+				AdditionalTags: s.AdditionalTags(),
+				IPTags:         subnet.NatGateway.NatGatewayIP.IPTags,
 			})
 		}
 		publicIPSpecs = append(publicIPSpecs, nodeNatGatewayIPSpecs...)
 	}
 
-	if s.AzureCluster.Spec.BastionSpec.AzureBastion != nil {
+	if azureBastion := s.AzureBastion(); azureBastion != nil {
 		// public IP for Azure Bastion.
-		azureBastionPublicIP := azure.PublicIPSpec{
-			Name:    s.AzureCluster.Spec.BastionSpec.AzureBastion.PublicIP.Name,
-			DNSName: s.AzureCluster.Spec.BastionSpec.AzureBastion.PublicIP.DNSName,
+		azureBastionPublicIP := &publicips.PublicIPSpec{
+			Name:           azureBastion.PublicIP.Name,
+			ResourceGroup:  s.ResourceGroup(),
+			DNSName:        azureBastion.PublicIP.DNSName,
+			IsIPv6:         false, // Public IP is IPv4 by default
+			ClusterName:    s.ClusterName(),
+			Location:       s.Location(),
+			FailureDomains: s.FailureDomains(),
+			AdditionalTags: s.AdditionalTags(),
+			IPTags:         azureBastion.PublicIP.IPTags,
 		}
 		publicIPSpecs = append(publicIPSpecs, azureBastionPublicIP)
 	}
@@ -164,11 +227,17 @@ func (s *ClusterScope) PublicIPSpecs() []azure.PublicIPSpec {
 }
 
 // LBSpecs returns the load balancer specs.
-func (s *ClusterScope) LBSpecs() []azure.LBSpec {
-	specs := []azure.LBSpec{
-		{
+func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
+	specs := []azure.ResourceSpecGetter{
+		&loadbalancers.LBSpec{
 			// API Server LB
 			Name:                 s.APIServerLB().Name,
+			ResourceGroup:        s.ResourceGroup(),
+			SubscriptionID:       s.SubscriptionID(),
+			ClusterName:          s.ClusterName(),
+			Location:             s.Location(),
+			VNetName:             s.Vnet().Name,
+			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			SubnetName:           s.ControlPlaneSubnet().Name,
 			FrontendIPConfigs:    s.APIServerLB().FrontendIPs,
 			APIServerPort:        s.APIServerPort(),
@@ -177,48 +246,69 @@ func (s *ClusterScope) LBSpecs() []azure.LBSpec {
 			Role:                 infrav1.APIServerRole,
 			BackendPoolName:      s.APIServerLBPoolName(s.APIServerLB().Name),
 			IdleTimeoutInMinutes: s.APIServerLB().IdleTimeoutInMinutes,
+			AdditionalTags:       s.AdditionalTags(),
 		},
 	}
 
 	// Node outbound LB
 	if s.NodeOutboundLB() != nil {
-		specs = append(specs, azure.LBSpec{
-			Name:                 s.NodeOutboundLBName(),
+		specs = append(specs, &loadbalancers.LBSpec{
+			Name:                 s.NodeOutboundLB().Name,
+			ResourceGroup:        s.ResourceGroup(),
+			SubscriptionID:       s.SubscriptionID(),
+			ClusterName:          s.ClusterName(),
+			Location:             s.Location(),
+			VNetName:             s.Vnet().Name,
+			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			FrontendIPConfigs:    s.NodeOutboundLB().FrontendIPs,
 			Type:                 s.NodeOutboundLB().Type,
 			SKU:                  s.NodeOutboundLB().SKU,
-			BackendPoolName:      s.OutboundPoolName(s.NodeOutboundLBName()),
+			BackendPoolName:      s.OutboundPoolName(s.NodeOutboundLB().Name),
 			IdleTimeoutInMinutes: s.NodeOutboundLB().IdleTimeoutInMinutes,
 			Role:                 infrav1.NodeOutboundRole,
+			AdditionalTags:       s.AdditionalTags(),
 		})
 	}
 
 	// Control Plane Outbound LB
 	if s.ControlPlaneOutboundLB() != nil {
-		specs = append(specs, azure.LBSpec{
+		specs = append(specs, &loadbalancers.LBSpec{
 			Name:                 s.ControlPlaneOutboundLB().Name,
+			ResourceGroup:        s.ResourceGroup(),
+			SubscriptionID:       s.SubscriptionID(),
+			ClusterName:          s.ClusterName(),
+			Location:             s.Location(),
+			VNetName:             s.Vnet().Name,
+			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			FrontendIPConfigs:    s.ControlPlaneOutboundLB().FrontendIPs,
 			Type:                 s.ControlPlaneOutboundLB().Type,
 			SKU:                  s.ControlPlaneOutboundLB().SKU,
 			BackendPoolName:      s.OutboundPoolName(azure.GenerateControlPlaneOutboundLBName(s.ClusterName())),
 			IdleTimeoutInMinutes: s.NodeOutboundLB().IdleTimeoutInMinutes,
 			Role:                 infrav1.ControlPlaneOutboundRole,
+			AdditionalTags:       s.AdditionalTags(),
 		})
 	}
 
 	return specs
 }
 
-// RouteTableSpecs returns the node route table.
-func (s *ClusterScope) RouteTableSpecs() []azure.RouteTableSpec {
-	var routetables []azure.RouteTableSpec
+// RouteTableSpecs returns the subnet route tables.
+func (s *ClusterScope) RouteTableSpecs() []azure.ResourceSpecGetter {
+	var specs []azure.ResourceSpecGetter
 	for _, subnet := range s.AzureCluster.Spec.NetworkSpec.Subnets {
 		if subnet.RouteTable.Name != "" {
-			routetables = append(routetables, azure.RouteTableSpec{Name: subnet.RouteTable.Name, Subnet: subnet})
+			specs = append(specs, &routetables.RouteTableSpec{
+				Name:           subnet.RouteTable.Name,
+				Location:       s.Location(),
+				ResourceGroup:  s.ResourceGroup(),
+				ClusterName:    s.ClusterName(),
+				AdditionalTags: s.AdditionalTags(),
+			})
 		}
 	}
 
-	return routetables
+	return specs
 }
 
 // NatGatewaySpecs returns the node NAT gateway.
@@ -236,9 +326,11 @@ func (s *ClusterScope) NatGatewaySpecs() []azure.ResourceSpecGetter {
 					ResourceGroup:  s.ResourceGroup(),
 					SubscriptionID: s.SubscriptionID(),
 					Location:       s.Location(),
+					ClusterName:    s.ClusterName(),
 					NatGatewayIP: infrav1.PublicIPSpec{
 						Name: subnet.NatGateway.NatGatewayIP.Name,
 					},
+					AdditionalTags: s.AdditionalTags(),
 				})
 			}
 		}
@@ -248,12 +340,16 @@ func (s *ClusterScope) NatGatewaySpecs() []azure.ResourceSpecGetter {
 }
 
 // NSGSpecs returns the security group specs.
-func (s *ClusterScope) NSGSpecs() []azure.NSGSpec {
-	nsgspecs := make([]azure.NSGSpec, len(s.AzureCluster.Spec.NetworkSpec.Subnets))
+func (s *ClusterScope) NSGSpecs() []azure.ResourceSpecGetter {
+	nsgspecs := make([]azure.ResourceSpecGetter, len(s.AzureCluster.Spec.NetworkSpec.Subnets))
 	for i, subnet := range s.AzureCluster.Spec.NetworkSpec.Subnets {
-		nsgspecs[i] = azure.NSGSpec{
-			Name:          subnet.SecurityGroup.Name,
-			SecurityRules: subnet.SecurityGroup.SecurityRules,
+		nsgspecs[i] = &securitygroups.NSGSpec{
+			Name:           subnet.SecurityGroup.Name,
+			SecurityRules:  subnet.SecurityGroup.SecurityRules,
+			ResourceGroup:  s.ResourceGroup(),
+			Location:       s.Location(),
+			ClusterName:    s.ClusterName(),
+			AdditionalTags: s.AdditionalTags(),
 		}
 	}
 
@@ -261,32 +357,41 @@ func (s *ClusterScope) NSGSpecs() []azure.NSGSpec {
 }
 
 // SubnetSpecs returns the subnets specs.
-func (s *ClusterScope) SubnetSpecs() []azure.SubnetSpec {
+func (s *ClusterScope) SubnetSpecs() []azure.ResourceSpecGetter {
 	numberOfSubnets := len(s.AzureCluster.Spec.NetworkSpec.Subnets)
-	if s.AzureCluster.Spec.BastionSpec.AzureBastion != nil {
+	if s.IsAzureBastionEnabled() {
 		numberOfSubnets++
 	}
 
-	subnetSpecs := make([]azure.SubnetSpec, 0, numberOfSubnets)
+	subnetSpecs := make([]azure.ResourceSpecGetter, 0, numberOfSubnets)
+
 	for _, subnet := range s.AzureCluster.Spec.NetworkSpec.Subnets {
-		subnetSpec := azure.SubnetSpec{
+		subnetSpec := &subnets.SubnetSpec{
 			Name:              subnet.Name,
+			ResourceGroup:     s.ResourceGroup(),
+			SubscriptionID:    s.SubscriptionID(),
 			CIDRs:             subnet.CIDRBlocks,
 			VNetName:          s.Vnet().Name,
-			SecurityGroupName: subnet.SecurityGroup.Name,
+			VNetResourceGroup: s.Vnet().ResourceGroup,
+			IsVNetManaged:     s.IsVnetManaged(),
 			RouteTableName:    subnet.RouteTable.Name,
+			SecurityGroupName: subnet.SecurityGroup.Name,
 			Role:              subnet.Role,
 			NatGatewayName:    subnet.NatGateway.Name,
 		}
 		subnetSpecs = append(subnetSpecs, subnetSpec)
 	}
 
-	if s.AzureCluster.Spec.BastionSpec.AzureBastion != nil {
+	if s.IsAzureBastionEnabled() {
 		azureBastionSubnet := s.AzureCluster.Spec.BastionSpec.AzureBastion.Subnet
-		subnetSpecs = append(subnetSpecs, azure.SubnetSpec{
+		subnetSpecs = append(subnetSpecs, &subnets.SubnetSpec{
 			Name:              azureBastionSubnet.Name,
+			ResourceGroup:     s.ResourceGroup(),
+			SubscriptionID:    s.SubscriptionID(),
 			CIDRs:             azureBastionSubnet.CIDRBlocks,
 			VNetName:          s.Vnet().Name,
+			VNetResourceGroup: s.Vnet().ResourceGroup,
+			IsVNetManaged:     s.IsVnetManaged(),
 			SecurityGroupName: azureBastionSubnet.SecurityGroup.Name,
 			RouteTableName:    azureBastionSubnet.RouteTable.Name,
 			Role:              azureBastionSubnet.Role,
@@ -334,59 +439,94 @@ func (s *ClusterScope) VnetPeeringSpecs() []azure.ResourceSpecGetter {
 }
 
 // VNetSpec returns the virtual network spec.
-func (s *ClusterScope) VNetSpec() azure.VNetSpec {
-	return azure.VNetSpec{
-		ResourceGroup: s.Vnet().ResourceGroup,
-		Name:          s.Vnet().Name,
-		CIDRs:         s.Vnet().CIDRBlocks,
+func (s *ClusterScope) VNetSpec() azure.ResourceSpecGetter {
+	return &virtualnetworks.VNetSpec{
+		ResourceGroup:  s.Vnet().ResourceGroup,
+		Name:           s.Vnet().Name,
+		CIDRs:          s.Vnet().CIDRBlocks,
+		Location:       s.Location(),
+		ClusterName:    s.ClusterName(),
+		AdditionalTags: s.AdditionalTags(),
 	}
 }
 
 // PrivateDNSSpec returns the private dns zone spec.
-func (s *ClusterScope) PrivateDNSSpec() *azure.PrivateDNSSpec {
-	var specs *azure.PrivateDNSSpec
+func (s *ClusterScope) PrivateDNSSpec() (zoneSpec azure.ResourceSpecGetter, linkSpec, recordSpec []azure.ResourceSpecGetter) {
 	if s.IsAPIServerPrivate() {
-		links := make([]azure.PrivateDNSLinkSpec, 1+len(s.Vnet().Peerings))
-		links[0] = azure.PrivateDNSLinkSpec{
-			VNetName:          s.Vnet().Name,
+		zone := privatedns.ZoneSpec{
+			Name:           s.GetPrivateDNSZoneName(),
+			ResourceGroup:  s.ResourceGroup(),
+			ClusterName:    s.ClusterName(),
+			AdditionalTags: s.AdditionalTags(),
+		}
+
+		links := make([]azure.ResourceSpecGetter, 1+len(s.Vnet().Peerings))
+		links[0] = privatedns.LinkSpec{
+			Name:              azure.GenerateVNetLinkName(s.Vnet().Name),
+			ZoneName:          s.GetPrivateDNSZoneName(),
+			SubscriptionID:    s.SubscriptionID(),
 			VNetResourceGroup: s.Vnet().ResourceGroup,
-			LinkName:          azure.GenerateVNetLinkName(s.Vnet().Name),
+			VNetName:          s.Vnet().Name,
+			ResourceGroup:     s.ResourceGroup(),
+			ClusterName:       s.ClusterName(),
+			AdditionalTags:    s.AdditionalTags(),
 		}
 		for i, peering := range s.Vnet().Peerings {
-			links[i+1] = azure.PrivateDNSLinkSpec{
-				VNetName:          peering.RemoteVnetName,
+			links[i+1] = privatedns.LinkSpec{
+				Name:              azure.GenerateVNetLinkName(peering.RemoteVnetName),
+				ZoneName:          s.GetPrivateDNSZoneName(),
+				SubscriptionID:    s.SubscriptionID(),
 				VNetResourceGroup: peering.ResourceGroup,
-				LinkName:          azure.GenerateVNetLinkName(peering.RemoteVnetName),
+				VNetName:          peering.RemoteVnetName,
+				ResourceGroup:     s.ResourceGroup(),
+				ClusterName:       s.ClusterName(),
+				AdditionalTags:    s.AdditionalTags(),
 			}
 		}
-		specs = &azure.PrivateDNSSpec{
-			ZoneName: s.GetPrivateDNSZoneName(),
-			Links:    links,
-			Records: []infrav1.AddressRecord{
-				{
-					Hostname: azure.PrivateAPIServerHostname,
-					IP:       s.APIServerPrivateIP(),
-				},
+
+		records := make([]azure.ResourceSpecGetter, 1)
+		records[0] = privatedns.RecordSpec{
+			Record: infrav1.AddressRecord{
+				Hostname: azure.PrivateAPIServerHostname,
+				IP:       s.APIServerPrivateIP(),
 			},
+			ZoneName:      s.GetPrivateDNSZoneName(),
+			ResourceGroup: s.ResourceGroup(),
 		}
+
+		return zone, links, records
 	}
 
-	return specs
+	return nil, nil, nil
 }
 
-// BastionSpec returns the bastion spec.
-func (s *ClusterScope) BastionSpec() azure.BastionSpec {
-	var ret azure.BastionSpec
-	if s.AzureCluster.Spec.BastionSpec.AzureBastion != nil {
-		ret.AzureBastion = &azure.AzureBastionSpec{
-			Name:         s.AzureCluster.Spec.BastionSpec.AzureBastion.Name,
-			SubnetSpec:   s.AzureCluster.Spec.BastionSpec.AzureBastion.Subnet,
-			PublicIPName: s.AzureCluster.Spec.BastionSpec.AzureBastion.PublicIP.Name,
-			VNetName:     s.Vnet().Name,
+// IsAzureBastionEnabled returns true if the azure bastion is enabled.
+func (s *ClusterScope) IsAzureBastionEnabled() bool {
+	return s.AzureCluster.Spec.BastionSpec.AzureBastion != nil
+}
+
+// AzureBastion returns the cluster AzureBastion.
+func (s *ClusterScope) AzureBastion() *infrav1.AzureBastion {
+	return s.AzureCluster.Spec.BastionSpec.AzureBastion
+}
+
+// AzureBastionSpec returns the bastion spec.
+func (s *ClusterScope) AzureBastionSpec() azure.ResourceSpecGetter {
+	if s.IsAzureBastionEnabled() {
+		subnetID := azure.SubnetID(s.SubscriptionID(), s.ResourceGroup(), s.Vnet().Name, s.AzureBastion().Subnet.Name)
+		publicIPID := azure.PublicIPID(s.SubscriptionID(), s.ResourceGroup(), s.AzureBastion().PublicIP.Name)
+
+		return &bastionhosts.AzureBastionSpec{
+			Name:          s.AzureBastion().Name,
+			ResourceGroup: s.ResourceGroup(),
+			Location:      s.Location(),
+			ClusterName:   s.ClusterName(),
+			SubnetID:      subnetID,
+			PublicIPID:    publicIPID,
 		}
 	}
 
-	return ret
+	return nil
 }
 
 // Vnet returns the cluster Vnet.
@@ -396,7 +536,12 @@ func (s *ClusterScope) Vnet() *infrav1.VnetSpec {
 
 // IsVnetManaged returns true if the vnet is managed.
 func (s *ClusterScope) IsVnetManaged() bool {
-	return s.Vnet().ID == "" || s.Vnet().Tags.HasOwned(s.ClusterName())
+	if s.cache.isVnetManaged != nil {
+		return to.Bool(s.cache.isVnetManaged)
+	}
+	isVnetManaged := s.Vnet().ID == "" || s.Vnet().Tags.HasOwned(s.ClusterName())
+	s.cache.isVnetManaged = to.BoolPtr(isVnetManaged)
+	return isVnetManaged
 }
 
 // IsIPv6Enabled returns true if IPv6 is enabled.
@@ -453,6 +598,7 @@ func (s *ClusterScope) SetSubnet(subnetSpec infrav1.SubnetSpec) {
 	}
 }
 
+// SetNatGatewayIDInSubnets sets the NAT Gateway ID in the subnets with the same name.
 func (s *ClusterScope) SetNatGatewayIDInSubnets(name string, id string) {
 	for _, subnet := range s.Subnets() {
 		if subnet.NatGateway.Name == name {
@@ -460,6 +606,20 @@ func (s *ClusterScope) SetNatGatewayIDInSubnets(name string, id string) {
 			s.SetSubnet(subnet)
 		}
 	}
+}
+
+// UpdateSubnetCIDRs updates the subnet CIDRs for the subnet with the same name.
+func (s *ClusterScope) UpdateSubnetCIDRs(name string, cidrBlocks []string) {
+	subnetSpecInfra := s.Subnet(name)
+	subnetSpecInfra.CIDRBlocks = cidrBlocks
+	s.SetSubnet(subnetSpecInfra)
+}
+
+// UpdateSubnetID updates the subnet ID for the subnet with the same name.
+func (s *ClusterScope) UpdateSubnetID(name string, id string) {
+	subnetSpecInfra := s.Subnet(name)
+	subnetSpecInfra.ID = id
+	s.SetSubnet(subnetSpecInfra)
 }
 
 // ControlPlaneRouteTable returns the cluster controlplane routetable.
@@ -514,11 +674,6 @@ func (s *ClusterScope) GetPrivateDNSZoneName() string {
 // APIServerLBPoolName returns the API Server LB backend pool name.
 func (s *ClusterScope) APIServerLBPoolName(loadBalancerName string) string {
 	return azure.GenerateBackendAddressPoolName(loadBalancerName)
-}
-
-// NodeOutboundLBName returns the name of the node outbound LB.
-func (s *ClusterScope) NodeOutboundLBName() string {
-	return s.ClusterName()
 }
 
 // OutboundLBName returns the name of the outbound LB.
@@ -579,7 +734,7 @@ func (s *ClusterScope) CloudProviderConfigOverrides() *infrav1.CloudProviderConf
 // GenerateFQDN generates a fully qualified domain name, based on a hash, cluster name and cluster location.
 func (s *ClusterScope) GenerateFQDN(ipName string) string {
 	h := fnv.New32a()
-	if _, err := h.Write([]byte(fmt.Sprintf("%s/%s/%s", s.SubscriptionID(), s.ResourceGroup(), ipName))); err != nil {
+	if _, err := fmt.Fprintf(h, "%s/%s/%s", s.SubscriptionID(), s.ResourceGroup(), ipName); err != nil {
 		return ""
 	}
 	hash := fmt.Sprintf("%x", h.Sum32())
@@ -587,10 +742,10 @@ func (s *ClusterScope) GenerateFQDN(ipName string) string {
 }
 
 // GenerateLegacyFQDN generates an IP name and a fully qualified domain name, based on a hash, cluster name and cluster location.
-// DEPRECATED: use GenerateFQDN instead.
-func (s *ClusterScope) GenerateLegacyFQDN() (string, string) {
+// Deprecated: use GenerateFQDN instead.
+func (s *ClusterScope) GenerateLegacyFQDN() (ip string, domain string) {
 	h := fnv.New32a()
-	if _, err := h.Write([]byte(fmt.Sprintf("%s/%s/%s", s.SubscriptionID(), s.ResourceGroup(), s.ClusterName()))); err != nil {
+	if _, err := fmt.Fprintf(h, "%s/%s/%s", s.SubscriptionID(), s.ResourceGroup(), s.ClusterName()); err != nil {
 		return "", ""
 	}
 	ipName := fmt.Sprintf("%s-%x", s.ClusterName(), h.Sum32())
@@ -607,15 +762,10 @@ func (s *ClusterScope) ListOptionsLabelSelector() client.ListOption {
 
 // PatchObject persists the cluster configuration and status.
 func (s *ClusterScope) PatchObject(ctx context.Context) error {
-	conditions.SetSummary(s.AzureCluster,
-		conditions.WithConditions(
-			infrav1.ResourceGroupReadyCondition,
-			infrav1.NetworkInfrastructureReadyCondition,
-			infrav1.VnetPeeringReadyCondition,
-			infrav1.DisksReadyCondition,
-			infrav1.NATGatewaysReadyCondition,
-		),
-	)
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.ClusterScope.PatchObject")
+	defer done()
+
+	conditions.SetSummary(s.AzureCluster)
 
 	return s.patchHelper.Patch(
 		ctx,
@@ -623,10 +773,19 @@ func (s *ClusterScope) PatchObject(ctx context.Context) error {
 		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
 			clusterv1.ReadyCondition,
 			infrav1.ResourceGroupReadyCondition,
+			infrav1.RouteTablesReadyCondition,
 			infrav1.NetworkInfrastructureReadyCondition,
 			infrav1.VnetPeeringReadyCondition,
 			infrav1.DisksReadyCondition,
 			infrav1.NATGatewaysReadyCondition,
+			infrav1.LoadBalancersReadyCondition,
+			infrav1.BastionHostReadyCondition,
+			infrav1.VNetReadyCondition,
+			infrav1.SubnetsReadyCondition,
+			infrav1.SecurityGroupsReadyCondition,
+			infrav1.PrivateDNSZoneReadyCondition,
+			infrav1.PrivateDNSLinkReadyCondition,
+			infrav1.PrivateDNSRecordReadyCondition,
 		}})
 }
 
@@ -676,6 +835,9 @@ func (s *ClusterScope) FailureDomains() []string {
 		fds[i] = id
 		i++
 	}
+
+	sort.Strings(fds)
+
 	return fds
 }
 
@@ -722,7 +884,6 @@ func (s *ClusterScope) SetDNSName() {
 		ip, dns := s.GenerateLegacyFQDN()
 		lb = &infrav1.LoadBalancerSpec{
 			Name: lbName,
-			SKU:  infrav1.SKUStandard,
 			FrontendIPs: []infrav1.FrontendIP{
 				{
 					Name: azure.GenerateFrontendIPConfigName(lbName),
@@ -732,7 +893,10 @@ func (s *ClusterScope) SetDNSName() {
 					},
 				},
 			},
-			Type: infrav1.Public,
+			LoadBalancerClassSpec: infrav1.LoadBalancerClassSpec{
+				SKU:  infrav1.SKUStandard,
+				Type: infrav1.Public,
+			},
 		}
 		lb.DeepCopyInto(s.APIServerLB())
 	}
@@ -743,27 +907,6 @@ func (s *ClusterScope) SetDNSName() {
 	}
 }
 
-// getOutboundLBPublicIPSpecs returns the public ip specs for a LoadBalancerSpec based on the number of frontend ips configured.
-func (s *ClusterScope) getOutboundLBPublicIPSpecs(outboundLB *infrav1.LoadBalancerSpec, generateOutboundIPName func(string) string) []azure.PublicIPSpec {
-	var outboundIPSpecs []azure.PublicIPSpec
-	loadBalancerNodeOutboundIPs := outboundLB.FrontendIPsCount
-	if loadBalancerNodeOutboundIPs == nil || *loadBalancerNodeOutboundIPs == 0 {
-		// do nothing
-	} else if *loadBalancerNodeOutboundIPs == 1 {
-		outboundIPSpecs = append(outboundIPSpecs, azure.PublicIPSpec{
-			Name: generateOutboundIPName(s.ClusterName()),
-		})
-	} else {
-		for i := 0; i < int(*loadBalancerNodeOutboundIPs); i++ {
-			outboundIPSpecs = append(outboundIPSpecs, azure.PublicIPSpec{
-				Name: azure.WithIndex(generateOutboundIPName(s.ClusterName()), i+1),
-			})
-		}
-	}
-
-	return outboundIPSpecs
-}
-
 // SetLongRunningOperationState will set the future on the AzureCluster status to allow the resource to continue
 // in the next reconciliation.
 func (s *ClusterScope) SetLongRunningOperationState(future *infrav1.Future) {
@@ -771,13 +914,13 @@ func (s *ClusterScope) SetLongRunningOperationState(future *infrav1.Future) {
 }
 
 // GetLongRunningOperationState will get the future on the AzureCluster status.
-func (s *ClusterScope) GetLongRunningOperationState(name, service string) *infrav1.Future {
-	return futures.Get(s.AzureCluster, name, service)
+func (s *ClusterScope) GetLongRunningOperationState(name, service, futureType string) *infrav1.Future {
+	return futures.Get(s.AzureCluster, name, service, futureType)
 }
 
 // DeleteLongRunningOperationState will delete the future from the AzureCluster status.
-func (s *ClusterScope) DeleteLongRunningOperationState(name, service string) {
-	futures.Delete(s.AzureCluster, name, service)
+func (s *ClusterScope) DeleteLongRunningOperationState(name, service, futureType string) {
+	futures.Delete(s.AzureCluster, name, service, futureType)
 }
 
 // UpdateDeleteStatus updates a condition on the AzureCluster status after a DELETE operation.
@@ -785,8 +928,6 @@ func (s *ClusterScope) UpdateDeleteStatus(condition clusterv1.ConditionType, ser
 	switch {
 	case err == nil:
 		conditions.MarkFalse(s.AzureCluster, condition, infrav1.DeletedReason, clusterv1.ConditionSeverityInfo, "%s successfully deleted", service)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(s.AzureCluster, condition, infrav1.DeletingReason, clusterv1.ConditionSeverityInfo, "%s deleting", service)
 	default:
@@ -799,8 +940,6 @@ func (s *ClusterScope) UpdatePutStatus(condition clusterv1.ConditionType, servic
 	switch {
 	case err == nil:
 		conditions.MarkTrue(s.AzureCluster, condition)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(s.AzureCluster, condition, infrav1.CreatingReason, clusterv1.ConditionSeverityInfo, "%s creating or updating", service)
 	default:
@@ -813,8 +952,6 @@ func (s *ClusterScope) UpdatePatchStatus(condition clusterv1.ConditionType, serv
 	switch {
 	case err == nil:
 		conditions.MarkTrue(s.AzureCluster, condition)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(s.AzureCluster, condition, infrav1.UpdatingReason, clusterv1.ConditionSeverityInfo, "%s updating", service)
 	default:
@@ -826,7 +963,7 @@ func (s *ClusterScope) UpdatePatchStatus(condition clusterv1.ConditionType, serv
 func (s *ClusterScope) AnnotationJSON(annotation string) (map[string]interface{}, error) {
 	out := map[string]interface{}{}
 	jsonAnnotation := s.AzureCluster.GetAnnotations()[annotation]
-	if len(jsonAnnotation) == 0 {
+	if jsonAnnotation == "" {
 		return out, nil
 	}
 	err := json.Unmarshal([]byte(jsonAnnotation), &out)
@@ -863,7 +1000,7 @@ func (s *ClusterScope) TagsSpecs() []azure.TagsSpec {
 		{
 			Scope:      azure.ResourceGroupID(s.SubscriptionID(), s.ResourceGroup()),
 			Tags:       s.AdditionalTags(),
-			Annotation: infrav1.RGTagsLastAppliedAnnotation,
+			Annotation: azure.RGTagsLastAppliedAnnotation,
 		},
 	}
 }

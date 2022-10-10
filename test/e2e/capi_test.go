@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -20,15 +21,16 @@ package e2e
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/blang/semver"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	e2e_namespace "sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/namespace"
 	clusterctl "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
@@ -44,6 +46,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 	var (
 		ctx               = context.TODO()
 		identityNamespace *corev1.Namespace
+		specTimes         = map[string]time.Time{}
 	)
 	BeforeEach(func() {
 		Expect(e2eConfig.Variables).To(HaveKey(capi_e2e.CNIPath))
@@ -86,9 +89,12 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
 		Expect(os.Setenv(ClusterIdentitySecretName, IdentitySecretName)).To(Succeed())
 		Expect(os.Setenv(ClusterIdentitySecretNamespace, identityNamespace.Name)).To(Succeed())
+
+		logCheckpoint(specTimes)
 	})
 
 	AfterEach(func() {
+		CheckTestBeforeCleanup()
 		redactLogs()
 
 		Expect(os.Unsetenv(AzureResourceGroup)).To(Succeed())
@@ -96,6 +102,8 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 		Expect(os.Unsetenv(ClusterIdentityName)).To(Succeed())
 		Expect(os.Unsetenv(ClusterIdentitySecretName)).To(Succeed())
 		Expect(os.Unsetenv(ClusterIdentitySecretNamespace)).To(Succeed())
+
+		logCheckpoint(specTimes)
 	})
 
 	Context("Running the quick-start spec", func() {
@@ -106,33 +114,6 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				BootstrapClusterProxy: bootstrapClusterProxy,
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
-			}
-		})
-	})
-
-	Context("Running the KCP upgrade spec in a HA cluster [K8s-Upgrade]", func() {
-		capi_e2e.KCPUpgradeSpec(context.TODO(), func() capi_e2e.KCPUpgradeSpecInput {
-			return capi_e2e.KCPUpgradeSpecInput{
-				E2EConfig:                e2eConfig,
-				ClusterctlConfigPath:     clusterctlConfigPath,
-				BootstrapClusterProxy:    bootstrapClusterProxy,
-				ArtifactFolder:           artifactFolder,
-				ControlPlaneMachineCount: 3,
-				SkipCleanup:              skipCleanup,
-			}
-		})
-	})
-
-	Context("Running the KCP upgrade spec in a HA cluster using scale in rollout [K8s-Upgrade]", func() {
-		capi_e2e.KCPUpgradeSpec(context.TODO(), func() capi_e2e.KCPUpgradeSpecInput {
-			return capi_e2e.KCPUpgradeSpecInput{
-				E2EConfig:                e2eConfig,
-				ClusterctlConfigPath:     clusterctlConfigPath,
-				BootstrapClusterProxy:    bootstrapClusterProxy,
-				ArtifactFolder:           artifactFolder,
-				ControlPlaneMachineCount: 3,
-				SkipCleanup:              skipCleanup,
-				Flavor:                   "kcp-scale-in",
 			}
 		})
 	})
@@ -225,33 +206,6 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 
 	if os.Getenv("LOCAL_ONLY") != "true" {
 		Context("API Version Upgrade", func() {
-			Context("upgrade from v1alpha3 to v1beta1, and scale workload clusters created in v1alpha3 ", func() {
-				BeforeEach(func() {
-					// Unset resource group and vnet env variables, since we capi test creates 2 clusters,
-					// and will result in both the clusters using the same vnet and resource group.
-					Expect(os.Unsetenv(AzureResourceGroup)).To(Succeed())
-					Expect(os.Unsetenv(AzureVNetName)).To(Succeed())
-
-					// Set base64 encoded values for v1alpha3 cluster.
-					Expect(os.Setenv("AZURE_CLIENT_ID_B64", base64.StdEncoding.EncodeToString([]byte(os.Getenv(AzureClientId))))).To(Succeed())
-					Expect(os.Setenv("AZURE_CLIENT_SECRET_B64", base64.StdEncoding.EncodeToString([]byte(os.Getenv(AzureClientSecret))))).To(Succeed())
-					Expect(os.Setenv("AZURE_SUBSCRIPTION_ID_B64", base64.StdEncoding.EncodeToString([]byte(os.Getenv("AZURE_SUBSCRIPTION_ID"))))).To(Succeed())
-					Expect(os.Setenv("AZURE_TENANT_ID_B64", base64.StdEncoding.EncodeToString([]byte(os.Getenv("AZURE_TENANT_ID"))))).To(Succeed())
-
-					// Unset windows specific variables
-					Expect(os.Unsetenv("WINDOWS_WORKER_MACHINE_COUNT")).To(Succeed())
-					Expect(os.Unsetenv("K8S_FEATURE_GATES")).To(Succeed())
-				})
-				capi_e2e.ClusterctlUpgradeSpec(ctx, func() capi_e2e.ClusterctlUpgradeSpecInput {
-					return capi_e2e.ClusterctlUpgradeSpecInput{
-						E2EConfig:             e2eConfig,
-						ClusterctlConfigPath:  clusterctlConfigPath,
-						BootstrapClusterProxy: bootstrapClusterProxy,
-						ArtifactFolder:        artifactFolder,
-						SkipCleanup:           skipCleanup,
-					}
-				})
-			})
 
 			Context("upgrade from v1alpha4 to v1beta1, and scale workload clusters created in v1alpha4", func() {
 				BeforeEach(func() {
@@ -266,14 +220,12 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				})
 				capi_e2e.ClusterctlUpgradeSpec(ctx, func() capi_e2e.ClusterctlUpgradeSpecInput {
 					return capi_e2e.ClusterctlUpgradeSpecInput{
-						E2EConfig:                 e2eConfig,
-						ClusterctlConfigPath:      clusterctlConfigPath,
-						BootstrapClusterProxy:     bootstrapClusterProxy,
-						ArtifactFolder:            artifactFolder,
-						SkipCleanup:               skipCleanup,
-						InitWithProvidersContract: "v1alpha4",
-						InitWithBinary:            "https://github.com/kubernetes-sigs/cluster-api/releases/download/v0.4.4/clusterctl-{OS}-{ARCH}",
-						PreInit:                   getPreInitFunc(ctx),
+						E2EConfig:             e2eConfig,
+						ClusterctlConfigPath:  clusterctlConfigPath,
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						ArtifactFolder:        artifactFolder,
+						SkipCleanup:           skipCleanup,
+						PreInit:               getPreInitFunc(ctx),
 					}
 				})
 			})
@@ -289,6 +241,37 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				SkipConformanceTests:  true,
+			}
+		})
+	})
+
+	Context("Running KCP upgrade in a HA cluster [K8s-Upgrade]", func() {
+		capi_e2e.ClusterUpgradeConformanceSpec(context.TODO(), func() capi_e2e.ClusterUpgradeConformanceSpecInput {
+			return capi_e2e.ClusterUpgradeConformanceSpecInput{
+				E2EConfig:                e2eConfig,
+				ClusterctlConfigPath:     clusterctlConfigPath,
+				BootstrapClusterProxy:    bootstrapClusterProxy,
+				ArtifactFolder:           artifactFolder,
+				ControlPlaneMachineCount: pointer.Int64(3),
+				WorkerMachineCount:       pointer.Int64(0),
+				SkipCleanup:              skipCleanup,
+				SkipConformanceTests:     true,
+			}
+		})
+	})
+
+	Context("Running KCP upgrade in a HA cluster using scale in rollout [K8s-Upgrade]", func() {
+		capi_e2e.ClusterUpgradeConformanceSpec(context.TODO(), func() capi_e2e.ClusterUpgradeConformanceSpecInput {
+			return capi_e2e.ClusterUpgradeConformanceSpecInput{
+				E2EConfig:                e2eConfig,
+				ClusterctlConfigPath:     clusterctlConfigPath,
+				BootstrapClusterProxy:    bootstrapClusterProxy,
+				ArtifactFolder:           artifactFolder,
+				ControlPlaneMachineCount: pointer.Int64(3),
+				WorkerMachineCount:       pointer.Int64(0),
+				SkipCleanup:              skipCleanup,
+				SkipConformanceTests:     true,
+				Flavor:                   pointer.String("kcp-scale-in"),
 			}
 		})
 	})
@@ -312,8 +295,8 @@ func getPreInitFunc(ctx context.Context) func(proxy framework.ClusterProxy) {
 		Expect(err).NotTo(HaveOccurred())
 
 		identityName := e2eConfig.GetVariable(ClusterIdentityName)
-		Expect(os.Setenv(ClusterIdentityName, identityName)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretName, IdentitySecretName)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretNamespace, "default")).NotTo(HaveOccurred())
+		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretName, IdentitySecretName)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretNamespace, "default")).To(Succeed())
 	}
 }

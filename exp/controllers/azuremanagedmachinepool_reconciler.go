@@ -19,23 +19,22 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/pkg/errors"
-
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 type (
 	// azureManagedMachinePoolService contains the services required by the cluster controller.
 	azureManagedMachinePoolService struct {
-		scope         agentpools.ManagedMachinePoolScope
+		scope         agentpools.AgentPoolScope
 		agentPoolsSvc azure.Reconciler
 		scaleSetsSvc  NodeLister
 	}
@@ -74,7 +73,7 @@ func (a *AgentPoolVMSSNotFoundError) Is(target error) bool {
 }
 
 // newAzureManagedMachinePoolService populates all the services based on input scope.
-func newAzureManagedMachinePoolService(scope *scope.ManagedControlPlaneScope) (*azureManagedMachinePoolService, error) {
+func newAzureManagedMachinePoolService(scope *scope.ManagedMachinePoolScope) (*azureManagedMachinePoolService, error) {
 	var authorizer azure.Authorizer = scope
 	if scope.Location() != "" {
 		regionalAuthorizer, err := azure.WithRegionalBaseURI(scope, scope.Location())
@@ -97,7 +96,7 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 	defer done()
 
 	log.Info("reconciling managed machine pool")
-	agentPoolName := s.scope.AgentPoolSpec().Name
+	agentPoolName := s.scope.Name()
 
 	if err := s.agentPoolsSvc.Reconcile(ctx); err != nil {
 		return errors.Wrapf(err, "failed to reconcile machine pool %s", agentPoolName)
@@ -134,7 +133,12 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 
 	var providerIDs = make([]string, len(instances))
 	for i := 0; i < len(instances); i++ {
-		providerIDs[i] = strings.ToLower(azure.ProviderIDPrefix + *instances[i].ID)
+		// Transform the VMSS instance resource representation to conform to the cloud-provider-azure representation
+		providerID, err := azureutil.ConvertResourceGroupNameToLower(azure.ProviderIDPrefix + *instances[i].ID)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse instance ID %s", *instances[i].ID)
+		}
+		providerIDs[i] = providerID
 	}
 
 	s.scope.SetAgentPoolProviderIDList(providerIDs)
@@ -151,7 +155,7 @@ func (s *azureManagedMachinePoolService) Delete(ctx context.Context) error {
 	defer done()
 
 	if err := s.agentPoolsSvc.Delete(ctx); err != nil {
-		return errors.Wrapf(err, "failed to delete machine pool %s", s.scope.AgentPoolSpec().Name)
+		return errors.Wrapf(err, "failed to delete machine pool %s", s.scope.Name())
 	}
 
 	return nil

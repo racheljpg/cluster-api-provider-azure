@@ -20,16 +20,16 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/cluster-api-provider-azure/controllers"
+	"sigs.k8s.io/cluster-api-provider-azure/internal/test/env"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	"sigs.k8s.io/cluster-api-provider-azure/internal/test/env"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -54,7 +54,7 @@ var _ = BeforeSuite(func(done Done) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ctx = log.IntoContext(ctx, testEnv.Log)
+	ctx = log.IntoContext(ctx, logr.New(testEnv.Log))
 
 	Expect((&AzureManagedClusterReconciler{
 		Client:   testEnv,

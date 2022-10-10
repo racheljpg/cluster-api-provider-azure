@@ -33,9 +33,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -122,7 +124,7 @@ func TestMachinePoolScope_SetBootstrapConditions(t *testing.T) {
 				g.Expect(conditions.IsFalse(amp, infrav1.BootstrapSucceededCondition))
 				g.Expect(conditions.GetReason(amp, infrav1.BootstrapSucceededCondition)).To(Equal(infrav1.BootstrapInProgressReason))
 				severity := conditions.GetSeverity(amp, infrav1.BootstrapSucceededCondition)
-				g.Expect(severity).ToNot(BeNil())
+				g.Expect(severity).NotTo(BeNil())
 				g.Expect(*severity).To(Equal(clusterv1.ConditionSeverityInfo))
 			},
 		},
@@ -136,7 +138,7 @@ func TestMachinePoolScope_SetBootstrapConditions(t *testing.T) {
 				g.Expect(conditions.IsFalse(amp, infrav1.BootstrapSucceededCondition))
 				g.Expect(conditions.GetReason(amp, infrav1.BootstrapSucceededCondition)).To(Equal(infrav1.BootstrapFailedReason))
 				severity := conditions.GetSeverity(amp, infrav1.BootstrapSucceededCondition)
-				g.Expect(severity).ToNot(BeNil())
+				g.Expect(severity).NotTo(BeNil())
 				g.Expect(*severity).To(Equal(clusterv1.ConditionSeverityError))
 			},
 		},
@@ -163,7 +165,7 @@ func TestMachinePoolScope_SetBootstrapConditions(t *testing.T) {
 func TestMachinePoolScope_MaxSurge(t *testing.T) {
 	cases := []struct {
 		Name   string
-		Setup  func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool)
+		Setup  func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool)
 		Verify func(g *WithT, surge int, err error)
 	}{
 		{
@@ -175,7 +177,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		},
 		{
 			Name: "default surge should be 1 regardless of replica count with no surger",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
 				mp.Spec.Replicas = to.Int32Ptr(3)
 			},
 			Verify: func(g *WithT, surge int, err error) {
@@ -185,7 +187,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		},
 		{
 			Name: "default surge should be 2 as specified by the surger",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
 				mp.Spec.Replicas = to.Int32Ptr(3)
 				two := intstr.FromInt(2)
 				amp.Spec.Strategy = infrav1exp.AzureMachinePoolDeploymentStrategy{
@@ -202,7 +204,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		},
 		{
 			Name: "default surge should be 2 (50%) of the desired replicas",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
 				mp.Spec.Replicas = to.Int32Ptr(4)
 				fiftyPercent := intstr.FromString("50%")
 				amp.Spec.Strategy = infrav1exp.AzureMachinePoolDeploymentStrategy{
@@ -232,12 +234,12 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 							{
 								Name:       "mp1",
 								Kind:       "MachinePool",
-								APIVersion: clusterv1exp.GroupVersion.String(),
+								APIVersion: expv1.GroupVersion.String(),
 							},
 						},
 					},
 				}
-				mp = &clusterv1exp.MachinePool{
+				mp = &expv1.MachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "mp1",
 						Namespace: "default",
@@ -272,7 +274,7 @@ func TestMachinePoolScope_SaveVMImageToStatus(t *testing.T) {
 					{
 						Name:       "mp1",
 						Kind:       "MachinePool",
-						APIVersion: clusterv1exp.GroupVersion.String(),
+						APIVersion: expv1.GroupVersion.String(),
 					},
 				},
 			},
@@ -282,9 +284,11 @@ func TestMachinePoolScope_SaveVMImageToStatus(t *testing.T) {
 		}
 		image = &infrav1.Image{
 			Marketplace: &infrav1.AzureMarketplaceImage{
-				Publisher:       "cncf-upstream",
-				Offer:           "capi",
-				SKU:             "k8s-1dot19dot11-ubuntu-1804",
+				ImagePlan: infrav1.ImagePlan{
+					Publisher: "cncf-upstream",
+					Offer:     "capi",
+					SKU:       "k8s-1dot19dot11-ubuntu-1804",
+				},
 				Version:         "latest",
 				ThirdPartyImage: false,
 			},
@@ -297,23 +301,34 @@ func TestMachinePoolScope_SaveVMImageToStatus(t *testing.T) {
 }
 
 func TestMachinePoolScope_GetVMImage(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	clusterMock := mock_azure.NewMockClusterScoper(mockCtrl)
+	clusterMock.EXPECT().Authorizer().AnyTimes()
+	clusterMock.EXPECT().BaseURI().AnyTimes()
+	clusterMock.EXPECT().Location().AnyTimes()
+	clusterMock.EXPECT().SubscriptionID().AnyTimes()
+
 	cases := []struct {
 		Name   string
-		Setup  func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool)
+		Setup  func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool)
 		Verify func(g *WithT, amp *infrav1exp.AzureMachinePool, vmImage *infrav1.Image, err error)
 	}{
 		{
 			Name: "should set and default the image if no image is specified for the AzureMachinePool",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
 				mp.Spec.Template.Spec.Version = to.StringPtr("v1.19.11")
 			},
 			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, vmImage *infrav1.Image, err error) {
 				g.Expect(err).NotTo(HaveOccurred())
 				image := &infrav1.Image{
 					Marketplace: &infrav1.AzureMarketplaceImage{
-						Publisher:       "cncf-upstream",
-						Offer:           "capi",
-						SKU:             "k8s-1dot19dot11-ubuntu-1804",
+						ImagePlan: infrav1.ImagePlan{
+							Publisher: "cncf-upstream",
+							Offer:     "capi",
+							SKU:       "k8s-1dot19dot11-ubuntu-1804",
+						},
 						Version:         "latest",
 						ThirdPartyImage: false,
 					},
@@ -324,13 +339,15 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 		},
 		{
 			Name: "should not default or set the image on the AzureMachinePool if it already exists",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
 				mp.Spec.Template.Spec.Version = to.StringPtr("v1.19.11")
 				amp.Spec.Template.Image = &infrav1.Image{
 					Marketplace: &infrav1.AzureMarketplaceImage{
-						Publisher:       "cncf-upstream",
-						Offer:           "capi",
-						SKU:             "k8s-1dot19dot19-ubuntu-1804",
+						ImagePlan: infrav1.ImagePlan{
+							Publisher: "cncf-upstream",
+							Offer:     "capi",
+							SKU:       "k8s-1dot19dot19-ubuntu-1804",
+						},
 						Version:         "latest",
 						ThirdPartyImage: false,
 					},
@@ -340,9 +357,11 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 				image := &infrav1.Image{
 					Marketplace: &infrav1.AzureMarketplaceImage{
-						Publisher:       "cncf-upstream",
-						Offer:           "capi",
-						SKU:             "k8s-1dot19dot19-ubuntu-1804",
+						ImagePlan: infrav1.ImagePlan{
+							Publisher: "cncf-upstream",
+							Offer:     "capi",
+							SKU:       "k8s-1dot19dot19-ubuntu-1804",
+						},
 						Version:         "latest",
 						ThirdPartyImage: false,
 					},
@@ -366,12 +385,12 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 							{
 								Name:       "mp1",
 								Kind:       "MachinePool",
-								APIVersion: clusterv1exp.GroupVersion.String(),
+								APIVersion: expv1.GroupVersion.String(),
 							},
 						},
 					},
 				}
-				mp = &clusterv1exp.MachinePool{
+				mp = &expv1.MachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "mp1",
 						Namespace: "default",
@@ -387,6 +406,7 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 			s := &MachinePoolScope{
 				MachinePool:      mp,
 				AzureMachinePool: amp,
+				ClusterScoper:    clusterMock,
 			}
 			image, err := s.GetVMImage(context.TODO())
 			c.Verify(g, amp, image, err)
@@ -397,12 +417,12 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 	cases := []struct {
 		Name   string
-		Setup  func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS)
+		Setup  func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS)
 		Verify func(g *WithT, requeue bool)
 	}{
 		{
 			Name: "should requeue if the machine is not in succeeded state",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				creating := infrav1.Creating
 				mp.Spec.Replicas = to.Int32Ptr(0)
 				amp.Status.ProvisioningState = &creating
@@ -413,7 +433,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 		},
 		{
 			Name: "should not requeue if the machine is in succeeded state",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
 				mp.Spec.Replicas = to.Int32Ptr(0)
 				amp.Status.ProvisioningState = &succeeded
@@ -424,7 +444,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 		},
 		{
 			Name: "should requeue if the machine is in succeeded state but desired replica count does not match",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
 				mp.Spec.Replicas = to.Int32Ptr(1)
 				amp.Status.ProvisioningState = &succeeded
@@ -435,7 +455,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 		},
 		{
 			Name: "should not requeue if the machine is in succeeded state but desired replica count does match",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
 				mp.Spec.Replicas = to.Int32Ptr(1)
 				amp.Status.ProvisioningState = &succeeded
@@ -451,7 +471,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 		},
 		{
 			Name: "should requeue if an instance VM image does not match the VM image of the VMSS",
-			Setup: func(mp *clusterv1exp.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
 				mp.Spec.Replicas = to.Int32Ptr(1)
 				amp.Status.ProvisioningState = &succeeded
@@ -485,12 +505,12 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 							{
 								Name:       "mp1",
 								Kind:       "MachinePool",
-								APIVersion: clusterv1exp.GroupVersion.String(),
+								APIVersion: expv1.GroupVersion.String(),
 							},
 						},
 					},
 				}
-				mp = &clusterv1exp.MachinePool{
+				mp = &expv1.MachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "mp1",
 						Namespace: "default",
@@ -598,7 +618,7 @@ func TestMachinePoolScope_updateReplicasAndProviderIDs(t *testing.T) {
 							{
 								Name:       "mp1",
 								Kind:       "MachinePool",
-								APIVersion: clusterv1exp.GroupVersion.String(),
+								APIVersion: expv1.GroupVersion.String(),
 							},
 						},
 					},
@@ -624,12 +644,12 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 	tests := []struct {
 		name             string
 		machinePoolScope MachinePoolScope
-		want             []azure.ExtensionSpec
+		want             []azure.ResourceSpecGetter
 	}{
 		{
 			name: "If OS type is Linux and cloud is AzurePublicCloud, it returns ExtensionSpec",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machinepool-name",
@@ -650,24 +670,32 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{
-				{
-					Name:      "CAPZ.Linux.Bootstrapping",
-					VMName:    "machinepool-name",
-					Publisher: "Microsoft.Azure.ContainerUpstream",
-					Version:   "1.0",
-					ProtectedSettings: map[string]string{
-						"commandToExecute": azure.LinuxBootstrapExtensionCommand,
+			want: []azure.ResourceSpecGetter{
+				&scalesets.VMSSExtensionSpec{
+					ExtensionSpec: azure.ExtensionSpec{
+						Name:      "CAPZ.Linux.Bootstrapping",
+						VMName:    "machinepool-name",
+						Publisher: "Microsoft.Azure.ContainerUpstream",
+						Version:   "1.0",
+						ProtectedSettings: map[string]string{
+							"commandToExecute": azure.LinuxBootstrapExtensionCommand,
+						},
 					},
+					ResourceGroup: "my-rg",
 				},
 			},
 		},
 		{
 			name: "If OS type is Linux and cloud is not AzurePublicCloud, it returns empty",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machinepool-name",
@@ -688,14 +716,19 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{},
+			want: []azure.ResourceSpecGetter{},
 		},
 		{
 			name: "If OS type is Windows and cloud is AzurePublicCloud, it returns ExtensionSpec",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						// Note: machine pool names longer than 9 characters get truncated. See MachinePoolScope::Name() for more details.
@@ -717,25 +750,33 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{
-				{
-					Name: "CAPZ.Windows.Bootstrapping",
-					// Note: machine pool names longer than 9 characters get truncated. See MachinePoolScope::Name() for more details.
-					VMName:    "winpool",
-					Publisher: "Microsoft.Azure.ContainerUpstream",
-					Version:   "1.0",
-					ProtectedSettings: map[string]string{
-						"commandToExecute": azure.WindowsBootstrapExtensionCommand,
+			want: []azure.ResourceSpecGetter{
+				&scalesets.VMSSExtensionSpec{
+					ExtensionSpec: azure.ExtensionSpec{
+						Name: "CAPZ.Windows.Bootstrapping",
+						// Note: machine pool names longer than 9 characters get truncated. See MachinePoolScope::Name() for more details.
+						VMName:    "winpool",
+						Publisher: "Microsoft.Azure.ContainerUpstream",
+						Version:   "1.0",
+						ProtectedSettings: map[string]string{
+							"commandToExecute": azure.WindowsBootstrapExtensionCommand,
+						},
 					},
+					ResourceGroup: "my-rg",
 				},
 			},
 		},
 		{
 			name: "If OS type is Windows and cloud is not AzurePublicCloud, it returns empty",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machinepool-name",
@@ -756,14 +797,19 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{},
+			want: []azure.ResourceSpecGetter{},
 		},
 		{
 			name: "If OS type is not Linux or Windows and cloud is AzurePublicCloud, it returns empty",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machinepool-name",
@@ -784,14 +830,19 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{},
+			want: []azure.ResourceSpecGetter{},
 		},
 		{
 			name: "If OS type is not Windows or Linux and cloud is not AzurePublicCloud, it returns empty",
 			machinePoolScope: MachinePoolScope{
-				MachinePool: &clusterv1exp.MachinePool{},
+				MachinePool: &expv1.MachinePool{},
 				AzureMachinePool: &infrav1exp.AzureMachinePool{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machinepool-name",
@@ -812,15 +863,97 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 							},
 						},
 					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
 				},
 			},
-			want: []azure.ExtensionSpec{},
+			want: []azure.ResourceSpecGetter{},
+		},
+		{
+			name: "If a custom VM extension is specified, it returns the custom VM extension",
+			machinePoolScope: MachinePoolScope{
+				MachinePool: &expv1.MachinePool{},
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machinepool-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Template: infrav1exp.AzureMachinePoolMachineTemplate{
+							OSDisk: infrav1.OSDisk{
+								OSType: "Linux",
+							},
+							VMExtensions: []infrav1.VMExtension{
+								{
+									Name:      "custom-vm-extension",
+									Publisher: "Microsoft.Azure.Extensions",
+									Version:   "2.0",
+									Settings: map[string]string{
+										"timestamp": "1234567890",
+									},
+									ProtectedSettings: map[string]string{
+										"commandToExecute": "echo hello world",
+									},
+								},
+							},
+						},
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						EnvironmentSettings: auth.EnvironmentSettings{
+							Environment: autorestazure.Environment{
+								Name: autorestazure.PublicCloud.Name,
+							},
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&scalesets.VMSSExtensionSpec{
+					ExtensionSpec: azure.ExtensionSpec{
+						Name:      "custom-vm-extension",
+						VMName:    "machinepool-name",
+						Publisher: "Microsoft.Azure.Extensions",
+						Version:   "2.0",
+						Settings: map[string]string{
+							"timestamp": "1234567890",
+						},
+						ProtectedSettings: map[string]string{
+							"commandToExecute": "echo hello world",
+						},
+					},
+					ResourceGroup: "my-rg",
+				},
+				&scalesets.VMSSExtensionSpec{
+					ExtensionSpec: azure.ExtensionSpec{
+						Name:      "CAPZ.Linux.Bootstrapping",
+						VMName:    "machinepool-name",
+						Publisher: "Microsoft.Azure.ContainerUpstream",
+						Version:   "1.0",
+						ProtectedSettings: map[string]string{
+							"commandToExecute": azure.LinuxBootstrapExtensionCommand,
+						},
+					},
+					ResourceGroup: "my-rg",
+				},
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.machinePoolScope.VMSSExtensionSpecs(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("VMSSExtensionSpecs() = %v, want %v", got, tt.want)
+				t.Errorf("VMSSExtensionSpecs() = \n%s, want \n%s", specArrayToString(got), specArrayToString(tt.want))
 			}
 		})
 	}

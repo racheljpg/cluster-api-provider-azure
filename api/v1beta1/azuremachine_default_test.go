@@ -21,9 +21,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/google/uuid"
-
 	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/google/uuid"
 	. "github.com/onsi/gomega"
 )
 
@@ -35,8 +34,8 @@ func TestAzureMachineSpec_SetDefaultSSHPublicKey(t *testing.T) {
 	}
 
 	existingPublicKey := "testpublickey"
-	publicKeyExistTest := test{machine: createMachineWithSSHPublicKey(t, existingPublicKey)}
-	publicKeyNotExistTest := test{machine: createMachineWithSSHPublicKey(t, "")}
+	publicKeyExistTest := test{machine: createMachineWithSSHPublicKey(existingPublicKey)}
+	publicKeyNotExistTest := test{machine: createMachineWithSSHPublicKey("")}
 
 	err := publicKeyExistTest.machine.Spec.SetDefaultSSHPublicKey()
 	g.Expect(err).To(BeNil())
@@ -216,6 +215,14 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 					DiskSizeGB: 30,
 					Lun:        to.Int32Ptr(2),
 				},
+				{
+					NameSuffix: "testdisk3",
+					DiskSizeGB: 30,
+					ManagedDisk: &ManagedDiskParameters{
+						StorageAccountType: "UltraSSD_LRS",
+					},
+					Lun: to.Int32Ptr(3),
+				},
 			},
 			output: []DataDisk{
 				{
@@ -229,6 +236,15 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 					DiskSizeGB:  30,
 					Lun:         to.Int32Ptr(2),
 					CachingType: "ReadWrite",
+				},
+				{
+					NameSuffix: "testdisk3",
+					DiskSizeGB: 30,
+					Lun:        to.Int32Ptr(3),
+					ManagedDisk: &ManagedDiskParameters{
+						StorageAccountType: "UltraSSD_LRS",
+					},
+					CachingType: "None",
 				},
 			},
 		},
@@ -250,12 +266,12 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 	}
 }
 
-func createMachineWithSSHPublicKey(t *testing.T, sshPublicKey string) *AzureMachine {
+func createMachineWithSSHPublicKey(sshPublicKey string) *AzureMachine {
 	machine := hardcodedAzureMachineWithSSHKey(sshPublicKey)
 	return machine
 }
 
-func createMachineWithUserAssignedIdentities(t *testing.T, identitiesList []UserAssignedIdentity) *AzureMachine {
+func createMachineWithUserAssignedIdentities(identitiesList []UserAssignedIdentity) *AzureMachine {
 	machine := hardcodedAzureMachineWithSSHKey(generateSSHPublicKey(true))
 	machine.Spec.Identity = VMIdentityUserAssigned
 	machine.Spec.UserAssignedIdentities = identitiesList

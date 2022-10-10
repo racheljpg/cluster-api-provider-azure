@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -27,17 +28,13 @@ import (
 	"strings"
 
 	"github.com/blang/semver"
-
-	"sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/node"
-
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
+	"sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/node"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/test/framework/kubetest"
@@ -57,9 +54,9 @@ var _ = Describe("Conformance Tests", func() {
 
 	BeforeEach(func() {
 		Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
-		Expect(bootstrapClusterProxy).ToNot(BeNil(), "Invalid argument. BootstrapClusterProxy can't be nil")
-		Expect(kubetestConfigFilePath).ToNot(BeNil(), "Invalid argument. kubetestConfigFilePath can't be nil")
-		Expect(e2eConfig).ToNot(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
+		Expect(bootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. BootstrapClusterProxy can't be nil")
+		Expect(kubetestConfigFilePath).NotTo(BeNil(), "Invalid argument. kubetestConfigFilePath can't be nil")
+		Expect(e2eConfig).NotTo(BeNil(), "Invalid argument. e2eConfig can't be nil when calling %s spec", specName)
 		Expect(clusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. clusterctlConfigPath must be an existing file when calling %s spec", specName)
 
 		Expect(e2eConfig.Variables).To(HaveKey(capi_e2e.KubernetesVersion))
@@ -75,8 +72,8 @@ var _ = Describe("Conformance Tests", func() {
 		namespace, cancelWatches, err = setupSpecNamespace(ctx, clusterName, bootstrapClusterProxy, artifactFolder)
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(os.Setenv(AzureResourceGroup, clusterName)).NotTo(HaveOccurred())
-		Expect(os.Setenv(AzureVNetName, fmt.Sprintf("%s-vnet", clusterName))).NotTo(HaveOccurred())
+		Expect(os.Setenv(AzureResourceGroup, clusterName)).To(Succeed())
+		Expect(os.Setenv(AzureVNetName, fmt.Sprintf("%s-vnet", clusterName))).To(Succeed())
 
 		result = new(clusterctl.ApplyClusterTemplateAndWaitResult)
 
@@ -93,10 +90,10 @@ var _ = Describe("Conformance Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		identityName := e2eConfig.GetVariable(ClusterIdentityName)
-		Expect(os.Setenv(ClusterIdentityName, identityName)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).NotTo(HaveOccurred())
+		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).To(Succeed())
 	})
 
 	Measure(specName, func(b Benchmarker) {
@@ -124,6 +121,15 @@ var _ = Describe("Conformance Tests", func() {
 			if isWindows(kubetestConfigFilePath) {
 				flavor = flavor + "-" + getWindowsFlavor()
 			}
+		}
+
+		// Starting with Kubernetes v1.25, the kubetest config file needs to be compatible with Ginkgo V2.
+		v125 := semver.MustParse("1.25.0-alpha.0.0")
+		v, err := semver.ParseTolerant(kubernetesVersion)
+		Expect(err).NotTo(HaveOccurred())
+		if v.GTE(v125) {
+			// Use the Ginkgo V2 config file.
+			kubetestConfigFilePath = getGinkgoV2ConfigFilePath(kubetestConfigFilePath)
 		}
 
 		// Set the worker counts for conformance tests that use Windows
@@ -179,23 +185,34 @@ var _ = Describe("Conformance Tests", func() {
 
 		if isWindows(kubetestConfigFilePath) {
 			// Windows requires a taint on control nodes nodes since not all conformance tests have ability to run
-			options := v1.ListOptions{
+			options := metav1.ListOptions{
 				LabelSelector: "kubernetes.io/os=linux",
 			}
 
 			noScheduleTaint := &corev1.Taint{
-				Key:    "node-role.kubernetes.io/master",
+				Key:    "node-role.kubernetes.io/control-plane",
 				Value:  "",
 				Effect: "NoSchedule",
 			}
 
-			err := node.TaintNode(workloadProxy.GetClientSet(), options, noScheduleTaint)
+			if v, err := semver.ParseTolerant(kubernetesVersion); err == nil {
+				if v.LT(semver.MustParse("1.24.0-alpha.0.0")) {
+					noScheduleTaint = &corev1.Taint{
+						Key:    "node-role.kubernetes.io/master",
+						Value:  "",
+						Effect: "NoSchedule",
+					}
+				}
+			}
+
+			err = node.TaintNode(workloadProxy.GetClientSet(), options, noScheduleTaint)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Windows requires a repo-list because some images are not in k8s gcr
+			// Windows requires a repo-list when running e2e tests against K8s versions prior to v1.25
+			// because some test images published to the k8s gcr do not have Windows flavors.
 			repoList, err = resolveKubetestRepoListPath(kubernetesVersion, kubetestRepoListPath)
 			Expect(err).NotTo(HaveOccurred())
-			fmt.Fprintf(GinkgoWriter, "INFO: Using repo-list %s for version %s\n", repoList, kubernetesVersion)
+			fmt.Fprintf(GinkgoWriter, "INFO: Using repo-list '%s' for version '%s'\n", repoList, kubernetesVersion)
 		}
 
 		ginkgoNodes, err := strconv.Atoi(e2eConfig.GetVariable("CONFORMANCE_NODES"))
@@ -223,6 +240,8 @@ var _ = Describe("Conformance Tests", func() {
 			_ = bootstrapClusterProxy.GetClient().Get(ctx, types.NamespacedName{Name: clusterName, Namespace: namespace.Name}, result.Cluster)
 		}
 
+		CheckTestBeforeCleanup()
+
 		cleanInput := cleanupInput{
 			SpecName:        specName,
 			Cluster:         result.Cluster,
@@ -236,8 +255,8 @@ var _ = Describe("Conformance Tests", func() {
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, cleanInput)
 
-		Expect(os.Unsetenv(AzureResourceGroup)).NotTo(HaveOccurred())
-		Expect(os.Unsetenv(AzureVNetName)).NotTo(HaveOccurred())
+		Expect(os.Unsetenv(AzureResourceGroup)).To(Succeed())
+		Expect(os.Unsetenv(AzureVNetName)).To(Succeed())
 	})
 
 })
@@ -255,4 +274,8 @@ func getWindowsFlavor() string {
 
 func isWindows(kubetestConfigFilePath string) bool {
 	return strings.Contains(kubetestConfigFilePath, "windows")
+}
+
+func getGinkgoV2ConfigFilePath(kubetestConfigFilePath string) string {
+	return strings.Replace(kubetestConfigFilePath, ".yaml", "-ginkgo-v2.yaml", 1)
 }

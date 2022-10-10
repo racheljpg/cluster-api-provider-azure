@@ -19,9 +19,12 @@ package v1beta1
 import (
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
 	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,11 +44,12 @@ func TestAzureManagedMachinePoolDefaultingWebhook(t *testing.T) {
 	}
 	var client client.Client
 	ammp.Default(client)
-	g.Expect(ammp.Labels).ToNot(BeNil())
+	g.Expect(ammp.Labels).NotTo(BeNil())
 	val, ok := ammp.Labels[LabelAgentPoolMode]
 	g.Expect(ok).To(BeTrue())
 	g.Expect(val).To(Equal("System"))
 	g.Expect(*ammp.Spec.Name).To(Equal("fooName"))
+	g.Expect(*ammp.Spec.OSType).To(Equal(azure.LinuxOS))
 
 	t.Logf("Testing ammp defaulting webhook with empty string name specified in Spec")
 	emptyName := ""
@@ -58,6 +62,12 @@ func TestAzureManagedMachinePoolDefaultingWebhook(t *testing.T) {
 	ammp.Spec.Name = &normalName
 	ammp.Default(client)
 	g.Expect(*ammp.Spec.Name).To(Equal("barName"))
+
+	t.Logf("Testing ammp defaulting webhook with normal OsDiskType specified in Spec")
+	normalOsDiskType := "Ephemeral"
+	ammp.Spec.OsDiskType = &normalOsDiskType
+	ammp.Default(client)
+	g.Expect(*ammp.Spec.OsDiskType).To(Equal("Ephemeral"))
 }
 
 func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
@@ -82,6 +92,26 @@ func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
 			},
 			old: &AzureManagedMachinePool{
 				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V4",
+					OSDiskSizeGB: to.Int32Ptr(512),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Cannot change OSType of the agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					OSType:       to.StringPtr("Linux"),
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					OSType:       to.StringPtr("Windows"),
 					Mode:         "System",
 					SKU:          "StandardD2S_V4",
 					OSDiskSizeGB: to.Int32Ptr(512),
@@ -225,12 +255,263 @@ func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "Cannot change OSDiskType of the agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(24),
+					OsDiskType:   to.StringPtr(string(containerservice.OSDiskTypeEphemeral)),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(24),
+					OsDiskType:   to.StringPtr(string(containerservice.OSDiskTypeManaged)),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "custom header annotation values are immutable",
+			old: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			new: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "false",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "cannot remove custom header annotation after resource creation",
+			old: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			new: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "cannot add new custom header annotations after resource creation",
+			old: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			new: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature":    "true",
+						"infrastructure.cluster.x-k8s.io/custom-header-AnotherFeature": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non-custom headers annotations are mutable",
+			old: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"annotation-a": "true",
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			new: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"infrastructure.cluster.x-k8s.io/custom-header-SomeFeature": "true",
+						"annotation-b": "true",
+					},
+				},
+				Spec: AzureManagedMachinePoolSpec{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Unchanged OSDiskType in an agentpool should not result in an error",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(30),
+					OsDiskType:   to.StringPtr(string(containerservice.OSDiskTypeManaged)),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:         "System",
+					SKU:          "StandardD2S_V3",
+					OSDiskSizeGB: to.Int32Ptr(512),
+					MaxPods:      to.Int32Ptr(30),
+					OsDiskType:   to.StringPtr(string(containerservice.OSDiskTypeManaged)),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Unexpected error, value EnableUltraSSD is unchanged",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableUltraSSD: to.BoolPtr(true),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableUltraSSD: to.BoolPtr(true),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "EnableUltraSSD feature is immutable and currently enabled on this agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableUltraSSD: to.BoolPtr(false),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableUltraSSD: to.BoolPtr(true),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Unexpected error, value EnableNodePublicIP is unchanged",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableNodePublicIP: to.BoolPtr(true),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableNodePublicIP: to.BoolPtr(true),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "EnableNodePublicIP feature is immutable and currently enabled on this agentpool",
+			new: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableNodePublicIP: to.BoolPtr(false),
+				},
+			},
+			old: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					EnableNodePublicIP: to.BoolPtr(true),
+				},
+			},
+			wantErr: true,
+		},
 	}
 	var client client.Client
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.new.ValidateUpdate(tc.old, client)
 			if tc.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestValidateBoolPtrImmutable(t *testing.T) {
+	tests := []struct {
+		name    string
+		oldVal  *bool
+		newVal  *bool
+		wantErr bool
+	}{
+		{
+			name:    "true to true ok",
+			oldVal:  to.BoolPtr(true),
+			newVal:  to.BoolPtr(true),
+			wantErr: false,
+		},
+		{
+			name:    "false to false ok",
+			oldVal:  to.BoolPtr(false),
+			newVal:  to.BoolPtr(false),
+			wantErr: false,
+		},
+		{
+			name:    "true to false bad",
+			oldVal:  to.BoolPtr(true),
+			newVal:  to.BoolPtr(false),
+			wantErr: true,
+		},
+		{
+			name:    "false to true bad",
+			oldVal:  to.BoolPtr(false),
+			newVal:  to.BoolPtr(true),
+			wantErr: true,
+		},
+		{
+			name:    "false to nil bad",
+			oldVal:  to.BoolPtr(false),
+			newVal:  nil,
+			wantErr: true,
+		},
+		{
+			name:    "true to nil bad",
+			oldVal:  to.BoolPtr(true),
+			newVal:  nil,
+			wantErr: true,
+		},
+		{
+			name:    "nil to false bad",
+			oldVal:  nil,
+			newVal:  to.BoolPtr(false),
+			wantErr: true,
+		},
+		{
+			name:    "nil to true bad",
+			oldVal:  nil,
+			newVal:  to.BoolPtr(true),
+			wantErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			g := NewWithT(t)
+			err := validateBoolPtrImmutable(field.NewPath("test"), test.oldVal, test.newVal)
+			if test.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
@@ -252,7 +533,18 @@ func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
 			name: "valid",
 			ammp: &AzureManagedMachinePool{
 				Spec: AzureManagedMachinePoolSpec{
-					MaxPods: to.Int32Ptr(30),
+					MaxPods:    to.Int32Ptr(30),
+					OsDiskType: to.StringPtr(string(containerservice.OSDiskTypeEphemeral)),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "another valid permutation",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					MaxPods:    to.Int32Ptr(249),
+					OsDiskType: to.StringPtr(string(containerservice.OSDiskTypeManaged)),
 				},
 			},
 			wantErr: false,
@@ -279,6 +571,54 @@ func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
 			ammp: &AzureManagedMachinePool{
 				Spec: AzureManagedMachinePoolSpec{
 					MaxPods: to.Int32Ptr(9),
+				},
+			},
+			wantErr:  true,
+			errorLen: 1,
+		},
+		{
+			name: "ostype Windows with System mode not allowed",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:   "System",
+					OSType: to.StringPtr(azure.WindowsOS),
+				},
+			},
+			wantErr:  true,
+			errorLen: 1,
+		},
+		{
+			name: "ostype windows with User mode",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:   "User",
+					OSType: to.StringPtr(azure.WindowsOS),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Windows clusters with 6char or less name",
+			ammp: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pool0",
+				},
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:   "User",
+					OSType: to.StringPtr(azure.WindowsOS),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "Windows clusters with more than 6char names are not allowed",
+			ammp: &AzureManagedMachinePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "pool0-name-too-long",
+				},
+				Spec: AzureManagedMachinePoolSpec{
+					Mode:   "User",
+					OSType: to.StringPtr(azure.WindowsOS),
 				},
 			},
 			wantErr:  true,

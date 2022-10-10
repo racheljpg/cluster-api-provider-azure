@@ -24,7 +24,6 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -57,6 +56,13 @@ func TestDeleteDisk(t *testing.T) {
 		expectedError string
 		expect        func(s *mock_disks.MockDiskScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder)
 	}{
+		{
+			name:          "noop if no disk specs are found",
+			expectedError: "",
+			expect: func(s *mock_disks.MockDiskScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				s.DiskSpecs().Return([]azure.ResourceSpecGetter{})
+			},
+		},
 		{
 			name:          "delete the disk",
 			expectedError: "",

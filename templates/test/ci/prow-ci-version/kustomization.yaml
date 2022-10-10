@@ -12,7 +12,7 @@ patchesStrategicMerge:
   - patches/machine-deployment-ci-version.yaml
   - patches/machine-deployment-ci-version-windows.yaml
   - ../patches/metrics-server-enabled-cluster.yaml
-  - patches/controller-manager-featuregates.yaml
+  - ../patches/controller-manager-featuregates.yaml
 patches:
 - target:
     group: bootstrap.cluster.x-k8s.io
@@ -27,7 +27,7 @@ patches:
     kind: KubeadmConfigTemplate
     name: .*-md-win
     namespace: default
-  path: patches/kubeadm-bootstrap-windows.yaml
+  path: patches/kubeadm-bootstrap-windows-k8s-ci-binaries.yaml
 - target:
     group: controlplane.cluster.x-k8s.io
     version: v1beta1

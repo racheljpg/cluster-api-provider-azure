@@ -19,7 +19,7 @@ package availabilitysets
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -41,7 +41,7 @@ type AvailabilitySetScope interface {
 // Service provides operations on Azure resources.
 type Service struct {
 	Scope AvailabilitySetScope
-	Client
+	async.Getter
 	async.Reconciler
 	resourceSKUCache *resourceskus.Cache
 }
@@ -51,10 +51,15 @@ func New(scope AvailabilitySetScope, skuCache *resourceskus.Cache) *Service {
 	client := NewClient(scope)
 	return &Service{
 		Scope:            scope,
-		Client:           client,
+		Getter:           client,
 		resourceSKUCache: skuCache,
 		Reconciler:       async.New(scope, client, client),
 	}
+}
+
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
 }
 
 // Reconcile creates or updates availability sets.
@@ -65,12 +70,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	setSpec := s.Scope.AvailabilitySetSpec()
 	var err error
-	if setSpec != nil {
+	if setSpec := s.Scope.AvailabilitySetSpec(); setSpec != nil {
 		_, err = s.CreateResource(ctx, setSpec, serviceName)
 	} else {
 		log.V(2).Info("skip creation when no availability set spec is found")
+		return nil
 	}
 
 	s.Scope.UpdatePutStatus(infrav1.AvailabilitySetReadyCondition, serviceName, err)
@@ -85,31 +90,37 @@ func (s *Service) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	setSpec := s.Scope.AvailabilitySetSpec()
 	var resultingErr error
+	setSpec := s.Scope.AvailabilitySetSpec()
 	if setSpec == nil {
 		log.V(2).Info("skip deletion when no availability set spec is found")
+		return nil
+	}
+
+	existingSet, err := s.Get(ctx, setSpec)
+	if err != nil {
+		if !azure.ResourceNotFound(err) {
+			resultingErr = errors.Wrapf(err, "failed to get availability set %s in resource group %s", setSpec.ResourceName(), setSpec.ResourceGroupName())
+		}
 	} else {
-		existingSet, err := s.Client.Get(ctx, setSpec)
-		if err != nil {
-			if !azure.ResourceNotFound(err) {
-				resultingErr = errors.Wrapf(err, "failed to get availability set %s in resource group %s", setSpec.ResourceName(), setSpec.ResourceGroupName())
-			}
+		availabilitySet, ok := existingSet.(compute.AvailabilitySet)
+		if !ok {
+			resultingErr = errors.Errorf("%T is not a compute.AvailabilitySet", existingSet)
 		} else {
-			availabilitySet, ok := existingSet.(compute.AvailabilitySet)
-			if !ok {
-				resultingErr = errors.Errorf("%T is not a compute.AvailabilitySet", existingSet)
+			// only delete when the availability set does not have any vms
+			if availabilitySet.AvailabilitySetProperties != nil && availabilitySet.VirtualMachines != nil && len(*availabilitySet.VirtualMachines) > 0 {
+				log.V(2).Info("skip deleting availability set with VMs", "availability set", setSpec.ResourceName())
 			} else {
-				// only delete when the availability set does not have any vms
-				if availabilitySet.AvailabilitySetProperties != nil && availabilitySet.VirtualMachines != nil && len(*availabilitySet.VirtualMachines) > 0 {
-					log.V(2).Info("skip deleting availability set with VMs", "availability set", setSpec.ResourceName())
-				} else {
-					resultingErr = s.DeleteResource(ctx, setSpec, serviceName)
-				}
+				resultingErr = s.DeleteResource(ctx, setSpec, serviceName)
 			}
 		}
 	}
 
 	s.Scope.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, resultingErr)
 	return resultingErr
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO availability set.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

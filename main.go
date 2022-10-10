@@ -26,7 +26,6 @@ import (
 	"time"
 
 	// +kubebuilder:scaffold:imports
-
 	aadpodv1 "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
 	"github.com/spf13/pflag"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,23 +36,13 @@ import (
 	cgrecord "k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/klogr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
-	clusterv1beta1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
-	clusterv1beta1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	capifeature "sigs.k8s.io/cluster-api/feature"
-	"sigs.k8s.io/cluster-api/util/record"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	infrav1alpha3 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	infrav1alpha4 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha4"
-	infrav1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/controllers"
 	infrav1alpha3exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha3"
 	infrav1alpha4exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1alpha4"
-	infrav1beta1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	infrav1controllersexp "sigs.k8s.io/cluster-api-provider-azure/exp/controllers"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/coalescing"
@@ -61,6 +50,15 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/webhook"
 	"sigs.k8s.io/cluster-api-provider-azure/version"
+	clusterv1alpha4 "sigs.k8s.io/cluster-api/api/v1alpha4"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	expv1alpha4 "sigs.k8s.io/cluster-api/exp/api/v1alpha4"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	capifeature "sigs.k8s.io/cluster-api/feature"
+	"sigs.k8s.io/cluster-api/util/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 var (
@@ -74,14 +72,14 @@ func init() {
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = infrav1alpha3.AddToScheme(scheme)
 	_ = infrav1alpha4.AddToScheme(scheme)
-	_ = infrav1beta1.AddToScheme(scheme)
+	_ = infrav1.AddToScheme(scheme)
 	_ = infrav1alpha3exp.AddToScheme(scheme)
 	_ = infrav1alpha4exp.AddToScheme(scheme)
-	_ = infrav1beta1exp.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
+	_ = clusterv1alpha4.AddToScheme(scheme)
+	_ = expv1alpha4.AddToScheme(scheme)
 	_ = clusterv1.AddToScheme(scheme)
-	_ = clusterv1exp.AddToScheme(scheme)
-	_ = clusterv1beta1.AddToScheme(scheme)
-	_ = clusterv1beta1exp.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
 	// +kubebuilder:scaffold:scheme
 
 	// Add aadpodidentity v1 to the scheme.
@@ -174,7 +172,7 @@ func InitFlags(fs *pflag.FlagSet) {
 		&watchFilterValue,
 		"watch-filter",
 		"",
-		fmt.Sprintf("Label value that the controller watches to reconcile cluster-api objects. Label key is always %s. If unspecified, the controller watches for all cluster-api objects.", clusterv1.WatchLabel),
+		fmt.Sprintf("Label value that the controller watches to reconcile cluster-api objects. Label key is always %s. If unspecified, the controller watches for all cluster-api objects.", clusterv1alpha4.WatchLabel),
 	)
 
 	fs.StringVar(
@@ -260,7 +258,15 @@ func main() {
 	if profilerAddress != "" {
 		setupLog.Info("Profiler listening for requests", "profiler-address", profilerAddress)
 		go func() {
-			setupLog.Error(http.ListenAndServe(profilerAddress, nil), "listen and serve error")
+			server := &http.Server{
+				Addr:              profilerAddress,
+				ReadHeaderTimeout: 3 * time.Second,
+			}
+
+			err := server.ListenAndServe()
+			if err != nil {
+				setupLog.Error(err, "listen and serve error")
+			}
 		}()
 	}
 
@@ -313,7 +319,7 @@ func main() {
 
 	registerControllers(ctx, mgr)
 
-	registerWebhooks(ctx, mgr)
+	registerWebhooks(mgr)
 
 	// +kubebuilder:scaffold:builder
 	setupLog.Info("starting manager", "version", version.Get().String())
@@ -473,53 +479,63 @@ func registerControllers(ctx context.Context, mgr manager.Manager) {
 	}
 }
 
-func registerWebhooks(ctx context.Context, mgr manager.Manager) {
-	if err := (&infrav1beta1.AzureCluster{}).SetupWebhookWithManager(mgr); err != nil {
+func registerWebhooks(mgr manager.Manager) {
+	if err := (&infrav1.AzureCluster{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureCluster")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureMachine{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1.AzureClusterTemplate{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AzureClusterTemplate")
+		os.Exit(1)
+	}
+
+	if err := (&infrav1.AzureMachine{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachine")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1.AzureMachineTemplate{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachineTemplate")
 		os.Exit(1)
 	}
 
-	if err := (&infrav1beta1.AzureClusterIdentity{}).SetupWebhookWithManager(mgr); err != nil {
+	if err := (&infrav1.AzureClusterIdentity{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "AzureClusterIdentity")
 		os.Exit(1)
 	}
-	// just use CAPI MachinePool feature flag rather than create a new one
-	if feature.Gates.Enabled(capifeature.MachinePool) {
-		if err := (&infrav1beta1exp.AzureMachinePool{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachinePool")
-			os.Exit(1)
-		}
-
-		if err := (&infrav1beta1exp.AzureMachinePoolMachine{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachinePoolMachine")
-			os.Exit(1)
-		}
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
+	// is going to prevent creating or updating new objects in case the feature flag is disabled
+	if err := (&infrav1exp.AzureMachinePool{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachinePool")
+		os.Exit(1)
 	}
 
-	if feature.Gates.Enabled(feature.AKS) {
-		if err := (&infrav1beta1exp.AzureManagedControlPlane{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "AzureManagedControlPlane")
-			os.Exit(1)
-		}
+	if err := (&infrav1exp.AzureMachinePoolMachine{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AzureMachinePoolMachine")
+		os.Exit(1)
+	}
+
+	// NOTE: AzureManagedCluster is behind AKS feature gate flag; the webhook
+	// is going to prevent creating or updating new objects in case the feature flag is disabled
+	if err := (&infrav1exp.AzureManagedCluster{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "AzureManagedCluster")
+		os.Exit(1)
 	}
 
 	if feature.Gates.Enabled(feature.AKS) {
 		hookServer := mgr.GetWebhookServer()
 		hookServer.Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool", webhook.NewMutatingWebhook(
-			&infrav1beta1exp.AzureManagedMachinePool{}, mgr.GetClient(),
+			&infrav1exp.AzureManagedMachinePool{}, mgr.GetClient(),
 		))
 		hookServer.Register("/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool", webhook.NewValidatingWebhook(
-			&infrav1beta1exp.AzureManagedMachinePool{}, mgr.GetClient(),
+			&infrav1exp.AzureManagedMachinePool{}, mgr.GetClient(),
+		))
+		hookServer.Register("/mutate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedcontrolplane", webhook.NewMutatingWebhook(
+			&infrav1exp.AzureManagedControlPlane{}, mgr.GetClient(),
+		))
+		hookServer.Register("/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedcontrolplane", webhook.NewValidatingWebhook(
+			&infrav1exp.AzureManagedControlPlane{}, mgr.GetClient(),
 		))
 	}
 

@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capiv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -105,7 +105,7 @@ func (ampr *AzureMachinePoolReconciler) SetupWithManager(ctx context.Context, mg
 		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(log, ampr.WatchFilterValue)).
 		// watch for changes in CAPI MachinePool resources
 		Watches(
-			&source.Kind{Type: &capiv1exp.MachinePool{}},
+			&source.Kind{Type: &expv1.MachinePool{}},
 			handler.EnqueueRequestsFromMapFunc(MachinePoolToInfrastructureMapFunc(infrav1exp.GroupVersion.WithKind("AzureMachinePool"), log)),
 		).
 		// watch for changes in AzureCluster resources
@@ -149,7 +149,7 @@ func (ampr *AzureMachinePoolReconciler) SetupWithManager(ctx context.Context, mg
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepoolmachines,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepoolmachines/status,verbs=get
-// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinepools;machinepools/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=machinepools;machinepools/status,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=events,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=secrets;,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
@@ -234,7 +234,7 @@ func (ampr *AzureMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl.
 		ClusterScope:     clusterScope,
 	})
 	if err != nil {
-		return reconcile.Result{}, errors.Errorf("failed to create scope: %+v", err)
+		return reconcile.Result{}, errors.Wrap(err, "failed to create scope")
 	}
 
 	// Always close the scope when exiting this function so we can persist any AzureMachine changes.
@@ -265,7 +265,7 @@ func (ampr *AzureMachinePoolReconciler) reconcileNormal(ctx context.Context, mac
 	}
 
 	// If the AzureMachine doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(machinePoolScope.AzureMachinePool, capiv1exp.MachinePoolFinalizer)
+	controllerutil.AddFinalizer(machinePoolScope.AzureMachinePool, expv1.MachinePoolFinalizer)
 	// Register the finalizer immediately to avoid orphaning Azure resources on delete
 	if err := machinePoolScope.PatchObject(ctx); err != nil {
 		return reconcile.Result{}, err
@@ -351,6 +351,6 @@ func (ampr *AzureMachinePoolReconciler) reconcileDelete(ctx context.Context, mac
 
 	// Delete succeeded, remove finalizer
 	log.V(4).Info("removing finalizer for AzureMachinePool")
-	controllerutil.RemoveFinalizer(machinePoolScope.AzureMachinePool, capiv1exp.MachinePoolFinalizer)
+	controllerutil.RemoveFinalizer(machinePoolScope.AzureMachinePool, expv1.MachinePoolFinalizer)
 	return reconcile.Result{}, nil
 }

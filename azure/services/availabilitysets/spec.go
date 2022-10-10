@@ -19,7 +19,7 @@ package availabilitysets
 import (
 	"strconv"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
@@ -53,7 +53,7 @@ func (s *AvailabilitySetSpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the availability set.
-func (s *AvailabilitySetSpec) Parameters(existing interface{}) (interface{}, error) {
+func (s *AvailabilitySetSpec) Parameters(existing interface{}) (params interface{}, err error) {
 	if existing != nil {
 		if _, ok := existing.(compute.AvailabilitySet); !ok {
 			return nil, errors.Errorf("%T is not a compute.AvailabilitySet", existing)

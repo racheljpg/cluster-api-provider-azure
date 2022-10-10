@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/pkg/errors"
 )
 
@@ -54,7 +54,7 @@ const (
 	EphemeralOSDisk = "EphemeralOSDiskSupported"
 	// AcceleratedNetworking identifies the capability for accelerated networking support.
 	AcceleratedNetworking = "AcceleratedNetworkingEnabled"
-	//VCPUs identifies the capability for the number of vCPUS.
+	// VCPUs identifies the capability for the number of vCPUS.
 	VCPUs = "vCPUs"
 	// MemoryGB identifies the capability for memory Size.
 	MemoryGB = "MemoryGB"

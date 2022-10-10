@@ -20,10 +20,6 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-	"sigs.k8s.io/cluster-api/util/secret"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
@@ -32,29 +28,30 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/tags"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
+	"sigs.k8s.io/cluster-api/util/secret"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // azureManagedControlPlaneService contains the services required by the cluster controller.
 type azureManagedControlPlaneService struct {
-	kubeclient         client.Client
-	scope              managedclusters.ManagedClusterScope
-	managedClustersSvc azure.Reconciler
-	groupsSvc          azure.Reconciler
-	vnetSvc            azure.Reconciler
-	subnetsSvc         azure.Reconciler
-	tagsSvc            azure.Reconciler
+	kubeclient client.Client
+	scope      managedclusters.ManagedClusterScope
+	services   []azure.ServiceReconciler
 }
 
 // newAzureManagedControlPlaneReconciler populates all the services based on input scope.
 func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope) *azureManagedControlPlaneService {
 	return &azureManagedControlPlaneService{
-		kubeclient:         scope.Client,
-		scope:              scope,
-		managedClustersSvc: managedclusters.New(scope),
-		groupsSvc:          groups.New(scope),
-		vnetSvc:            virtualnetworks.New(scope),
-		subnetsSvc:         subnets.New(scope),
-		tagsSvc:            tags.New(scope),
+		kubeclient: scope.Client,
+		scope:      scope,
+		services: []azure.ServiceReconciler{
+			groups.New(scope),
+			virtualnetworks.New(scope),
+			subnets.New(scope),
+			managedclusters.New(scope),
+			tags.New(scope),
+		},
 	}
 }
 
@@ -63,29 +60,14 @@ func (r *azureManagedControlPlaneService) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureManagedControlPlaneService.Reconcile")
 	defer done()
 
-	if err := r.groupsSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "failed to reconcile managed cluster resource group")
-	}
-
-	if err := r.vnetSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "failed to reconcile virtual network")
-	}
-
-	if err := r.subnetsSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "failed to reconcile subnet")
-	}
-
-	// Send to Azure for create/update.
-	if err := r.managedClustersSvc.Reconcile(ctx); err != nil {
-		return errors.Wrapf(err, "failed to reconcile managed cluster")
+	for _, service := range r.services {
+		if err := service.Reconcile(ctx); err != nil {
+			return errors.Wrapf(err, "failed to reconcile AzureManagedControlPlane service %s", service.Name())
+		}
 	}
 
 	if err := r.reconcileKubeconfig(ctx); err != nil {
 		return errors.Wrap(err, "failed to reconcile kubeconfig secret")
-	}
-
-	if err := r.tagsSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "unable to update tags")
 	}
 
 	return nil
@@ -96,16 +78,11 @@ func (r *azureManagedControlPlaneService) Delete(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureManagedControlPlaneService.Delete")
 	defer done()
 
-	if err := r.managedClustersSvc.Delete(ctx); err != nil {
-		return errors.Wrapf(err, "failed to delete managed cluster")
-	}
-
-	if err := r.vnetSvc.Delete(ctx); err != nil {
-		return errors.Wrap(err, "failed to delete virtual network")
-	}
-
-	if err := r.groupsSvc.Delete(ctx); err != nil && !errors.Is(err, azure.ErrNotOwned) {
-		return errors.Wrap(err, "failed to delete managed cluster resource group")
+	// Delete services in reverse order of creation.
+	for i := len(r.services) - 1; i >= 0; i-- {
+		if err := r.services[i].Delete(ctx); err != nil {
+			return errors.Wrapf(err, "failed to delete AzureManagedControlPlane service %s", r.services[i].Name())
+		}
 	}
 
 	return nil

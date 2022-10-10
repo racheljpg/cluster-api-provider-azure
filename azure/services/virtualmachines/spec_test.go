@@ -19,8 +19,8 @@ package virtualmachines
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
@@ -219,7 +219,7 @@ func TestParameters(t *testing.T) {
 			expect: func(g *WithT, result interface{}) {
 				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
 				g.Expect(result.(compute.VirtualMachine).Identity.Type).To(Equal(compute.ResourceIdentityTypeSystemAssigned))
-				g.Expect(result.(compute.VirtualMachine).Identity.UserAssignedIdentities).To(HaveLen(0))
+				g.Expect(result.(compute.VirtualMachine).Identity.UserAssignedIdentities).To(BeEmpty())
 			},
 			expectedError: "",
 		},
@@ -263,6 +263,33 @@ func TestParameters(t *testing.T) {
 				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
 				g.Expect(result.(compute.VirtualMachine).Priority).To(Equal(compute.VirtualMachinePriorityTypesSpot))
 				g.Expect(result.(compute.VirtualMachine).EvictionPolicy).To(Equal(compute.VirtualMachineEvictionPolicyTypesDeallocate))
+				g.Expect(result.(compute.VirtualMachine).BillingProfile).To(BeNil())
+			},
+			expectedError: "",
+		},
+		{
+			name: "can create a spot vm with evictionPolicy Delete",
+			spec: &VMSpec{
+				Name:       "my-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				OSDisk: infrav1.OSDisk{
+					DiffDiskSettings: &infrav1.DiffDiskSettings{
+						Option: string(compute.DiffDiskOptionsLocal),
+					},
+				},
+				SpotVMOptions: &infrav1.SpotVMOptions{},
+				SKU:           validSKUWithEphemeralOS,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).Priority).To(Equal(compute.VirtualMachinePriorityTypesSpot))
+				g.Expect(result.(compute.VirtualMachine).EvictionPolicy).To(Equal(compute.VirtualMachineEvictionPolicyTypesDelete))
 				g.Expect(result.(compute.VirtualMachine).BillingProfile).To(BeNil())
 			},
 			expectedError: "",
@@ -483,9 +510,11 @@ func TestParameters(t *testing.T) {
 				Size:       "Standard_D2v3",
 				Image: &infrav1.Image{
 					Marketplace: &infrav1.AzureMarketplaceImage{
-						Publisher:       "fake-publisher",
-						Offer:           "my-offer",
-						SKU:             "sku-id",
+						ImagePlan: infrav1.ImagePlan{
+							Publisher: "fake-publisher",
+							Offer:     "my-offer",
+							SKU:       "sku-id",
+						},
 						Version:         "1.0",
 						ThirdPartyImage: true,
 					},
@@ -658,6 +687,184 @@ func TestParameters(t *testing.T) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "reconcile error that cannot be recovered occurred: vm size Standard_D2v3 does not support ultra disks in location test-location. select a different vm size or disable ultra disks. Object will not be requeued",
+		},
+		{
+			name: "creates a vm with AdditionalCapabilities.UltraSSDEnabled false, if an ultra disk is specified as data disk but AdditionalCapabilities.UltraSSDEnabled is false",
+			spec: &VMSpec{
+				Name:       "my-ultra-ssd-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Location:   "test-location",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+					UltraSSDEnabled: to.BoolPtr(false),
+				},
+				DataDisks: []infrav1.DataDisk{
+					{
+						NameSuffix: "myDiskWithUltraDisk",
+						DiskSizeGB: 128,
+						Lun:        to.Int32Ptr(1),
+						ManagedDisk: &infrav1.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				},
+				SKU: validSKUWithUltraSSD,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).AdditionalCapabilities.UltraSSDEnabled).To(Equal(to.BoolPtr(false)))
+				expectedDataDisks := &[]compute.DataDisk{
+					{
+						Lun:          to.Int32Ptr(1),
+						Name:         to.StringPtr("my-ultra-ssd-vm_myDiskWithUltraDisk"),
+						CreateOption: "Empty",
+						DiskSizeGB:   to.Int32Ptr(128),
+						ManagedDisk: &compute.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				}
+				g.Expect(gomockinternal.DiffEq(expectedDataDisks).Matches(result.(compute.VirtualMachine).StorageProfile.DataDisks)).To(BeTrue(), cmp.Diff(expectedDataDisks, result.(compute.VirtualMachine).StorageProfile.DataDisks))
+			},
+			expectedError: "",
+		},
+		{
+			name: "creates a vm with AdditionalCapabilities.UltraSSDEnabled true, if an ultra disk is specified as data disk and no AdditionalCapabilities.UltraSSDEnabled is set",
+			spec: &VMSpec{
+				Name:       "my-ultra-ssd-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Location:   "test-location",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				DataDisks: []infrav1.DataDisk{
+					{
+						NameSuffix: "myDiskWithUltraDisk",
+						DiskSizeGB: 128,
+						Lun:        to.Int32Ptr(1),
+						ManagedDisk: &infrav1.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				},
+				SKU: validSKUWithUltraSSD,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).AdditionalCapabilities.UltraSSDEnabled).To(Equal(to.BoolPtr(true)))
+				expectedDataDisks := &[]compute.DataDisk{
+					{
+						Lun:          to.Int32Ptr(1),
+						Name:         to.StringPtr("my-ultra-ssd-vm_myDiskWithUltraDisk"),
+						CreateOption: "Empty",
+						DiskSizeGB:   to.Int32Ptr(128),
+						ManagedDisk: &compute.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				}
+				g.Expect(gomockinternal.DiffEq(expectedDataDisks).Matches(result.(compute.VirtualMachine).StorageProfile.DataDisks)).To(BeTrue(), cmp.Diff(expectedDataDisks, result.(compute.VirtualMachine).StorageProfile.DataDisks))
+			},
+			expectedError: "",
+		},
+		{
+			name: "creates a vm with AdditionalCapabilities.UltraSSDEnabled true, if an ultra disk is specified as data disk and AdditionalCapabilities.UltraSSDEnabled is true",
+			spec: &VMSpec{
+				Name:       "my-ultra-ssd-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Location:   "test-location",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+					UltraSSDEnabled: to.BoolPtr(true),
+				},
+				DataDisks: []infrav1.DataDisk{
+					{
+						NameSuffix: "myDiskWithUltraDisk",
+						DiskSizeGB: 128,
+						Lun:        to.Int32Ptr(1),
+						ManagedDisk: &infrav1.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				},
+				SKU: validSKUWithUltraSSD,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).AdditionalCapabilities.UltraSSDEnabled).To(Equal(to.BoolPtr(true)))
+				expectedDataDisks := &[]compute.DataDisk{
+					{
+						Lun:          to.Int32Ptr(1),
+						Name:         to.StringPtr("my-ultra-ssd-vm_myDiskWithUltraDisk"),
+						CreateOption: "Empty",
+						DiskSizeGB:   to.Int32Ptr(128),
+						ManagedDisk: &compute.ManagedDiskParameters{
+							StorageAccountType: "UltraSSD_LRS",
+						},
+					},
+				}
+				g.Expect(gomockinternal.DiffEq(expectedDataDisks).Matches(result.(compute.VirtualMachine).StorageProfile.DataDisks)).To(BeTrue(), cmp.Diff(expectedDataDisks, result.(compute.VirtualMachine).StorageProfile.DataDisks))
+			},
+			expectedError: "",
+		},
+		{
+			name: "creates a vm with AdditionalCapabilities.UltraSSDEnabled true, if no ultra disk is specified as data disk and AdditionalCapabilities.UltraSSDEnabled is true",
+			spec: &VMSpec{
+				Name:       "my-ultra-ssd-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Location:   "test-location",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+					UltraSSDEnabled: to.BoolPtr(true),
+				},
+				SKU: validSKUWithUltraSSD,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).AdditionalCapabilities.UltraSSDEnabled).To(Equal(to.BoolPtr(true)))
+			},
+			expectedError: "",
+		},
+		{
+			name: "creates a vm with AdditionalCapabilities.UltraSSDEnabled false, if no ultra disk is specified as data disk and AdditionalCapabilities.UltraSSDEnabled is false",
+			spec: &VMSpec{
+				Name:       "my-ultra-ssd-vm",
+				Role:       infrav1.Node,
+				NICIDs:     []string{"my-nic"},
+				SSHKeyData: "fakesshpublickey",
+				Size:       "Standard_D2v3",
+				Location:   "test-location",
+				Zone:       "1",
+				Image:      &infrav1.Image{ID: to.StringPtr("fake-image-id")},
+				AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+					UltraSSDEnabled: to.BoolPtr(false),
+				},
+				SKU: validSKUWithUltraSSD,
+			},
+			existing: nil,
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(compute.VirtualMachine{}))
+				g.Expect(result.(compute.VirtualMachine).AdditionalCapabilities.UltraSSDEnabled).To(Equal(to.BoolPtr(false)))
+			},
+			expectedError: "",
 		},
 	}
 	for _, tc := range testcases {

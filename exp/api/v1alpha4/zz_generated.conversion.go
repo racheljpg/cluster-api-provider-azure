@@ -149,11 +149,6 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.AzureMachinePoolMachineTemplate)(nil), (*AzureMachinePoolMachineTemplate)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(a.(*v1beta1.AzureMachinePoolMachineTemplate), b.(*AzureMachinePoolMachineTemplate), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*AzureMachinePoolSpec)(nil), (*v1beta1.AzureMachinePoolSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha4_AzureMachinePoolSpec_To_v1beta1_AzureMachinePoolSpec(a.(*AzureMachinePoolSpec), b.(*v1beta1.AzureMachinePoolSpec), scope)
 	}); err != nil {
@@ -239,18 +234,8 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.AzureManagedControlPlaneSpec)(nil), (*AzureManagedControlPlaneSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedControlPlaneSpec(a.(*v1beta1.AzureManagedControlPlaneSpec), b.(*AzureManagedControlPlaneSpec), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*AzureManagedControlPlaneStatus)(nil), (*v1beta1.AzureManagedControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha4_AzureManagedControlPlaneStatus_To_v1beta1_AzureManagedControlPlaneStatus(a.(*AzureManagedControlPlaneStatus), b.(*v1beta1.AzureManagedControlPlaneStatus), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.AzureManagedControlPlaneStatus)(nil), (*AzureManagedControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus(a.(*v1beta1.AzureManagedControlPlaneStatus), b.(*AzureManagedControlPlaneStatus), scope)
 	}); err != nil {
 		return err
 	}
@@ -281,11 +266,6 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddGeneratedConversionFunc((*AzureManagedMachinePoolStatus)(nil), (*v1beta1.AzureManagedMachinePoolStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha4_AzureManagedMachinePoolStatus_To_v1beta1_AzureManagedMachinePoolStatus(a.(*AzureManagedMachinePoolStatus), b.(*v1beta1.AzureManagedMachinePoolStatus), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.AzureManagedMachinePoolStatus)(nil), (*AzureManagedMachinePoolStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedMachinePoolStatus(a.(*v1beta1.AzureManagedMachinePoolStatus), b.(*AzureManagedMachinePoolStatus), scope)
 	}); err != nil {
 		return err
 	}
@@ -359,8 +339,28 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*v1beta1.AzureMachinePoolMachineTemplate)(nil), (*AzureMachinePoolMachineTemplate)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(a.(*v1beta1.AzureMachinePoolMachineTemplate), b.(*AzureMachinePoolMachineTemplate), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.AzureManagedControlPlaneSpec)(nil), (*AzureManagedControlPlaneSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedControlPlaneSpec(a.(*v1beta1.AzureManagedControlPlaneSpec), b.(*AzureManagedControlPlaneSpec), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.AzureManagedControlPlaneStatus)(nil), (*AzureManagedControlPlaneStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus(a.(*v1beta1.AzureManagedControlPlaneStatus), b.(*AzureManagedControlPlaneStatus), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*v1beta1.AzureManagedMachinePoolSpec)(nil), (*AzureManagedMachinePoolSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_AzureManagedMachinePoolSpec_To_v1alpha4_AzureManagedMachinePoolSpec(a.(*v1beta1.AzureManagedMachinePoolSpec), b.(*AzureManagedMachinePoolSpec), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.AzureManagedMachinePoolStatus)(nil), (*AzureManagedMachinePoolStatus)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedMachinePoolStatus(a.(*v1beta1.AzureManagedMachinePoolStatus), b.(*AzureManagedMachinePoolStatus), scope)
 	}); err != nil {
 		return err
 	}
@@ -715,12 +715,8 @@ func autoConvert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachin
 	out.SecurityProfile = (*clusterapiproviderazureapiv1alpha4.SecurityProfile)(unsafe.Pointer(in.SecurityProfile))
 	out.SpotVMOptions = (*clusterapiproviderazureapiv1alpha4.SpotVMOptions)(unsafe.Pointer(in.SpotVMOptions))
 	out.SubnetName = in.SubnetName
+	// WARNING: in.VMExtensions requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate is an autogenerated conversion function.
-func Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(in *v1beta1.AzureMachinePoolMachineTemplate, out *AzureMachinePoolMachineTemplate, s conversion.Scope) error {
-	return autoConvert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(in, out, s)
 }
 
 func autoConvert_v1alpha4_AzureMachinePoolSpec_To_v1beta1_AzureMachinePoolSpec(in *AzureMachinePoolSpec, out *v1beta1.AzureMachinePoolSpec, s conversion.Scope) error {
@@ -1066,15 +1062,11 @@ func autoConvert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedCo
 	out.LoadBalancerSKU = (*string)(unsafe.Pointer(in.LoadBalancerSKU))
 	out.IdentityRef = (*v1.ObjectReference)(unsafe.Pointer(in.IdentityRef))
 	out.AADProfile = (*AADProfile)(unsafe.Pointer(in.AADProfile))
+	// WARNING: in.AddonProfiles requires manual conversion: does not exist in peer-type
 	out.SKU = (*SKU)(unsafe.Pointer(in.SKU))
 	out.LoadBalancerProfile = (*LoadBalancerProfile)(unsafe.Pointer(in.LoadBalancerProfile))
 	out.APIServerAccessProfile = (*APIServerAccessProfile)(unsafe.Pointer(in.APIServerAccessProfile))
 	return nil
-}
-
-// Convert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedControlPlaneSpec is an autogenerated conversion function.
-func Convert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedControlPlaneSpec(in *v1beta1.AzureManagedControlPlaneSpec, out *AzureManagedControlPlaneSpec, s conversion.Scope) error {
-	return autoConvert_v1beta1_AzureManagedControlPlaneSpec_To_v1alpha4_AzureManagedControlPlaneSpec(in, out, s)
 }
 
 func autoConvert_v1alpha4_AzureManagedControlPlaneStatus_To_v1beta1_AzureManagedControlPlaneStatus(in *AzureManagedControlPlaneStatus, out *v1beta1.AzureManagedControlPlaneStatus, s conversion.Scope) error {
@@ -1092,13 +1084,9 @@ func Convert_v1alpha4_AzureManagedControlPlaneStatus_To_v1beta1_AzureManagedCont
 func autoConvert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus(in *v1beta1.AzureManagedControlPlaneStatus, out *AzureManagedControlPlaneStatus, s conversion.Scope) error {
 	out.Ready = in.Ready
 	out.Initialized = in.Initialized
+	// WARNING: in.Conditions requires manual conversion: does not exist in peer-type
 	out.LongRunningOperationStates = *(*clusterapiproviderazureapiv1alpha4.Futures)(unsafe.Pointer(&in.LongRunningOperationStates))
 	return nil
-}
-
-// Convert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus is an autogenerated conversion function.
-func Convert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus(in *v1beta1.AzureManagedControlPlaneStatus, out *AzureManagedControlPlaneStatus, s conversion.Scope) error {
-	return autoConvert_v1beta1_AzureManagedControlPlaneStatus_To_v1alpha4_AzureManagedControlPlaneStatus(in, out, s)
 }
 
 func autoConvert_v1alpha4_AzureManagedMachinePool_To_v1beta1_AzureManagedMachinePool(in *AzureManagedMachinePool, out *v1beta1.AzureManagedMachinePool, s conversion.Scope) error {
@@ -1195,9 +1183,15 @@ func autoConvert_v1beta1_AzureManagedMachinePoolSpec_To_v1alpha4_AzureManagedMac
 	out.SKU = in.SKU
 	out.OSDiskSizeGB = (*int32)(unsafe.Pointer(in.OSDiskSizeGB))
 	// WARNING: in.AvailabilityZones requires manual conversion: does not exist in peer-type
+	// WARNING: in.NodeLabels requires manual conversion: does not exist in peer-type
+	// WARNING: in.Taints requires manual conversion: does not exist in peer-type
 	out.ProviderIDList = *(*[]string)(unsafe.Pointer(&in.ProviderIDList))
 	// WARNING: in.Scaling requires manual conversion: does not exist in peer-type
 	// WARNING: in.MaxPods requires manual conversion: does not exist in peer-type
+	// WARNING: in.OsDiskType requires manual conversion: does not exist in peer-type
+	// WARNING: in.EnableUltraSSD requires manual conversion: does not exist in peer-type
+	// WARNING: in.OSType requires manual conversion: does not exist in peer-type
+	// WARNING: in.EnableNodePublicIP requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1219,12 +1213,9 @@ func autoConvert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedM
 	out.Replicas = in.Replicas
 	out.ErrorReason = (*errors.MachineStatusError)(unsafe.Pointer(in.ErrorReason))
 	out.ErrorMessage = (*string)(unsafe.Pointer(in.ErrorMessage))
+	// WARNING: in.Conditions requires manual conversion: does not exist in peer-type
+	// WARNING: in.LongRunningOperationStates requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedMachinePoolStatus is an autogenerated conversion function.
-func Convert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedMachinePoolStatus(in *v1beta1.AzureManagedMachinePoolStatus, out *AzureManagedMachinePoolStatus, s conversion.Scope) error {
-	return autoConvert_v1beta1_AzureManagedMachinePoolStatus_To_v1alpha4_AzureManagedMachinePoolStatus(in, out, s)
 }
 
 func autoConvert_v1alpha4_LoadBalancerProfile_To_v1beta1_LoadBalancerProfile(in *LoadBalancerProfile, out *v1beta1.LoadBalancerProfile, s conversion.Scope) error {

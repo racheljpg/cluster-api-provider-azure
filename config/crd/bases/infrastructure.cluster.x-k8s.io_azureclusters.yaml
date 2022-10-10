@@ -175,7 +175,7 @@ spec:
                       properties:
                         cidrBlock:
                           description: 'CidrBlock is the CIDR block to be used when
-                            the provider creates a managed Vnet. DEPRECATED: Use CIDRBlocks
+                            the provider creates a managed Vnet. Deprecated: Use CIDRBlocks
                             instead'
                           type: string
                         cidrBlocks:
@@ -287,7 +287,7 @@ spec:
                     properties:
                       cidrBlock:
                         description: 'CidrBlock is the CIDR block to be used when
-                          the provider creates a managed virtual network. DEPRECATED:
+                          the provider creates a managed virtual network. Deprecated:
                           Use CIDRBlocks instead'
                         type: string
                       cidrBlocks:
@@ -1320,6 +1320,24 @@ spec:
                         properties:
                           dnsName:
                             type: string
+                          ipTags:
+                            items:
+                              description: IPTag contains the IpTag associated with
+                                the object.
+                              properties:
+                                tag:
+                                  description: 'Tag specifies the value of the IP
+                                    tag associated with the public IP. Example: SQL.'
+                                  type: string
+                                type:
+                                  description: 'Type specifies the IP tag type. Example:
+                                    FirstPartyUsage.'
+                                  type: string
+                              required:
+                              - tag
+                              - type
+                              type: object
+                            type: array
                           name:
                             type: string
                         required:
@@ -1354,6 +1372,25 @@ spec:
                                 properties:
                                   dnsName:
                                     type: string
+                                  ipTags:
+                                    items:
+                                      description: IPTag contains the IpTag associated
+                                        with the object.
+                                      properties:
+                                        tag:
+                                          description: 'Tag specifies the value of
+                                            the IP tag associated with the public
+                                            IP. Example: SQL.'
+                                          type: string
+                                        type:
+                                          description: 'Type specifies the IP tag
+                                            type. Example: FirstPartyUsage.'
+                                          type: string
+                                      required:
+                                      - tag
+                                      - type
+                                      type: object
+                                    type: array
                                   name:
                                     type: string
                                 required:
@@ -1366,6 +1403,10 @@ spec:
                             type: object
                           role:
                             description: Role defines the subnet role (eg. Node, ControlPlane)
+                            enum:
+                            - node
+                            - control-plane
+                            - bastion
                             type: string
                           routeTable:
                             description: RouteTable defines the route table that should
@@ -1574,7 +1615,9 @@ spec:
                 type: object
               controlPlaneEndpoint:
                 description: ControlPlaneEndpoint represents the endpoint used to
-                  communicate with the control plane.
+                  communicate with the control plane. It is not recommended to set
+                  this when creating an AzureCluster as CAPZ will set this for you.
+                  However, if it is set, CAPZ will not change it.
                 properties:
                   host:
                     description: The hostname on which the API server is serving.
@@ -1650,6 +1693,25 @@ spec:
                               properties:
                                 dnsName:
                                   type: string
+                                ipTags:
+                                  items:
+                                    description: IPTag contains the IpTag associated
+                                      with the object.
+                                    properties:
+                                      tag:
+                                        description: 'Tag specifies the value of the
+                                          IP tag associated with the public IP. Example:
+                                          SQL.'
+                                        type: string
+                                      type:
+                                        description: 'Type specifies the IP tag type.
+                                          Example: FirstPartyUsage.'
+                                        type: string
+                                    required:
+                                    - tag
+                                    - type
+                                    type: object
+                                  type: array
                                 name:
                                   type: string
                               required:
@@ -1704,6 +1766,25 @@ spec:
                               properties:
                                 dnsName:
                                   type: string
+                                ipTags:
+                                  items:
+                                    description: IPTag contains the IpTag associated
+                                      with the object.
+                                    properties:
+                                      tag:
+                                        description: 'Tag specifies the value of the
+                                          IP tag associated with the public IP. Example:
+                                          SQL.'
+                                        type: string
+                                      type:
+                                        description: 'Type specifies the IP tag type.
+                                          Example: FirstPartyUsage.'
+                                        type: string
+                                    required:
+                                    - tag
+                                    - type
+                                    type: object
+                                  type: array
                                 name:
                                   type: string
                               required:
@@ -1756,6 +1837,25 @@ spec:
                               properties:
                                 dnsName:
                                   type: string
+                                ipTags:
+                                  items:
+                                    description: IPTag contains the IpTag associated
+                                      with the object.
+                                    properties:
+                                      tag:
+                                        description: 'Tag specifies the value of the
+                                          IP tag associated with the public IP. Example:
+                                          SQL.'
+                                        type: string
+                                      type:
+                                        description: 'Type specifies the IP tag type.
+                                          Example: FirstPartyUsage.'
+                                        type: string
+                                    required:
+                                    - tag
+                                    - type
+                                    type: object
+                                  type: array
                                 name:
                                   type: string
                               required:
@@ -1824,6 +1924,25 @@ spec:
                               properties:
                                 dnsName:
                                   type: string
+                                ipTags:
+                                  items:
+                                    description: IPTag contains the IpTag associated
+                                      with the object.
+                                    properties:
+                                      tag:
+                                        description: 'Tag specifies the value of the
+                                          IP tag associated with the public IP. Example:
+                                          SQL.'
+                                        type: string
+                                      type:
+                                        description: 'Type specifies the IP tag type.
+                                          Example: FirstPartyUsage.'
+                                        type: string
+                                    required:
+                                    - tag
+                                    - type
+                                    type: object
+                                  type: array
                                 name:
                                   type: string
                               required:
@@ -1836,6 +1955,10 @@ spec:
                           type: object
                         role:
                           description: Role defines the subnet role (eg. Node, ControlPlane)
+                          enum:
+                          - node
+                          - control-plane
+                          - bastion
                           type: string
                         routeTable:
                           description: RouteTable defines the route table that should

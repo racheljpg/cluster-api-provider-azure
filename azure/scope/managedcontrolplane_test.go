@@ -26,24 +26,27 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capiv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestManagedControlPlaneScope_Autoscaling(t *testing.T) {
+func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = capiv1exp.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
 
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected azure.AgentPoolSpec
+		Expected []azure.ResourceSpecGetter
+		Err      string
 	}{
 		{
-			Name: "Without Autoscaling",
+			Name: "Without Version",
 			Input: ManagedControlPlaneScopeParams{
 				AzureClients: AzureClients{
 					Authorizer: autorest.NullAuthorizer{},
@@ -54,31 +57,36 @@ func TestManagedControlPlaneScope_Autoscaling(t *testing.T) {
 						Namespace: "default",
 					},
 				},
-				ControlPlane: &infrav1.AzureManagedControlPlane{
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
 						Namespace: "default",
 					},
-					Spec: infrav1.AzureManagedControlPlaneSpec{
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
 						SubscriptionID: "00000000-0000-0000-0000-000000000000",
 					},
 				},
-				MachinePool:      getMachinePool("pool0"),
-				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				PatchTarget:      getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+				},
 			},
-			Expected: azure.AgentPoolSpec{
-
-				Name:         "pool0",
-				SKU:          "Standard_D2s_v3",
-				Replicas:     1,
-				Mode:         "System",
-				Cluster:      "cluster1",
-				VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+			Expected: []azure.ResourceSpecGetter{
+				&agentpools.AgentPoolSpec{
+					Name:         "pool0",
+					SKU:          "Standard_D2s_v3",
+					Replicas:     1,
+					Mode:         "System",
+					Cluster:      "cluster1",
+					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+					Headers:      map[string]string{},
+				},
 			},
 		},
 		{
-			Name: "With Autoscaling",
+			Name: "With Version",
 			Input: ManagedControlPlaneScopeParams{
 				AzureClients: AzureClients{
 					Authorizer: autorest.NullAuthorizer{},
@@ -89,29 +97,162 @@ func TestManagedControlPlaneScope_Autoscaling(t *testing.T) {
 						Namespace: "default",
 					},
 				},
-				ControlPlane: &infrav1.AzureManagedControlPlane{
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
 						Namespace: "default",
 					},
-					Spec: infrav1.AzureManagedControlPlaneSpec{
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.22.0",
 						SubscriptionID: "00000000-0000-0000-0000-000000000000",
 					},
 				},
-				MachinePool:      getMachinePool("pool1"),
-				InfraMachinePool: getAzureMachinePoolWithScaling("pool1", 2, 10),
-				PatchTarget:      getAzureMachinePoolWithScaling("pool1", 2, 10),
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePoolWithVersion("pool0", "v1.21.1"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+				},
 			},
-			Expected: azure.AgentPoolSpec{
-				Name:              "pool1",
-				SKU:               "Standard_D2s_v3",
-				Mode:              "User",
-				Cluster:           "cluster1",
-				Replicas:          1,
-				EnableAutoScaling: to.BoolPtr(true),
-				MinCount:          to.Int32Ptr(2),
-				MaxCount:          to.Int32Ptr(10),
-				VnetSubnetID:      "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+			Expected: []azure.ResourceSpecGetter{
+				&agentpools.AgentPoolSpec{
+					Name:         "pool0",
+					SKU:          "Standard_D2s_v3",
+					Mode:         "System",
+					Replicas:     1,
+					Version:      to.StringPtr("1.21.1"),
+					Cluster:      "cluster1",
+					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+					Headers:      map[string]string{},
+				},
+			},
+		},
+		{
+			Name: "With bad version",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePoolWithVersion("pool0", "v1.21.1"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+				},
+			},
+			Err: "MachinePool version cannot be greater than the AzureManagedControlPlane version",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			agentPools, err := s.GetAllAgentPoolSpecs()
+			if err != nil {
+				g.Expect(err.Error()).To(Equal(c.Err))
+			} else {
+				g.Expect(agentPools).To(Equal(c.Expected))
+			}
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_AddonProfiles(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected []managedclusters.AddonProfile
+	}{
+		{
+			Name: "Without add-ons",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: nil,
+		},
+		{
+			Name: "With add-ons",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AddonProfiles: []infrav1exp.AddonProfile{
+							{Name: "addon1", Config: nil, Enabled: false},
+							{Name: "addon2", Config: map[string]string{"k1": "v1", "k2": "v2"}, Enabled: true},
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: []managedclusters.AddonProfile{
+				{Name: "addon1", Config: nil, Enabled: false},
+				{Name: "addon2", Config: map[string]string{"k1": "v1", "k2": "v2"}, Enabled: true},
 			},
 		},
 	}
@@ -120,28 +261,29 @@ func TestManagedControlPlaneScope_Autoscaling(t *testing.T) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
 			c.Input.Client = fakeClient
 			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
 			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
-			g.Expect(agentPool).To(Equal(c.Expected))
+			managedCluster := s.ManagedClusterSpec(context.TODO())
+			g.Expect(managedCluster.(*managedclusters.ManagedClusterSpec).AddonProfiles).To(Equal(c.Expected))
 		})
 	}
 }
 
-func TestManagedControlPlaneScope_MaxPods(t *testing.T) {
+func TestManagedControlPlaneScope_OSType(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = capiv1exp.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
 
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected azure.AgentPoolSpec
+		Expected []azure.ResourceSpecGetter
+		Err      string
 	}{
 		{
-			Name: "Without MaxPods",
+			Name: "with Linux and Windows pools",
 			Input: ManagedControlPlaneScopeParams{
 				AzureClients: AzureClients{
 					Authorizer: autorest.NullAuthorizer{},
@@ -152,30 +294,65 @@ func TestManagedControlPlaneScope_MaxPods(t *testing.T) {
 						Namespace: "default",
 					},
 				},
-				ControlPlane: &infrav1.AzureManagedControlPlane{
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
 						Namespace: "default",
 					},
-					Spec: infrav1.AzureManagedControlPlaneSpec{
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
 						SubscriptionID: "00000000-0000-0000-0000-000000000000",
 					},
 				},
-				MachinePool:      getMachinePool("pool0"),
-				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				PatchTarget:      getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+					{
+						MachinePool:      getMachinePool("pool1"),
+						InfraMachinePool: getLinuxAzureMachinePool("pool1"),
+					},
+					{
+						MachinePool:      getMachinePool("pool2"),
+						InfraMachinePool: getWindowsAzureMachinePool("pool2"),
+					},
+				},
 			},
-			Expected: azure.AgentPoolSpec{
-				Name:         "pool0",
-				SKU:          "Standard_D2s_v3",
-				Replicas:     1,
-				Mode:         "System",
-				Cluster:      "cluster1",
-				VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+			Expected: []azure.ResourceSpecGetter{
+				&agentpools.AgentPoolSpec{
+					Name:         "pool0",
+					SKU:          "Standard_D2s_v3",
+					Mode:         "System",
+					Replicas:     1,
+					Cluster:      "cluster1",
+					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+					Headers:      map[string]string{},
+				},
+				&agentpools.AgentPoolSpec{
+					Name:         "pool1",
+					SKU:          "Standard_D2s_v3",
+					Mode:         "User",
+					Replicas:     1,
+					Cluster:      "cluster1",
+					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+					OSType:       to.StringPtr(azure.LinuxOS),
+					Headers:      map[string]string{},
+				},
+				&agentpools.AgentPoolSpec{
+					Name:         "pool2",
+					SKU:          "Standard_D2s_v3",
+					Mode:         "User",
+					Replicas:     1,
+					Cluster:      "cluster1",
+					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
+					OSType:       to.StringPtr(azure.WindowsOS),
+					Headers:      map[string]string{},
+				},
 			},
 		},
 		{
-			Name: "With MaxPods",
+			Name: "system pool required",
 			Input: ManagedControlPlaneScopeParams{
 				AzureClients: AzureClients{
 					Authorizer: autorest.NullAuthorizer{},
@@ -186,28 +363,28 @@ func TestManagedControlPlaneScope_MaxPods(t *testing.T) {
 						Namespace: "default",
 					},
 				},
-				ControlPlane: &infrav1.AzureManagedControlPlane{
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
 						Namespace: "default",
 					},
-					Spec: infrav1.AzureManagedControlPlaneSpec{
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
 						SubscriptionID: "00000000-0000-0000-0000-000000000000",
 					},
 				},
-				MachinePool:      getMachinePool("pool1"),
-				InfraMachinePool: getAzureMachinePoolWithMaxPods("pool1", 12),
-				PatchTarget:      getAzureMachinePoolWithScaling("pool1", 2, 10),
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getLinuxAzureMachinePool("pool0"),
+					},
+					{
+						MachinePool:      getMachinePool("pool1"),
+						InfraMachinePool: getWindowsAzureMachinePool("pool1"),
+					},
+				},
 			},
-			Expected: azure.AgentPoolSpec{
-				Name:         "pool1",
-				SKU:          "Standard_D2s_v3",
-				Mode:         "User",
-				Cluster:      "cluster1",
-				Replicas:     1,
-				MaxPods:      to.Int32Ptr(12),
-				VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
-			},
+			Err: "failed to fetch azuremanagedMachine pool with mode:System, require at least 1 system node pool",
 		},
 	}
 
@@ -215,66 +392,153 @@ func TestManagedControlPlaneScope_MaxPods(t *testing.T) {
 		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
 			c.Input.Client = fakeClient
 			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
 			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
-			g.Expect(agentPool).To(Equal(c.Expected))
+			agentPools, err := s.GetAllAgentPoolSpecs()
+			if err != nil {
+				g.Expect(err.Error()).To(Equal(c.Err))
+			} else {
+				g.Expect(agentPools).To(Equal(c.Expected))
+			}
 		})
 	}
 }
 
-func getAzureMachinePool(name string, mode infrav1.NodePoolMode) *infrav1.AzureManagedMachinePool {
-	return &infrav1.AzureManagedMachinePool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: "default",
-			Labels: map[string]string{
-				clusterv1.ClusterLabelName: "cluster1",
-			},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion: "cluster.x-k8s.io/v1beta1",
-					Kind:       "MachinePool",
-					Name:       name,
+func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected bool
+	}{
+		{
+			Name: "no Cache value",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+					{
+						MachinePool:      getMachinePool("pool1"),
+						InfraMachinePool: getLinuxAzureMachinePool("pool1"),
+					},
 				},
 			},
+			Expected: false,
 		},
-		Spec: infrav1.AzureManagedMachinePoolSpec{
-			Mode: string(mode),
-			SKU:  "Standard_D2s_v3",
-			Name: to.StringPtr(name),
-		},
-	}
-}
-
-func getAzureMachinePoolWithScaling(name string, min, max int32) *infrav1.AzureManagedMachinePool {
-	managedPool := getAzureMachinePool(name, infrav1.NodePoolModeUser)
-	managedPool.Spec.Scaling = &infrav1.ManagedMachinePoolScaling{
-		MinSize: to.Int32Ptr(min),
-		MaxSize: to.Int32Ptr(max),
-	}
-	return managedPool
-}
-
-func getAzureMachinePoolWithMaxPods(name string, maxPods int32) *infrav1.AzureManagedMachinePool {
-	managedPool := getAzureMachinePool(name, infrav1.NodePoolModeUser)
-	managedPool.Spec.MaxPods = to.Int32Ptr(maxPods)
-	return managedPool
-}
-
-func getMachinePool(name string) *capiv1exp.MachinePool {
-	return &capiv1exp.MachinePool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: "default",
-			Labels: map[string]string{
-				clusterv1.ClusterLabelName: "cluster1",
+		{
+			Name: "with Cache value of true",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+					{
+						MachinePool:      getMachinePool("pool1"),
+						InfraMachinePool: getLinuxAzureMachinePool("pool1"),
+					},
+				},
+				Cache: &ManagedControlPlaneCache{
+					isVnetManaged: to.BoolPtr(true),
+				},
 			},
+			Expected: true,
 		},
-		Spec: capiv1exp.MachinePoolSpec{
-			ClusterName: "cluster1",
+		{
+			Name: "with Cache value of false",
+			Input: ManagedControlPlaneScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1exp.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1exp.AzureManagedControlPlaneSpec{
+						Version:        "v1.20.1",
+						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1exp.NodePoolModeSystem),
+					},
+					{
+						MachinePool:      getMachinePool("pool1"),
+						InfraMachinePool: getLinuxAzureMachinePool("pool1"),
+					},
+				},
+				Cache: &ManagedControlPlaneCache{
+					isVnetManaged: to.BoolPtr(false),
+				},
+			},
+			Expected: false,
 		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			isVnetManaged := s.IsVnetManaged()
+			g.Expect(isVnetManaged).To(Equal(c.Expected))
+		})
 	}
 }

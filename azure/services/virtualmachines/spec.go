@@ -20,16 +20,14 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/util/generators"
-
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
-
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
-	"github.com/Azure/go-autorest/autorest/to"
-	"github.com/pkg/errors"
 )
 
 // VMSpec defines the specification for a Virtual Machine.
@@ -51,6 +49,7 @@ type VMSpec struct {
 	SpotVMOptions          *infrav1.SpotVMOptions
 	SecurityProfile        *infrav1.SecurityProfile
 	AdditionalTags         infrav1.Tags
+	AdditionalCapabilities *infrav1.AdditionalCapabilities
 	SKU                    resourceskus.SKU
 	Image                  *infrav1.Image
 	BootstrapData          string
@@ -73,7 +72,7 @@ func (s *VMSpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the virtual machine.
-func (s *VMSpec) Parameters(existing interface{}) (interface{}, error) {
+func (s *VMSpec) Parameters(existing interface{}) (params interface{}, err error) {
 	if existing != nil {
 		if _, ok := existing.(compute.VirtualMachine); !ok {
 			return nil, errors.Errorf("%T is not a compute.VirtualMachine", existing)
@@ -102,7 +101,7 @@ func (s *VMSpec) Parameters(existing interface{}) (interface{}, error) {
 		return nil, errors.Wrap(err, "failed to generate OS Profile")
 	}
 
-	priority, evictionPolicy, billingProfile, err := converters.GetSpotVMOptions(s.SpotVMOptions)
+	priority, evictionPolicy, billingProfile, err := converters.GetSpotVMOptions(s.SpotVMOptions, s.OSDisk.DiffDiskSettings)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get Spot VM options")
 	}
@@ -308,6 +307,9 @@ func (s *VMSpec) generateNICRefs() *[]compute.NetworkInterfaceReference {
 
 func (s *VMSpec) generateAdditionalCapabilities() *compute.AdditionalCapabilities {
 	var capabilities *compute.AdditionalCapabilities
+
+	// Provisionally detect whether there is any Data Disk defined which uses UltraSSDs.
+	// If that's the case, enable the UltraSSD capability.
 	for _, dataDisk := range s.DataDisks {
 		if dataDisk.ManagedDisk != nil && dataDisk.ManagedDisk.StorageAccountType == string(compute.StorageAccountTypesUltraSSDLRS) {
 			capabilities = &compute.AdditionalCapabilities{
@@ -316,6 +318,18 @@ func (s *VMSpec) generateAdditionalCapabilities() *compute.AdditionalCapabilitie
 			break
 		}
 	}
+
+	// Set Additional Capabilities if any is present on the spec.
+	if s.AdditionalCapabilities != nil {
+		if capabilities == nil {
+			capabilities = &compute.AdditionalCapabilities{}
+		}
+		// Set UltraSSDEnabled if a specific value is set on the spec for it.
+		if s.AdditionalCapabilities.UltraSSDEnabled != nil {
+			capabilities.UltraSSDEnabled = s.AdditionalCapabilities.UltraSSDEnabled
+		}
+	}
+
 	return capabilities
 }
 

@@ -17,12 +17,16 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/gomega"
+	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
@@ -36,99 +40,107 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 		{
 			name: "azuremachinetemplate with marketplane image - full",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithtMarketPlaceImage(t, "PUB1234", "OFFER1234", "SKU1234", "1.0.0"),
+				createMachineWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0"),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate with marketplace image - missing publisher",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithtMarketPlaceImage(t, "", "OFFER1234", "SKU1234", "1.0.0"),
+				createMachineWithMarketPlaceImage("", "OFFER1234", "SKU1234", "1.0.0"),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with shared gallery image - full",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithSharedImage(t, "SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0"),
+				createMachineWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0"),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate with marketplace image - missing subscription",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithSharedImage(t, "", "RG123", "NAME123", "GALLERY1", "1.0.0"),
+				createMachineWithSharedImage("", "RG123", "NAME123", "GALLERY2", "1.0.0"),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with image by - with id",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithImageByID(t, "ID123"),
+				createMachineWithImageByID("ID123"),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate with image by - without id",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithImageByID(t, ""),
+				createMachineWithImageByID(""),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with valid SSHPublicKey",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithSSHPublicKey(t, validSSHPublicKey),
+				createMachineWithSSHPublicKey(validSSHPublicKey),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate without SSHPublicKey",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithSSHPublicKey(t, ""),
+				createMachineWithSSHPublicKey(""),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with invalid SSHPublicKey",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithSSHPublicKey(t, "invalid ssh key"),
+				createMachineWithSSHPublicKey("invalid ssh key"),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with list of user-assigned identities",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithUserAssignedIdentities(t, []UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
+				createMachineWithUserAssignedIdentities([]UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate with empty list of user-assigned identities",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithUserAssignedIdentities(t, []UserAssignedIdentity{}),
+				createMachineWithUserAssignedIdentities([]UserAssignedIdentity{}),
 			),
 			wantErr: true,
 		},
 		{
 			name: "azuremachinetemplate with valid osDisk cache type",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithOsDiskCacheType(t, string(compute.PossibleCachingTypesValues()[1])),
+				createMachineWithOsDiskCacheType(string(compute.PossibleCachingTypesValues()[1])),
 			),
 			wantErr: false,
 		},
 		{
 			name: "azuremachinetemplate with invalid osDisk cache type",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithOsDiskCacheType(t, "invalid_cache_type"),
+				createMachineWithOsDiskCacheType("invalid_cache_type"),
 			),
 			wantErr: true,
+		},
+		{
+			name:            "azuremachinetemplate with RoleAssignmentName",
+			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithRoleAssignmentName()),
+			wantErr:         true,
 		},
 	}
 
 	for _, test := range tests {
+		test := test
 		t.Run(test.name, func(t *testing.T) {
-			err := test.machineTemplate.ValidateCreate()
+			t.Parallel()
+			ctx := context.Background()
+			err := test.machineTemplate.ValidateCreate(ctx, test.machineTemplate)
 			if test.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -316,11 +328,27 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 		},
 	}
 
+	// dry-run=true
 	for _, amt := range tests {
 		amt := amt
 		t.Run(amt.name, func(t *testing.T) {
 			t.Parallel()
-			err := amt.template.ValidateUpdate(amt.oldTemplate)
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: pointer.Bool(true)}})
+			err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
+			if amt.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+	// dry-run=false
+	for _, amt := range tests {
+		amt := amt
+		t.Run(amt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: pointer.Bool(false)}})
+			err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
 			if amt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

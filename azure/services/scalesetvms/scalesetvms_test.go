@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
@@ -38,7 +38,7 @@ import (
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomock2 "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -65,9 +65,11 @@ func TestNewService(t *testing.T) {
 		Cluster: cluster,
 		AzureCluster: &infrav1.AzureCluster{
 			Spec: infrav1.AzureClusterSpec{
-				Location:       "test-location",
-				ResourceGroup:  "my-rg",
-				SubscriptionID: "123",
+				AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+					Location:       "test-location",
+					SubscriptionID: "123",
+				},
+				ResourceGroup: "my-rg",
 				NetworkSpec: infrav1.NetworkSpec{
 					Vnet: infrav1.VnetSpec{Name: "my-vnet", ResourceGroup: "my-rg"},
 				},
@@ -78,14 +80,14 @@ func TestNewService(t *testing.T) {
 
 	mpms, err := scope.NewMachinePoolMachineScope(scope.MachinePoolMachineScopeParams{
 		Client:                  client,
-		MachinePool:             new(clusterv1exp.MachinePool),
+		MachinePool:             new(expv1.MachinePool),
 		AzureMachinePool:        new(infrav1exp.AzureMachinePool),
 		AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 		ClusterScope:            s,
 	})
 	g.Expect(err).NotTo(HaveOccurred())
 	actual := NewService(mpms)
-	g.Expect(actual).ToNot(BeNil())
+	g.Expect(actual).NotTo(BeNil())
 }
 
 func TestService_Reconcile(t *testing.T) {
@@ -175,7 +177,7 @@ func TestService_Delete(t *testing.T) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ScaleSetName().Return("scaleset")
-				s.GetLongRunningOperationState("0", serviceName).Return(nil)
+				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
 				}
@@ -198,9 +200,9 @@ func TestService_Delete(t *testing.T) {
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
 				}
-				s.GetLongRunningOperationState("0", serviceName).Return(future)
+				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(future)
 				m.GetResultIfDone(gomock2.AContext(), future).Return(compute.VirtualMachineScaleSetVM{}, nil)
-				s.DeleteLongRunningOperationState("0", serviceName)
+				s.DeleteLongRunningOperationState("0", serviceName, infrav1.DeleteFuture)
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
 			},
 		},
@@ -210,7 +212,7 @@ func TestService_Delete(t *testing.T) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ScaleSetName().Return("scaleset")
-				s.GetLongRunningOperationState("0", serviceName).Return(nil)
+				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomock2.AContext(), "rg", "scaleset", "0").Return(nil, autorest404)
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
 			},
@@ -221,7 +223,7 @@ func TestService_Delete(t *testing.T) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ScaleSetName().Return("scaleset")
-				s.GetLongRunningOperationState("0", serviceName).Return(nil)
+				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomock2.AContext(), "rg", "scaleset", "0").Return(nil, errors.New("boom"))
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
 			},
@@ -236,7 +238,7 @@ func TestService_Delete(t *testing.T) {
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
 				}
-				s.GetLongRunningOperationState("0", serviceName).Return(future)
+				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(future)
 				m.GetResultIfDone(gomock2.AContext(), future).Return(compute.VirtualMachineScaleSetVM{}, errors.New("boom"))
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
 			},

@@ -21,26 +21,20 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets/mock_scalesets"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 const (
@@ -51,47 +45,6 @@ const (
 
 func init() {
 	_ = clusterv1.AddToScheme(scheme.Scheme)
-}
-
-func TestNewService(t *testing.T) {
-	g := NewGomegaWithT(t)
-	scheme := runtime.NewScheme()
-	_ = clusterv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-	_ = infrav1exp.AddToScheme(scheme)
-
-	cluster := &clusterv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-cluster"},
-	}
-	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster).Build()
-	s, err := scope.NewClusterScope(context.Background(), scope.ClusterScopeParams{
-		AzureClients: scope.AzureClients{
-			Authorizer: autorest.NullAuthorizer{},
-		},
-		Client:  client,
-		Cluster: cluster,
-		AzureCluster: &infrav1.AzureCluster{
-			Spec: infrav1.AzureClusterSpec{
-				Location: "test-location",
-				ResourceGroup:  "my-rg",
-				SubscriptionID: "123",
-				NetworkSpec: infrav1.NetworkSpec{
-					Vnet: infrav1.VnetSpec{Name: "my-vnet", ResourceGroup: "my-rg"},
-				},
-			},
-		},
-	})
-	g.Expect(err).NotTo(HaveOccurred())
-
-	mps, err := scope.NewMachinePoolScope(scope.MachinePoolScopeParams{
-		Client:           client,
-		MachinePool:      new(clusterv1exp.MachinePool),
-		AzureMachinePool: new(infrav1exp.AzureMachinePool),
-		ClusterScope:     s,
-	})
-	g.Expect(err).NotTo(HaveOccurred())
-	actual := NewService(mps, resourceskus.NewStaticCache(nil, ""))
-	g.Expect(actual).ToNot(BeNil())
 }
 
 func TestGetExistingVMSS(t *testing.T) {
@@ -265,8 +218,11 @@ func TestReconcileVMSS(t *testing.T) {
 				s.ScaleSetSpec().Return(defaultSpec).AnyTimes()
 				createdVMSS := newDefaultVMSS("VM_SIZE")
 				instances := newDefaultInstances()
-				_ = setupDefaultVMSSInProgressOperationDoneExpectations(s, m, createdVMSS, instances)
-				s.DeleteLongRunningOperationState(defaultSpec.Name, scope.ScalesetsServiceName)
+
+				setupDefaultVMSSInProgressOperationDoneExpectations(s, m, createdVMSS, instances)
+				s.DeleteLongRunningOperationState(defaultSpec.Name, serviceName, infrav1.PutFuture)
+				s.DeleteLongRunningOperationState(defaultSpec.Name, serviceName, infrav1.PatchFuture)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 			},
 		},
 		{
@@ -277,8 +233,11 @@ func TestReconcileVMSS(t *testing.T) {
 				s.ScaleSetSpec().Return(defaultSpec).AnyTimes()
 				createdVMSS := newDefaultWindowsVMSS()
 				instances := newDefaultInstances()
-				_ = setupDefaultVMSSInProgressOperationDoneExpectations(s, m, createdVMSS, instances)
-				s.DeleteLongRunningOperationState(defaultSpec.Name, scope.ScalesetsServiceName)
+
+				setupDefaultVMSSInProgressOperationDoneExpectations(s, m, createdVMSS, instances)
+				s.DeleteLongRunningOperationState(defaultSpec.Name, serviceName, infrav1.PutFuture)
+				s.DeleteLongRunningOperationState(defaultSpec.Name, serviceName, infrav1.PatchFuture)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 			},
 		},
 		{
@@ -321,6 +280,29 @@ func TestReconcileVMSS(t *testing.T) {
 				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
 					Return(putFuture, nil)
 				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE"), putFuture)
+			},
+		},
+		{
+			name:          "should start creating a vmss with spot vm and delete evictionPolicy",
+			expectedError: "failed to get VMSS my-vmss after create or update: failed to get result from future: operation type PUT on Azure resource my-rg/my-vmss is not done",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				spec := newDefaultVMSSSpec()
+				spec.Size = "VM_SIZE_EPH"
+				spec.SpotVMOptions = &infrav1.SpotVMOptions{}
+				spec.OSDisk.DiffDiskSettings = &infrav1.DiffDiskSettings{
+					Option: string(compute.DiffDiskOptionsLocal),
+				}
+				s.ScaleSetSpec().Return(spec).AnyTimes()
+				setupDefaultVMSSStartCreatingExpectations(s, m)
+				vmss := newDefaultVMSS("VM_SIZE_EPH")
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.StorageProfile.OsDisk.DiffDiskSettings = &compute.DiffDiskSettings{
+					Option: compute.DiffDiskOptionsLocal,
+				}
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.Priority = compute.VirtualMachinePriorityTypesSpot
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.EvictionPolicy = compute.VirtualMachineEvictionPolicyTypesDelete
+				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
+					Return(putFuture, nil)
+				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE_EPH"), putFuture)
 			},
 		},
 		{
@@ -453,6 +435,30 @@ func TestReconcileVMSS(t *testing.T) {
 			},
 		},
 		{
+			name:          "should start creating a vmss with ephemeral osdisk",
+			expectedError: "failed to get VMSS my-vmss after create or update: failed to get result from future: operation type PUT on Azure resource my-rg/my-vmss is not done",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				defaultSpec := newDefaultVMSSSpec()
+				defaultSpec.Size = "VM_SIZE_EPH"
+				defaultSpec.OSDisk.DiffDiskSettings = &infrav1.DiffDiskSettings{
+					Option: "Local",
+				}
+				defaultSpec.OSDisk.CachingType = "ReadOnly"
+
+				s.ScaleSetSpec().Return(defaultSpec).AnyTimes()
+				setupDefaultVMSSStartCreatingExpectations(s, m)
+				vmss := newDefaultVMSS("VM_SIZE_EPH")
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.StorageProfile.OsDisk.DiffDiskSettings = &compute.DiffDiskSettings{
+					Option: compute.DiffDiskOptionsLocal,
+				}
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.StorageProfile.OsDisk.Caching = compute.CachingTypesReadOnly
+
+				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
+					Return(putFuture, nil)
+				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE_EPH"), putFuture)
+			},
+		},
+		{
 			name:          "should start updating when scale set already exists and not currently in a long running operation",
 			expectedError: "failed to get VMSS my-vmss after create or update: failed to get result from future: operation type PATCH on Azure resource my-rg/my-vmss is not done",
 			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
@@ -519,7 +525,7 @@ func TestReconcileVMSS(t *testing.T) {
 		},
 		{
 			name:          "failed to get SKU",
-			expectedError: "reconcile error that cannot be recovered occurred: failed to get SKU INVALID_VM_SIZE in compute api: resource sku with name 'INVALID_VM_SIZE' and category 'virtualMachines' not found in location 'test-location'. Object will not be requeued",
+			expectedError: "failed to get SKU INVALID_VM_SIZE in compute api: reconcile error that cannot be recovered occurred: resource sku with name 'INVALID_VM_SIZE' and category 'virtualMachines' not found in location 'test-location'. Object will not be requeued",
 			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
 				s.ScaleSetSpec().Return(azure.ScaleSetSpec{
 					Name:       defaultVMSSName,
@@ -543,7 +549,7 @@ func TestReconcileVMSS(t *testing.T) {
 			},
 		},
 		{
-			name:          "fail to create a vm with ultra disk enabled",
+			name:          "fail to create a vm with ultra disk implicitly enabled by data disk, when location not supported",
 			expectedError: "reconcile error that cannot be recovered occurred: vm size VM_SIZE_USSD does not support ultra disks in location test-location. select a different vm size or disable ultra disks. Object will not be requeued",
 			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
 				s.ScaleSetSpec().Return(azure.ScaleSetSpec{
@@ -557,6 +563,45 @@ func TestReconcileVMSS(t *testing.T) {
 								StorageAccountType: "UltraSSD_LRS",
 							},
 						},
+					},
+				})
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
+		{
+			name:          "fail to create a vm with ultra disk explicitly enabled via additional capabilities, when location not supported",
+			expectedError: "reconcile error that cannot be recovered occurred: vm size VM_SIZE_USSD does not support ultra disks in location test-location. select a different vm size or disable ultra disks. Object will not be requeued",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				s.ScaleSetSpec().Return(azure.ScaleSetSpec{
+					Name:       defaultVMSSName,
+					Size:       "VM_SIZE_USSD",
+					Capacity:   2,
+					SSHKeyData: "ZmFrZXNzaGtleQo=",
+					AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+						UltraSSDEnabled: to.BoolPtr(true),
+					},
+				})
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
+		{
+			name:          "fail to create a vm with ultra disk explicitly enabled via additional capabilities, when location not supported",
+			expectedError: "reconcile error that cannot be recovered occurred: vm size VM_SIZE_USSD does not support ultra disks in location test-location. select a different vm size or disable ultra disks. Object will not be requeued",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				s.ScaleSetSpec().Return(azure.ScaleSetSpec{
+					Name:       defaultVMSSName,
+					Size:       "VM_SIZE_USSD",
+					Capacity:   2,
+					SSHKeyData: "ZmFrZXNzaGtleQo=",
+					DataDisks: []infrav1.DataDisk{
+						{
+							ManagedDisk: &infrav1.ManagedDiskParameters{
+								StorageAccountType: "UltraSSD_LRS",
+							},
+						},
+					},
+					AdditionalCapabilities: &infrav1.AdditionalCapabilities{
+						UltraSSDEnabled: to.BoolPtr(false),
 					},
 				})
 				s.Location().AnyTimes().Return("test-location")
@@ -616,11 +661,12 @@ func TestDeleteVMSS(t *testing.T) {
 				}).AnyTimes()
 				s.ResourceGroup().AnyTimes().Return("my-existing-rg")
 				future := &infrav1.Future{}
-				s.GetLongRunningOperationState("my-existing-vmss", scope.ScalesetsServiceName).Return(future)
+				s.GetLongRunningOperationState("my-existing-vmss", serviceName, infrav1.DeleteFuture).Return(future)
 				m.GetResultIfDone(gomockinternal.AContext(), future).Return(compute.VirtualMachineScaleSet{}, nil)
 				m.Get(gomockinternal.AContext(), "my-existing-rg", "my-existing-vmss").
 					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
-				s.DeleteLongRunningOperationState("my-existing-vmss", scope.ScalesetsServiceName)
+				s.DeleteLongRunningOperationState("my-existing-vmss", serviceName, infrav1.DeleteFuture)
+				s.UpdateDeleteStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 			},
 		},
 		{
@@ -633,7 +679,7 @@ func TestDeleteVMSS(t *testing.T) {
 					Capacity: 3,
 				}).AnyTimes()
 				s.ResourceGroup().AnyTimes().Return(resourceGroup)
-				s.GetLongRunningOperationState(name, scope.ScalesetsServiceName).Return(nil)
+				s.GetLongRunningOperationState(name, serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomockinternal.AContext(), resourceGroup, name).
 					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
 				m.Get(gomockinternal.AContext(), resourceGroup, name).
@@ -650,7 +696,7 @@ func TestDeleteVMSS(t *testing.T) {
 					Capacity: 3,
 				}).AnyTimes()
 				s.ResourceGroup().AnyTimes().Return(resourceGroup)
-				s.GetLongRunningOperationState(name, scope.ScalesetsServiceName).Return(nil)
+				s.GetLongRunningOperationState(name, serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomockinternal.AContext(), resourceGroup, name).
 					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal Server Error"))
 				m.Get(gomockinternal.AContext(), resourceGroup, name).
@@ -741,16 +787,16 @@ func getFakeSkus() []compute.ResourceSku {
 				{
 					Location: to.StringPtr("test-location"),
 					Zones:    &[]string{"1", "3"},
-					//ZoneDetails: &[]compute.ResourceSkuZoneDetails{
-					//	{
-					//		Capabilities: &[]compute.ResourceSkuCapabilities{
-					//			{
-					//				Name:  pointer.String("UltraSSDAvailable"),
-					//				Value: pointer.String("True"),
-					//			},
-					//		},
-					//	},
-					//},
+					// ZoneDetails: &[]compute.ResourceSkuZoneDetails{
+					//    {
+					//        	Capabilities: &[]compute.ResourceSkuCapabilities{
+					//        		{
+					//        			Name:  pointer.String("UltraSSDAvailable"),
+					//        			Value: pointer.String("True"),
+					//        		},
+					//        	},
+					//        },
+					//    },
 				},
 			},
 			Capabilities: &[]compute.ResourceSkuCapabilities{
@@ -835,16 +881,16 @@ func getFakeSkus() []compute.ResourceSku {
 				{
 					Location: to.StringPtr("test-location"),
 					Zones:    &[]string{"1", "3"},
-					//ZoneDetails: &[]compute.ResourceSkuZoneDetails{
-					//	{
-					//		Capabilities: &[]compute.ResourceSkuCapabilities{
-					//			{
-					//				Name:  pointer.String("UltraSSDAvailable"),
-					//				Value: pointer.String("True"),
-					//			},
-					//		},
-					//	},
-					//},
+					//  ZoneDetails: &[]compute.ResourceSkuZoneDetails{
+					//	    {
+					//    		Capabilities: &[]compute.ResourceSkuCapabilities{
+					//    			{
+					//    				Name:  pointer.String("UltraSSDAvailable"),
+					//    				Value: pointer.String("True"),
+					//    			},
+					//    		},
+					//	    },
+					//  },
 				},
 			},
 			Capabilities: &[]compute.ResourceSkuCapabilities{
@@ -887,6 +933,49 @@ func getFakeSkus() []compute.ResourceSku {
 				{
 					Name:  to.StringPtr(resourceskus.MemoryGB),
 					Value: to.StringPtr("6"),
+				},
+			},
+		},
+		{
+			Name:         to.StringPtr("VM_SIZE_EPH"),
+			ResourceType: to.StringPtr(string(resourceskus.VirtualMachines)),
+			Kind:         to.StringPtr(string(resourceskus.VirtualMachines)),
+			Locations: &[]string{
+				"test-location",
+			},
+			LocationInfo: &[]compute.ResourceSkuLocationInfo{
+				{
+					Location: to.StringPtr("test-location"),
+					Zones:    &[]string{"1", "3"},
+					ZoneDetails: &[]compute.ResourceSkuZoneDetails{
+						{
+							Capabilities: &[]compute.ResourceSkuCapabilities{
+								{
+									Name:  pointer.String("UltraSSDAvailable"),
+									Value: pointer.String("True"),
+								},
+							},
+							Name: &[]string{"1", "3"},
+						},
+					},
+				},
+			},
+			Capabilities: &[]compute.ResourceSkuCapabilities{
+				{
+					Name:  to.StringPtr(resourceskus.AcceleratedNetworking),
+					Value: to.StringPtr(string(resourceskus.CapabilityUnsupported)),
+				},
+				{
+					Name:  to.StringPtr(resourceskus.VCPUs),
+					Value: to.StringPtr("4"),
+				},
+				{
+					Name:  to.StringPtr(resourceskus.MemoryGB),
+					Value: to.StringPtr("4"),
+				},
+				{
+					Name:  to.StringPtr(resourceskus.EphemeralOSDisk),
+					Value: to.StringPtr("True"),
 				},
 			},
 		},
@@ -951,7 +1040,7 @@ func newWindowsVMSSSpec() azure.ScaleSetSpec {
 
 func newDefaultExistingVMSS(vmSize string) compute.VirtualMachineScaleSet {
 	vmss := newDefaultVMSS(vmSize)
-	vmss.ID = to.StringPtr("vmss-id")
+	vmss.ID = to.StringPtr("subscriptions/1234/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
 	return vmss
 }
 
@@ -1034,14 +1123,14 @@ func newDefaultVMSS(vmSize string) compute.VirtualMachineScaleSet {
 				NetworkProfile: &compute.VirtualMachineScaleSetNetworkProfile{
 					NetworkInterfaceConfigurations: &[]compute.VirtualMachineScaleSetNetworkConfiguration{
 						{
-							Name: to.StringPtr("my-vmss-netconfig"),
+							Name: to.StringPtr("my-vmss"),
 							VirtualMachineScaleSetNetworkConfigurationProperties: &compute.VirtualMachineScaleSetNetworkConfigurationProperties{
 								Primary:                     to.BoolPtr(true),
 								EnableAcceleratedNetworking: to.BoolPtr(false),
 								EnableIPForwarding:          to.BoolPtr(true),
 								IPConfigurations: &[]compute.VirtualMachineScaleSetIPConfiguration{
 									{
-										Name: to.StringPtr("my-vmss-ipconfig"),
+										Name: to.StringPtr("my-vmss"),
 										VirtualMachineScaleSetIPConfigurationProperties: &compute.VirtualMachineScaleSetIPConfigurationProperties{
 											Subnet: &compute.APIEntityReference{
 												ID: to.StringPtr("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet"),
@@ -1064,6 +1153,9 @@ func newDefaultVMSS(vmSize string) compute.VirtualMachineScaleSet {
 								Publisher:          to.StringPtr("somePublisher"),
 								Type:               to.StringPtr("someExtension"),
 								TypeHandlerVersion: to.StringPtr("someVersion"),
+								Settings: map[string]string{
+									"someSetting": "someValue",
+								},
 								ProtectedSettings: map[string]string{
 									"commandToExecute": "echo hello",
 								},
@@ -1194,8 +1286,8 @@ func newDefaultInstances() []compute.VirtualMachineScaleSetVM {
 	}
 }
 
-func setupDefaultVMSSInProgressOperationDoneExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder, createdVMSS compute.VirtualMachineScaleSet, instances []compute.VirtualMachineScaleSetVM) compute.VirtualMachineScaleSet {
-	createdVMSS.ID = to.StringPtr("vmss-id")
+func setupDefaultVMSSInProgressOperationDoneExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder, createdVMSS compute.VirtualMachineScaleSet, instances []compute.VirtualMachineScaleSetVM) {
+	createdVMSS.ID = to.StringPtr("subscriptions/1234/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
 	createdVMSS.ProvisioningState = to.StringPtr(string(infrav1.Succeeded))
 	setupDefaultVMSSExpectations(s)
 	future := &infrav1.Future{
@@ -1204,18 +1296,18 @@ func setupDefaultVMSSInProgressOperationDoneExpectations(s *mock_scalesets.MockS
 		Name:          defaultVMSSName,
 		Data:          "",
 	}
-	s.GetLongRunningOperationState(defaultVMSSName, scope.ScalesetsServiceName).Return(future)
+	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PutFuture).Return(future)
 	m.GetResultIfDone(gomockinternal.AContext(), future).Return(createdVMSS, nil).AnyTimes()
 	m.ListInstances(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName).Return(instances, nil).AnyTimes()
 	s.MaxSurge().Return(1, nil)
 	s.SetVMSSState(gomock.Any())
 	s.SetProviderID(azure.ProviderIDPrefix + *createdVMSS.ID)
-	return createdVMSS
 }
 
 func setupDefaultVMSSStartCreatingExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
 	setupDefaultVMSSExpectations(s)
-	s.GetLongRunningOperationState(defaultVMSSName, scope.ScalesetsServiceName).Return(nil)
+	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PutFuture).Return(nil)
+	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PatchFuture).Return(nil)
 	m.Get(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName).
 		Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
 }
@@ -1233,10 +1325,12 @@ func setupDefaultVMSSExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorde
 	setupVMSSExpectationsWithoutVMImage(s)
 	image := &infrav1.Image{
 		Marketplace: &infrav1.AzureMarketplaceImage{
-			Publisher: "fake-publisher",
-			Offer:     "my-offer",
-			SKU:       "sku-id",
-			Version:   "1.0",
+			ImagePlan: infrav1.ImagePlan{
+				Publisher: "fake-publisher",
+				Offer:     "my-offer",
+				SKU:       "sku-id",
+			},
+			Version: "1.0",
 		},
 	}
 	s.GetVMImage(gomockinternal.AContext()).Return(image, nil).AnyTimes()
@@ -1247,10 +1341,12 @@ func setupUpdateVMSSExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder
 	setupVMSSExpectationsWithoutVMImage(s)
 	image := &infrav1.Image{
 		Marketplace: &infrav1.AzureMarketplaceImage{
-			Publisher: "fake-publisher",
-			Offer:     "my-offer",
-			SKU:       "sku-id",
-			Version:   "2.0",
+			ImagePlan: infrav1.ImagePlan{
+				Publisher: "fake-publisher",
+				Offer:     "my-offer",
+				SKU:       "sku-id",
+			},
+			Version: "2.0",
 		},
 	}
 	s.GetVMImage(gomockinternal.AContext()).Return(image, nil).AnyTimes()
@@ -1264,23 +1360,30 @@ func setupVMSSExpectationsWithoutVMImage(s *mock_scalesets.MockScaleSetScopeMock
 	s.Location().AnyTimes().Return("test-location")
 	s.ClusterName().Return("my-cluster")
 	s.GetBootstrapData(gomockinternal.AContext()).Return("fake-bootstrap-data", nil)
-	s.VMSSExtensionSpecs().Return([]azure.ExtensionSpec{
-		{
-			Name:      "someExtension",
-			VMName:    "my-vmss",
-			Publisher: "somePublisher",
-			Version:   "someVersion",
-			ProtectedSettings: map[string]string{
-				"commandToExecute": "echo hello",
+	s.VMSSExtensionSpecs().Return([]azure.ResourceSpecGetter{
+		&VMSSExtensionSpec{
+			ExtensionSpec: azure.ExtensionSpec{
+				Name:      "someExtension",
+				VMName:    "my-vmss",
+				Publisher: "somePublisher",
+				Version:   "someVersion",
+				Settings: map[string]string{
+					"someSetting": "someValue",
+				},
+				ProtectedSettings: map[string]string{
+					"commandToExecute": "echo hello",
+				},
 			},
+			ResourceGroup: "my-rg",
 		},
 	}).AnyTimes()
 }
 
 func setupDefaultVMSSUpdateExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder) {
 	setupUpdateVMSSExpectations(s)
-	s.SetProviderID(azure.ProviderIDPrefix + "vmss-id")
-	s.GetLongRunningOperationState(defaultVMSSName, scope.ScalesetsServiceName).Return(nil)
+	s.SetProviderID(azure.ProviderIDPrefix + "subscriptions/1234/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
+	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PutFuture).Return(nil)
+	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PatchFuture).Return(nil)
 	s.MaxSurge().Return(1, nil)
 	s.SetVMSSState(gomock.Any())
 }

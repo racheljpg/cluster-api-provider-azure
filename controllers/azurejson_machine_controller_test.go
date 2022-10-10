@@ -30,9 +30,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infraexpv1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	clusterexpv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -117,12 +117,16 @@ func TestAzureJSONMachineReconciler(t *testing.T) {
 			},
 		},
 		Spec: infrav1.AzureClusterSpec{
-			SubscriptionID: "123",
+			AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+				SubscriptionID: "123",
+			},
 			NetworkSpec: infrav1.NetworkSpec{
 				Subnets: infrav1.Subnets{
 					{
 						Name: "node",
-						Role: infrav1.SubnetNode,
+						SubnetClassSpec: infrav1.SubnetClassSpec{
+							Role: infrav1.SubnetNode,
+						},
 					},
 				},
 			},
@@ -165,6 +169,40 @@ func TestAzureJSONMachineReconciler(t *testing.T) {
 			fail: true,
 			err:  "azureclusters.infrastructure.cluster.x-k8s.io \"my-azure-cluster\" not found",
 		},
+		"infra ref is nil": {
+			objects: []runtime.Object{
+				&clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-cluster",
+					},
+					Spec: clusterv1.ClusterSpec{
+						InfrastructureRef: nil,
+					},
+				},
+				azureCluster,
+				azureMachine,
+			},
+			fail: false,
+		},
+		"infra ref is not an azure cluster": {
+			objects: []runtime.Object{
+				&clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-cluster",
+					},
+					Spec: clusterv1.ClusterSpec{
+						InfrastructureRef: &corev1.ObjectReference{
+							APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
+							Kind:       "FooCluster",
+							Name:       "my-foo-cluster",
+						},
+					},
+				},
+				azureCluster,
+				azureMachine,
+			},
+			fail: false,
+		},
 	}
 
 	os.Setenv(auth.ClientID, "fooClient")
@@ -205,8 +243,8 @@ func newScheme() (*runtime.Scheme, error) {
 		clientgoscheme.AddToScheme,
 		infrav1.AddToScheme,
 		clusterv1.AddToScheme,
-		infraexpv1.AddToScheme,
-		clusterexpv1.AddToScheme,
+		infrav1exp.AddToScheme,
+		expv1.AddToScheme,
 	}
 	for _, fn := range schemeFn {
 		fn := fn

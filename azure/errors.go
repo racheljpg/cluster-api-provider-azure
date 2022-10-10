@@ -23,12 +23,8 @@ import (
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
-
-// ErrNotOwned is returned when a resource can't be deleted because it isn't owned.
-var ErrNotOwned = errors.New("resource is not managed and cannot be deleted")
 
 const codeResourceGroupNotFound = "ResourceGroupNotFound"
 

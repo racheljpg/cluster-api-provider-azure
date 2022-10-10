@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
+const serviceName = "tags"
+
 // TagScope defines the scope interface for a tags service.
 type TagScope interface {
 	azure.Authorizer
@@ -48,6 +50,11 @@ func New(scope TagScope) *Service {
 		Scope:  scope,
 		client: newClient(scope),
 	}
+}
+
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
 }
 
 // Reconcile ensures tags are correct.
@@ -100,7 +107,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			}
 
 			// We also need to update the annotation if anything changed.
-			if err = s.Scope.UpdateAnnotationJSON(tagsSpec.Annotation, newAnnotation); err != nil {
+			if err := s.Scope.UpdateAnnotationJSON(tagsSpec.Annotation, newAnnotation); err != nil {
 				return err
 			}
 			log.V(2).Info("successfully updated tags")
@@ -122,7 +129,7 @@ func (s *Service) Delete(ctx context.Context) error {
 }
 
 // tagsChanged determines which tags to delete and which to add.
-func tagsChanged(lastAppliedTags map[string]interface{}, desiredTags map[string]string, currentTags map[string]*string) (bool, map[string]string, map[string]string, map[string]interface{}) {
+func tagsChanged(lastAppliedTags map[string]interface{}, desiredTags map[string]string, currentTags map[string]*string) (change bool, createOrUpdates map[string]string, deletes map[string]string, annotation map[string]interface{}) {
 	// Bool tracking if we found any changed state.
 	changed := false
 
@@ -186,4 +193,9 @@ func tagsChanged(lastAppliedTags map[string]interface{}, desiredTags map[string]
 	// We made it through the loop, and everything that was in desiredTags, was also
 	// in dst. Nothing changed.
 	return changed, createdOrUpdated, deleted, newAnnotation
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO tags.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

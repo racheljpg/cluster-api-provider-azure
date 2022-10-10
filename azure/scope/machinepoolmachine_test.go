@@ -27,13 +27,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	mock_scope "sigs.k8s.io/cluster-api-provider-azure/azure/scope/mocks"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomock2 "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capiv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -43,8 +44,8 @@ const (
 
 func TestNewMachinePoolMachineScope(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = capiv1exp.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
 
 	cases := []struct {
 		Name  string
@@ -62,18 +63,18 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 						},
 					},
 				},
-				MachinePool:             new(capiv1exp.MachinePool),
-				AzureMachinePool:        new(infrav1.AzureMachinePool),
-				AzureMachinePoolMachine: new(infrav1.AzureMachinePoolMachine),
+				MachinePool:             new(expv1.MachinePool),
+				AzureMachinePool:        new(infrav1exp.AzureMachinePool),
+				AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 			},
 		},
 		{
 			Name: "no client",
 			Input: MachinePoolMachineScopeParams{
 				ClusterScope:            new(ClusterScope),
-				MachinePool:             new(capiv1exp.MachinePool),
-				AzureMachinePool:        new(infrav1.AzureMachinePool),
-				AzureMachinePoolMachine: new(infrav1.AzureMachinePoolMachine),
+				MachinePool:             new(expv1.MachinePool),
+				AzureMachinePool:        new(infrav1exp.AzureMachinePool),
+				AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 			},
 			Err: "client is required when creating a MachinePoolScope",
 		},
@@ -81,9 +82,9 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 			Name: "no ClusterScope",
 			Input: MachinePoolMachineScopeParams{
 				Client:                  fake.NewClientBuilder().WithScheme(scheme).Build(),
-				MachinePool:             new(capiv1exp.MachinePool),
-				AzureMachinePool:        new(infrav1.AzureMachinePool),
-				AzureMachinePoolMachine: new(infrav1.AzureMachinePoolMachine),
+				MachinePool:             new(expv1.MachinePool),
+				AzureMachinePool:        new(infrav1exp.AzureMachinePool),
+				AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 			},
 			Err: "cluster scope is required when creating a MachinePoolScope",
 		},
@@ -92,8 +93,8 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 			Input: MachinePoolMachineScopeParams{
 				Client:                  fake.NewClientBuilder().WithScheme(scheme).Build(),
 				ClusterScope:            new(ClusterScope),
-				AzureMachinePool:        new(infrav1.AzureMachinePool),
-				AzureMachinePoolMachine: new(infrav1.AzureMachinePoolMachine),
+				AzureMachinePool:        new(infrav1exp.AzureMachinePool),
+				AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 			},
 			Err: "machine pool is required when creating a MachinePoolScope",
 		},
@@ -102,8 +103,8 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 			Input: MachinePoolMachineScopeParams{
 				Client:                  fake.NewClientBuilder().WithScheme(scheme).Build(),
 				ClusterScope:            new(ClusterScope),
-				MachinePool:             new(capiv1exp.MachinePool),
-				AzureMachinePoolMachine: new(infrav1.AzureMachinePoolMachine),
+				MachinePool:             new(expv1.MachinePool),
+				AzureMachinePoolMachine: new(infrav1exp.AzureMachinePoolMachine),
 			},
 			Err: "azure machine pool is required when creating a MachinePoolScope",
 		},
@@ -112,8 +113,8 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 			Input: MachinePoolMachineScopeParams{
 				Client:           fake.NewClientBuilder().WithScheme(scheme).Build(),
 				ClusterScope:     new(ClusterScope),
-				MachinePool:      new(capiv1exp.MachinePool),
-				AzureMachinePool: new(infrav1.AzureMachinePool),
+				MachinePool:      new(expv1.MachinePool),
+				AzureMachinePool: new(infrav1exp.AzureMachinePool),
 			},
 			Err: "azure machine pool machine is required when creating a MachinePoolScope",
 		},
@@ -127,102 +128,84 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 				g.Expect(err).To(MatchError(c.Err))
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(s).ToNot(BeNil())
+				g.Expect(s).NotTo(BeNil())
 			}
 		})
 	}
 }
 
-func TestMachineScope_UpdateStatus(t *testing.T) {
+func TestMachineScope_UpdateNodeStatus(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = capiv1exp.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
 
-	var (
-		clusterScope = ClusterScope{
-			Cluster: &clusterv1.Cluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-foo",
-				},
-			},
-		}
-	)
+	mockCtrl := gomock.NewController(t)
+	defer mockCtrl.Finish()
+
+	clusterScope := mock_azure.NewMockClusterScoper(mockCtrl)
+	clusterScope.EXPECT().Authorizer().AnyTimes()
+	clusterScope.EXPECT().BaseURI().AnyTimes()
+	clusterScope.EXPECT().Location().AnyTimes()
+	clusterScope.EXPECT().SubscriptionID().AnyTimes()
+	clusterScope.EXPECT().ClusterName().Return("cluster-foo").AnyTimes()
 
 	cases := []struct {
 		Name   string
-		Setup  func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine)
+		Setup  func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine)
 		Verify func(g *WithT, scope *MachinePoolMachineScope)
 		Err    string
 	}{
 		{
 			Name: "should set kubernetes version, ready, and node reference upon finding the node",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine) {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(getReadyNode(), nil)
 				return nil, ampm
 			},
 			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{
-					Ready:   true,
-					Version: "1.2.3",
-					NodeRef: &corev1.ObjectReference{
-						Name: "node1",
-					},
+				g.Expect(scope.AzureMachinePoolMachine.Status.Ready).To(Equal(true))
+				g.Expect(scope.AzureMachinePoolMachine.Status.Version).To(Equal("1.2.3"))
+				g.Expect(scope.AzureMachinePoolMachine.Status.NodeRef).To(Equal(&corev1.ObjectReference{
+					Name: "node1",
 				}))
+				assertCondition(t, scope.AzureMachinePoolMachine, conditions.TrueCondition(clusterv1.MachineNodeHealthyCondition))
 			},
 		},
 		{
 			Name: "should not mark AMPM ready if node is not ready",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine) {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(getNotReadyNode(), nil)
 				return nil, ampm
 			},
 			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{
-					Ready:   false,
-					Version: "1.2.3",
-					NodeRef: &corev1.ObjectReference{
-						Name: "node1",
-					},
+				g.Expect(scope.AzureMachinePoolMachine.Status.Ready).To(Equal(false))
+				g.Expect(scope.AzureMachinePoolMachine.Status.Version).To(Equal("1.2.3"))
+				g.Expect(scope.AzureMachinePoolMachine.Status.NodeRef).To(Equal(&corev1.ObjectReference{
+					Name: "node1",
 				}))
+				assertCondition(t, scope.AzureMachinePoolMachine, conditions.FalseCondition(clusterv1.MachineNodeHealthyCondition, clusterv1.NodeConditionsFailedReason, clusterv1.ConditionSeverityWarning, ""))
 			},
 		},
 		{
 			Name: "fails fetching the node",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine) {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(nil, errors.New("boom"))
 				return nil, ampm
 			},
-			Err: "failed to to get node by providerID or object reference: boom",
+			Err: "failed to get node by providerID: boom",
 		},
 		{
-			Name: "should not mark AMPM ready if node is not ready",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
-				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(getNotReadyNode(), nil)
-				return nil, ampm
-			},
-			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{
-					Ready:   false,
-					Version: "1.2.3",
-					NodeRef: &corev1.ObjectReference{
-						Name: "node1",
-					},
-				}))
-			},
-		},
-		{
-			Name: "node is not found",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
+			Name: "node is not found by providerID without error",
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine) {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(nil, nil)
 				return nil, ampm
 			},
 			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{}))
+				assertCondition(t, scope.AzureMachinePoolMachine, conditions.FalseCondition(clusterv1.MachineNodeHealthyCondition, clusterv1.NodeProvisioningReason, clusterv1.ConditionSeverityInfo, ""))
 			},
 		},
 		{
 			Name: "node is found by ObjectReference",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1exp.AzureMachinePoolMachine) {
 				nodeRef := corev1.ObjectReference{
 					Name: "node1",
 				}
@@ -231,37 +214,12 @@ func TestMachineScope_UpdateStatus(t *testing.T) {
 				return nil, ampm
 			},
 			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{
-					NodeRef: &corev1.ObjectReference{
-						Name: "node1",
-					},
-					Version: "1.2.3",
-					Ready:   true,
+				g.Expect(scope.AzureMachinePoolMachine.Status.Ready).To(Equal(true))
+				g.Expect(scope.AzureMachinePoolMachine.Status.Version).To(Equal("1.2.3"))
+				g.Expect(scope.AzureMachinePoolMachine.Status.NodeRef).To(Equal(&corev1.ObjectReference{
+					Name: "node1",
 				}))
-			},
-		},
-		{
-			Name: "instance information with latest model populates the AMPM status",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) (*azure.VMSSVM, *infrav1.AzureMachinePoolMachine) {
-				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(nil, nil)
-				return &azure.VMSSVM{
-					State: v1beta1.Succeeded,
-					Image: v1beta1.Image{
-						Marketplace: &v1beta1.AzureMarketplaceImage{
-							Publisher: "cncf-upstream",
-							Offer:     "capi",
-							SKU:       "k8s-1dot19dot11-ubuntu-1804",
-							Version:   "latest",
-						},
-					},
-				}, ampm
-			},
-			Verify: func(g *WithT, scope *MachinePoolMachineScope) {
-				succeeded := v1beta1.Succeeded
-				g.Expect(scope.AzureMachinePoolMachine.Status).To(Equal(infrav1.AzureMachinePoolMachineStatus{
-					ProvisioningState:  &succeeded,
-					LatestModelApplied: true,
-				}))
+				assertCondition(t, scope.AzureMachinePoolMachine, conditions.TrueCondition(clusterv1.MachineNodeHealthyCondition))
 			},
 		},
 	}
@@ -274,9 +232,9 @@ func TestMachineScope_UpdateStatus(t *testing.T) {
 				g          = NewWithT(t)
 				params     = MachinePoolMachineScopeParams{
 					Client:       fake.NewClientBuilder().WithScheme(scheme).Build(),
-					ClusterScope: &clusterScope,
-					MachinePool: &capiv1exp.MachinePool{
-						Spec: capiv1exp.MachinePoolSpec{
+					ClusterScope: clusterScope,
+					MachinePool: &expv1.MachinePool{
+						Spec: expv1.MachinePoolSpec{
 							Template: clusterv1.MachineTemplateSpec{
 								Spec: clusterv1.MachineSpec{
 									Version: to.StringPtr("v1.19.11"),
@@ -284,25 +242,25 @@ func TestMachineScope_UpdateStatus(t *testing.T) {
 							},
 						},
 					},
-					AzureMachinePool: new(infrav1.AzureMachinePool),
+					AzureMachinePool: new(infrav1exp.AzureMachinePool),
 				}
 			)
 
 			defer controller.Finish()
 
-			instance, ampm := c.Setup(mockClient, &infrav1.AzureMachinePoolMachine{
-				Spec: infrav1.AzureMachinePoolMachineSpec{
+			instance, ampm := c.Setup(mockClient, &infrav1exp.AzureMachinePoolMachine{
+				Spec: infrav1exp.AzureMachinePoolMachineSpec{
 					ProviderID: FakeProviderID,
 				},
 			})
 			params.AzureMachinePoolMachine = ampm
 			s, err := NewMachinePoolMachineScope(params)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(s).ToNot(BeNil())
+			g.Expect(s).NotTo(BeNil())
 			s.instance = instance
 			s.workloadNodeGetter = mockClient
 
-			err = s.UpdateStatus(context.TODO())
+			err = s.UpdateNodeStatus(context.TODO())
 			if c.Err == "" {
 				g.Expect(err).To(Succeed())
 			} else {
@@ -318,8 +276,8 @@ func TestMachineScope_UpdateStatus(t *testing.T) {
 
 func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = capiv1exp.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
+	_ = expv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
 
 	var (
 		clusterScope = ClusterScope{
@@ -333,19 +291,19 @@ func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 
 	cases := []struct {
 		Name  string
-		Setup func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) *infrav1.AzureMachinePoolMachine
+		Setup func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) *infrav1exp.AzureMachinePoolMachine
 		Err   string
 	}{
 		{
 			Name: "should skip cordon and drain if the node does not exist with provider ID",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) *infrav1.AzureMachinePoolMachine {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) *infrav1exp.AzureMachinePoolMachine {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(nil, nil)
 				return ampm
 			},
 		},
 		{
 			Name: "should skip cordon and drain if the node does not exist with node reference",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) *infrav1.AzureMachinePoolMachine {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) *infrav1exp.AzureMachinePoolMachine {
 				nodeRef := corev1.ObjectReference{
 					Name: "node1",
 				}
@@ -356,11 +314,11 @@ func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 		},
 		{
 			Name: "if GetNodeByProviderID fails with an error, an error will be returned",
-			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1.AzureMachinePoolMachine) *infrav1.AzureMachinePoolMachine {
+			Setup: func(mockNodeGetter *mock_scope.MocknodeGetter, ampm *infrav1exp.AzureMachinePoolMachine) *infrav1exp.AzureMachinePoolMachine {
 				mockNodeGetter.EXPECT().GetNodeByProviderID(gomock2.AContext(), FakeProviderID).Return(nil, errors.New("boom"))
 				return ampm
 			},
-			Err: "failed to find node: boom",
+			Err: "failed to get node: failed to get node by providerID: boom",
 		},
 	}
 
@@ -373,8 +331,8 @@ func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 				params     = MachinePoolMachineScopeParams{
 					Client:       fake.NewClientBuilder().WithScheme(scheme).Build(),
 					ClusterScope: &clusterScope,
-					MachinePool: &capiv1exp.MachinePool{
-						Spec: capiv1exp.MachinePoolSpec{
+					MachinePool: &expv1.MachinePool{
+						Spec: expv1.MachinePoolSpec{
 							Template: clusterv1.MachineTemplateSpec{
 								Spec: clusterv1.MachineSpec{
 									Version: to.StringPtr("v1.19.11"),
@@ -382,21 +340,21 @@ func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 							},
 						},
 					},
-					AzureMachinePool: new(infrav1.AzureMachinePool),
+					AzureMachinePool: new(infrav1exp.AzureMachinePool),
 				}
 			)
 
 			defer controller.Finish()
 
-			ampm := c.Setup(mockClient, &infrav1.AzureMachinePoolMachine{
-				Spec: infrav1.AzureMachinePoolMachineSpec{
+			ampm := c.Setup(mockClient, &infrav1exp.AzureMachinePoolMachine{
+				Spec: infrav1exp.AzureMachinePoolMachineSpec{
 					ProviderID: FakeProviderID,
 				},
 			})
 			params.AzureMachinePoolMachine = ampm
 			s, err := NewMachinePoolMachineScope(params)
 			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(s).ToNot(BeNil())
+			g.Expect(s).NotTo(BeNil())
 			s.workloadNodeGetter = mockClient
 
 			err = s.CordonAndDrain(context.TODO())
@@ -444,5 +402,27 @@ func getNotReadyNode() *corev1.Node {
 				},
 			},
 		},
+	}
+}
+
+// asserts whether a condition of type is set on the Getter object
+// when the condition is true, asserting the reason/severity/message
+// for the condition are avoided.
+func assertCondition(t *testing.T, from conditions.Getter, condition *clusterv1.Condition) {
+	t.Helper()
+
+	g := NewWithT(t)
+	g.Expect(conditions.Has(from, condition.Type)).To(BeTrue())
+
+	if condition.Status == corev1.ConditionTrue {
+		conditions.IsTrue(from, condition.Type)
+	} else {
+		conditionToBeAsserted := conditions.Get(from, condition.Type)
+		g.Expect(conditionToBeAsserted.Status).To(Equal(condition.Status))
+		g.Expect(conditionToBeAsserted.Severity).To(Equal(condition.Severity))
+		g.Expect(conditionToBeAsserted.Reason).To(Equal(condition.Reason))
+		if condition.Message != "" {
+			g.Expect(conditionToBeAsserted.Message).To(Equal(condition.Message))
+		}
 	}
 }

@@ -21,11 +21,15 @@ import (
 	"fmt"
 	"reflect"
 
-	"k8s.io/apimachinery/pkg/types"
-
+	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity"
+	aadpodv1 "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/identity"
@@ -33,11 +37,6 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctl "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	aadpodv1 "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const azureSecretKey = "clientSecret"
@@ -89,10 +88,6 @@ func NewAzureClusterCredentialsProvider(ctx context.Context, kubeClient client.C
 		return nil, errors.Errorf("failed to retrieve AzureClusterIdentity external object %q/%q: %v", key.Namespace, key.Name, err)
 	}
 
-	if identity.Spec.Type != infrav1.ServicePrincipal {
-		return nil, errors.New("AzureClusterIdentity is not of type Service Principal")
-	}
-
 	return &AzureClusterCredentialsProvider{
 		AzureCredentialsProvider{
 			Client:   kubeClient,
@@ -125,10 +120,6 @@ func NewManagedControlPlaneCredentialsProvider(ctx context.Context, kubeClient c
 		return nil, errors.Errorf("failed to retrieve AzureClusterIdentity external object %q/%q: %v", key.Namespace, key.Name, err)
 	}
 
-	if identity.Spec.Type != infrav1.ServicePrincipal {
-		return nil, errors.New("AzureClusterIdentity is not of type Service Principal")
-	}
-
 	return &ManagedControlPlaneCredentialsProvider{
 		AzureCredentialsProvider{
 			Client:   kubeClient,
@@ -147,7 +138,7 @@ func (p *ManagedControlPlaneCredentialsProvider) GetAuthorizer(ctx context.Conte
 func (p *AzureCredentialsProvider) GetAuthorizer(ctx context.Context, resourceManagerEndpoint, activeDirectoryEndpoint string, clusterMeta metav1.ObjectMeta) (autorest.Authorizer, error) {
 	var spt *adal.ServicePrincipalToken
 	switch p.Identity.Spec.Type {
-	case infrav1.ServicePrincipal:
+	case infrav1.ServicePrincipal, infrav1.ServicePrincipalCertificate, infrav1.UserAssignedMSI:
 		if err := createAzureIdentityWithBindings(ctx, p.Identity, resourceManagerEndpoint, activeDirectoryEndpoint, clusterMeta, p.Client); err != nil {
 			return nil, err
 		}
@@ -194,22 +185,31 @@ func (p *AzureCredentialsProvider) GetClientID() string {
 // NOTE: this only works if the Identity references a Service Principal Client Secret.
 // If using another type of credentials, such a Certificate, we return an empty string.
 func (p *AzureCredentialsProvider) GetClientSecret(ctx context.Context) (string, error) {
-	secretRef := p.Identity.Spec.ClientSecret
-	key := types.NamespacedName{
-		Namespace: secretRef.Namespace,
-		Name:      secretRef.Name,
+	if p.hasClientSecret() {
+		secretRef := p.Identity.Spec.ClientSecret
+		key := types.NamespacedName{
+			Namespace: secretRef.Namespace,
+			Name:      secretRef.Name,
+		}
+		secret := &corev1.Secret{}
+
+		if err := p.Client.Get(ctx, key, secret); err != nil {
+			return "", errors.Wrap(err, "Unable to fetch ClientSecret")
+		}
+		return string(secret.Data[azureSecretKey]), nil
 	}
-	secret := &corev1.Secret{}
-	err := p.Client.Get(ctx, key, secret)
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to fetch ClientSecret")
-	}
-	return string(secret.Data[azureSecretKey]), nil
+	return "", nil
 }
 
 // GetTenantID returns the Tenant ID associated with the AzureCredentialsProvider's Identity.
 func (p *AzureCredentialsProvider) GetTenantID() string {
 	return p.Identity.Spec.TenantID
+}
+
+// hasClientSecret returns true if the identity has a Service Principal Client Secret.
+// This does not include service principals with certificates or managed identities.
+func (p *AzureCredentialsProvider) hasClientSecret() bool {
+	return p.Identity.Spec.Type == infrav1.ServicePrincipal || p.Identity.Spec.Type == infrav1.ManualServicePrincipal
 }
 
 func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1.AzureClusterIdentity, resourceManagerEndpoint, activeDirectoryEndpoint string, clusterMeta metav1.ObjectMeta,
@@ -220,7 +220,7 @@ func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1
 	}
 
 	// AzureIdentity and AzureIdentityBinding will no longer have an OwnerRef starting from capz release v0.5.0 because of the following:
-	// In Kubenetes v1.20+, if the garbage collector detects an invalid cross-namespace ownerReference, or a cluster-scoped dependent with
+	// In Kubernetes v1.20+, if the garbage collector detects an invalid cross-namespace ownerReference, or a cluster-scoped dependent with
 	// an ownerReference referencing a namespaced kind, a warning Event with a reason of OwnerRefInvalidNamespace and an involvedObject
 	// of the invalid dependent is reported. You can check for that kind of Event by running kubectl get events -A --field-selector=reason=OwnerRefInvalidNamespace.
 
@@ -272,7 +272,7 @@ func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1
 		},
 		Spec: aadpodv1.AzureIdentityBindingSpec{
 			AzureIdentity: copiedIdentity.Name,
-			Selector:      infrav1.AzureIdentityBindingSelector, //should be same as selector added on controller
+			Selector:      infrav1.AzureIdentityBindingSelector, // should be same as selector added on controller
 		},
 	}
 	err = kubeClient.Create(ctx, azureIdentityBinding)
@@ -285,13 +285,15 @@ func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1
 
 func getAzureIdentityType(identity *infrav1.AzureClusterIdentity) (aadpodv1.IdentityType, error) {
 	switch identity.Spec.Type {
-	case infrav1.ServicePrincipal:
-		return aadpodv1.ServicePrincipal, nil
 	case infrav1.UserAssignedMSI:
 		return aadpodv1.UserAssignedMSI, nil
+	case infrav1.ServicePrincipal:
+		return aadpodv1.ServicePrincipal, nil
+	case infrav1.ServicePrincipalCertificate:
+		return aadpodv1.IdentityType(aadpodid.ServicePrincipalCertificate), nil
 	}
 
-	return 0, errors.New("AzureIdentity does not have a vaild type")
+	return -1, errors.New("AzureIdentity does not have a valid type")
 }
 
 // IsClusterNamespaceAllowed indicates if the cluster namespace is allowed.

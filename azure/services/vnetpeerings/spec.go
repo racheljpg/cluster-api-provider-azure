@@ -17,7 +17,7 @@ limitations under the License.
 package vnetpeerings
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -49,7 +49,7 @@ func (s *VnetPeeringSpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the virtual network peering.
-func (s *VnetPeeringSpec) Parameters(existing interface{}) (interface{}, error) {
+func (s *VnetPeeringSpec) Parameters(existing interface{}) (params interface{}, err error) {
 	if existing != nil {
 		if _, ok := existing.(network.VirtualNetworkPeering); !ok {
 			return nil, errors.Errorf("%T is not a network.VnetPeering", existing)

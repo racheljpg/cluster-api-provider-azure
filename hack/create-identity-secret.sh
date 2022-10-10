@@ -21,10 +21,13 @@ set +o xtrace
 # Install kubectl
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 KUBECTL="${REPO_ROOT}/hack/tools/bin/kubectl"
-cd "${REPO_ROOT}" && make "${KUBECTL##*/}"
+make --directory="${REPO_ROOT}" "${KUBECTL##*/}"
 
 # shellcheck source=hack/parse-prow-creds.sh
 source "${REPO_ROOT}/hack/parse-prow-creds.sh"
 
-"${KUBECTL}" create secret generic "${AZURE_CLUSTER_IDENTITY_SECRET_NAME}" --from-literal=clientSecret="${AZURE_CLIENT_SECRET}"
+if ! "${KUBECTL}" get secret "${AZURE_CLUSTER_IDENTITY_SECRET_NAME}" > /dev/null; then
+  "${KUBECTL}" create secret generic "${AZURE_CLUSTER_IDENTITY_SECRET_NAME}" --from-literal=clientSecret="${AZURE_CLIENT_SECRET}"
+fi
+
 "${KUBECTL}" label secret "${AZURE_CLUSTER_IDENTITY_SECRET_NAME}" "clusterctl.cluster.x-k8s.io/move-hierarchy=true" --overwrite=true

@@ -17,12 +17,13 @@ limitations under the License.
 package natgateways
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	autorest "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 )
 
 // NatGatewaySpec defines the specification for a NAT gateway.
@@ -32,6 +33,8 @@ type NatGatewaySpec struct {
 	SubscriptionID string
 	Location       string
 	NatGatewayIP   infrav1.PublicIPSpec
+	ClusterName    string
+	AdditionalTags infrav1.Tags
 }
 
 // ResourceName returns the name of the NAT gateway.
@@ -50,7 +53,7 @@ func (s *NatGatewaySpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the NAT gateway.
-func (s *NatGatewaySpec) Parameters(existing interface{}) (interface{}, error) {
+func (s *NatGatewaySpec) Parameters(existing interface{}) (params interface{}, err error) {
 	if existing != nil {
 		existingNatGateway, ok := existing.(network.NatGateway)
 		if !ok {
@@ -74,6 +77,12 @@ func (s *NatGatewaySpec) Parameters(existing interface{}) (interface{}, error) {
 				},
 			},
 		},
+		Tags: converters.TagsToMap(infrav1.Build(infrav1.BuildParams{
+			ClusterName: s.ClusterName,
+			Lifecycle:   infrav1.ResourceLifecycleOwned,
+			Name:        to.StringPtr(s.Name),
+			Additional:  s.AdditionalTags,
+		})),
 	}
 
 	return natGatewayToCreate, nil

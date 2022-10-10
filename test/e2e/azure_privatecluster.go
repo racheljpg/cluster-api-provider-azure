@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -24,10 +25,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/msi/mgmt/2018-11-30/msi"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-05-01/resources"
 	azuresdk "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
@@ -36,8 +38,6 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -58,6 +58,7 @@ type AzurePrivateClusterSpecInput struct {
 	E2EConfig             *clusterctl.E2EConfig
 	ArtifactFolder        string
 	SkipCleanup           bool
+	CancelWatches         context.CancelFunc
 }
 
 // AzurePrivateClusterSpec implements a test that creates a workload cluster with a private API endpoint.
@@ -73,7 +74,7 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 	)
 
 	input = inputGetter()
-	Expect(input).ToNot(BeNil())
+	Expect(input).NotTo(BeNil())
 	Expect(input.BootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. input.BootstrapClusterProxy can't be nil when calling %s spec", specName)
 	Expect(input.Namespace).NotTo(BeNil(), "Invalid argument. input.Namespace can't be nil when calling %s spec", specName)
 	By("creating a Kubernetes client to the workload cluster")
@@ -106,32 +107,31 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 	}, "5s", "100ms").Should(BeNil(), "Failed to assert public API server stability")
 
 	// **************
-	spClientSecret := os.Getenv("AZURE_CLIENT_SECRET")
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "cluster-identity-secret-private",
-			Namespace: input.Namespace.Name,
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{"clientSecret": []byte(spClientSecret)},
+	// Get the Client ID for the user assigned identity
+	subscriptionID := os.Getenv(AzureSubscriptionID)
+	identityRG, ok := os.LookupEnv(AzureIdentityResourceGroup)
+	if !ok {
+		identityRG = "capz-ci"
 	}
-	err := publicClusterProxy.GetClient().Create(ctx, secret)
-	Expect(err).NotTo(HaveOccurred())
+	userID, ok := os.LookupEnv(AzureUserIdentity)
+	if !ok {
+		userID = "cloud-provider-user-identity"
+	}
+	resourceID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ManagedIdentity/userAssignedIdentities/%s", subscriptionID, identityRG, userID)
+	os.Setenv("UAMI_CLIENT_ID", getClientIDforMSI(resourceID))
 
-	identityName := e2eConfig.GetVariable(ClusterIdentityName)
-	os.Setenv("CLUSTER_IDENTITY_NAME", identityName)
+	os.Setenv("CLUSTER_IDENTITY_NAME", "cluster-identity-user-assigned")
 	os.Setenv("CLUSTER_IDENTITY_NAMESPACE", input.Namespace.Name)
-	os.Setenv("AZURE_CLUSTER_IDENTITY_SECRET_NAME", "cluster-identity-secret-private")
-	os.Setenv("AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE", input.Namespace.Name)
-	//*************
+	// *************
 
 	By("Creating a private workload cluster")
 	clusterName = fmt.Sprintf("capz-e2e-%s-%s", util.RandomString(6), "private")
-	Expect(os.Setenv(AzureVNetName, clusterName+"-vnet")).NotTo(HaveOccurred())
-	Expect(os.Setenv(AzureVNetCidr, "10.255.0.0/16")).NotTo(HaveOccurred())
-	Expect(os.Setenv(AzureInternalLBIP, "10.255.0.100")).NotTo(HaveOccurred())
-	Expect(os.Setenv(AzureCPSubnetCidr, "10.255.0.0/24")).NotTo(HaveOccurred())
-	Expect(os.Setenv(AzureNodeSubnetCidr, "10.255.1.0/24")).NotTo(HaveOccurred())
+	Expect(os.Setenv(AzureVNetName, clusterName+"-vnet")).To(Succeed())
+	Expect(os.Setenv(AzureVNetCidr, "10.255.0.0/16")).To(Succeed())
+	Expect(os.Setenv(AzureInternalLBIP, "10.255.0.100")).To(Succeed())
+	Expect(os.Setenv(AzureCPSubnetCidr, "10.255.0.0/24")).To(Succeed())
+	Expect(os.Setenv(AzureNodeSubnetCidr, "10.255.1.0/24")).To(Succeed())
+	Expect(os.Setenv(AzureBastionSubnetCidr, "10.255.255.224/27")).To(Succeed())
 	result := &clusterctl.ApplyClusterTemplateAndWaitResult{}
 	clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
 		ClusterProxy: publicClusterProxy,
@@ -147,38 +147,30 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 			ControlPlaneMachineCount: pointer.Int64Ptr(3),
 			WorkerMachineCount:       pointer.Int64Ptr(1),
 		},
-		WaitForClusterIntervals:      input.E2EConfig.GetIntervals(specName, "wait-cluster"),
-		WaitForControlPlaneIntervals: input.E2EConfig.GetIntervals(specName, "wait-control-plane"),
+		WaitForClusterIntervals:      input.E2EConfig.GetIntervals(specName, "wait-private-cluster"),
+		WaitForControlPlaneIntervals: input.E2EConfig.GetIntervals(specName, "wait-control-plane-ha"),
 		WaitForMachineDeployments:    input.E2EConfig.GetIntervals(specName, "wait-worker-nodes"),
 	}, result)
 	cluster = result.Cluster
 
-	Expect(cluster).ToNot(BeNil())
+	Expect(cluster).NotTo(BeNil())
 
 	defer func() {
 		// Delete the private cluster, so that all of the Azure resources will be cleaned up when the public
 		// cluster is deleted at the end of the test. If we don't delete this cluster, the Azure resource delete
 		// verification will fail.
-		if !input.SkipCleanup {
-			Logf("deleting private cluster %q in namespace %q", cluster.Name, cluster.Namespace)
-			Expect(publicClusterProxy.GetClient().Delete(ctx, cluster)).To(Succeed())
-			Eventually(func() error {
-				var c clusterv1.Cluster
-				err := publicClusterProxy.GetClient().Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, &c)
-				if apierrors.IsNotFound(err) {
-					// 404 the cluster has been deleted
-					return nil
-				}
-
-				if err != nil {
-					// some unexpected error occurred; return it
-					return err
-				}
-
-				return fmt.Errorf("cluster %q as not yet been deleted", cluster.Name)
-			}, input.E2EConfig.GetIntervals(specName, "wait-delete-cluster")...).Should(BeNil())
-			Logf("deleted private cluster %q in namespace %q", cluster.Name, cluster.Namespace)
+		cleanInput := cleanupInput{
+			SpecName:               specName,
+			Cluster:                cluster,
+			ClusterProxy:           publicClusterProxy,
+			Namespace:              input.Namespace,
+			CancelWatches:          publicCancelWatches,
+			IntervalsGetter:        e2eConfig.GetIntervals,
+			SkipCleanup:            input.SkipCleanup,
+			ArtifactFolder:         input.ArtifactFolder,
+			SkipResourceGroupCheck: true, // We don't expect the resource group to be deleted since the private cluster does not own the resource group.
 		}
+		dumpSpecResourcesAndCleanup(ctx, cleanInput)
 	}()
 
 	// Check that azure bastion is provisioned successfully.
@@ -372,22 +364,22 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 		Logf("deleting an existing virtual network %q", os.Getenv(AzureCustomVNetName))
 		vFuture, err := vnetClient.Delete(ctx, groupName, os.Getenv(AzureCustomVNetName))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(vFuture.WaitForCompletionRef(ctx, vnetClient.Client)).ToNot(HaveOccurred())
+		Expect(vFuture.WaitForCompletionRef(ctx, vnetClient.Client)).To(Succeed())
 
 		Logf("deleting an existing route table %q", routeTableName)
 		rtFuture, err := routetableClient.Delete(ctx, groupName, routeTableName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(rtFuture.WaitForCompletionRef(ctx, routetableClient.Client)).ToNot(HaveOccurred())
+		Expect(rtFuture.WaitForCompletionRef(ctx, routetableClient.Client)).To(Succeed())
 
 		Logf("deleting an existing network security group %q", nsgNodeName)
 		nsgFuture, err := nsgClient.Delete(ctx, groupName, nsgNodeName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(nsgFuture.WaitForCompletionRef(ctx, nsgClient.Client)).NotTo(HaveOccurred())
+		Expect(nsgFuture.WaitForCompletionRef(ctx, nsgClient.Client)).To(Succeed())
 
 		Logf("deleting an existing network security group %q", nsgName)
 		nsgFuture, err = nsgClient.Delete(ctx, groupName, nsgName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(nsgFuture.WaitForCompletionRef(ctx, nsgClient.Client)).NotTo(HaveOccurred())
+		Expect(nsgFuture.WaitForCompletionRef(ctx, nsgClient.Client)).To(Succeed())
 
 		Logf("verifying the existing resource group %q is empty", groupName)
 		resClient := resources.NewClient(subscriptionID)
@@ -403,7 +395,7 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 			for _, genericResource := range page.Values() {
 				apiversion, err := getAPIVersion(*genericResource.ID)
 				if err != nil {
-					Logf("failed to get API version for %q with %+v", *genericResource.ID, err)
+					LogWarningf("failed to get API version for %q with %+v", *genericResource.ID, err)
 				}
 
 				_, err = resClient.GetByID(ctx, *genericResource.ID, apiversion)
@@ -414,7 +406,7 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 
 				// unexpected error calling GET on the resource
 				if err != nil {
-					Logf("failed GETing resource %q with %+v", *genericResource.ID, err)
+					LogWarningf("failed GETing resource %q with %+v", *genericResource.ID, err)
 					return nil, err
 				}
 
@@ -423,12 +415,12 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 			}
 			return foundResources, nil
 			// add some tolerance for Azure caching of resource group resource caching
-		}, 5*time.Minute, 10*time.Second).Should(HaveLen(0), "Expect the manually created resource group is empty after removing the manually created resources.")
+		}, deleteOperationTimeout, retryableOperationTimeout).Should(BeEmpty(), "Expect the manually created resource group is empty after removing the manually created resources.")
 
 		Logf("deleting the existing resource group %q", groupName)
 		grpFuture, err := groupClient.Delete(ctx, groupName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(grpFuture.WaitForCompletionRef(ctx, nsgClient.Client)).NotTo(HaveOccurred())
+		Expect(grpFuture.WaitForCompletionRef(ctx, nsgClient.Client)).To(Succeed())
 	}
 }
 
@@ -440,6 +432,9 @@ func getAPIVersion(resourceID string) (string, error) {
 
 	switch parsed.Provider {
 	case "Microsoft.Network":
+		if parsed.ResourceType == "privateDnsZones" {
+			return getAPIVersionFromUserAgent(privatedns.UserAgent()), nil
+		}
 		return getAPIVersionFromUserAgent(network.UserAgent()), nil
 	case "Microsoft.Compute":
 		return getAPIVersionFromUserAgent(compute.UserAgent()), nil
@@ -451,4 +446,24 @@ func getAPIVersion(resourceID string) (string, error) {
 func getAPIVersionFromUserAgent(userAgent string) string {
 	splits := strings.Split(userAgent, "/")
 	return splits[len(splits)-1]
+}
+
+// getClientIDforMSI fetches the client ID of a user assigned identity.
+func getClientIDforMSI(resourceID string) string {
+	settings, err := auth.GetSettingsFromEnvironment()
+	Expect(err).NotTo(HaveOccurred())
+	subscriptionID := settings.GetSubscriptionID()
+	authorizer, err := settings.GetAuthorizer()
+	Expect(err).NotTo(HaveOccurred())
+
+	msiClient := msi.NewUserAssignedIdentitiesClient(subscriptionID)
+	msiClient.Authorizer = authorizer
+
+	parsed, err := azuresdk.ParseResourceID(resourceID)
+	Expect(err).NotTo(HaveOccurred())
+
+	id, err := msiClient.Get(context.TODO(), parsed.ResourceGroup, parsed.ResourceName)
+	Expect(err).NotTo(HaveOccurred())
+
+	return id.ClientID.String()
 }

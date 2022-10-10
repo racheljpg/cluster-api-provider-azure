@@ -23,9 +23,16 @@ Check out the [Cluster API Quick Start][quickstart] to create your first Kuberne
 
 See the [flavors documentation][flavors_doc] to know which cluster templates are provided by CAPZ.
 
+
+## Getting Help
+
+If you need help with CAPZ, please visit the [#cluster-api-azure][slack] channel on Slack, open a [GitHub issue](#github-issues), or join us at [Office Hours](#office-hours).
+
 ------
 
-## Support Policy
+## Compatibility
+
+### Cluster API Versions
 
 This provider's versions are compatible with the following versions of Cluster API:
 
@@ -35,17 +42,14 @@ This provider's versions are compatible with the following versions of Cluster A
 |Azure Provider `v0.5.x` |  | ✓ |  |
 |Azure Provider `v1.0.x` |  |  | ✓ |
 
-This provider's versions are able to install and manage the following versions of Kubernetes:
+### Kubernetes Versions
 
-|  | Azure Provider `v0.4.x` | Azure Provider `v0.5.x` | Azure Provider `v1.0.x` |
-|---|---|---|---|
-| Kubernetes 1.16 | ✓ |  |  |
-| Kubernetes 1.17 | ✓ |  |  |
-| Kubernetes 1.18 | ✓ | ✓ | ✓ |
-| Kubernetes 1.19 | ✓ | ✓ | ✓ |
-| Kubernetes 1.20 | ✓ | ✓ | ✓ |
-| Kubernetes 1.21 | ✓ | ✓ | ✓ |
-| Kubernetes 1.22 |   | ✓ | ✓ |
+The Azure provider is able to install and manage the [versions of Kubernetes supported by the Cluster API (CAPI) project](https://cluster-api.sigs.k8s.io/reference/versions.html#supported-kubernetes-versions).
+
+
+#### Managed Clusters (AKS)
+
+Managed Clusters (AKS) follow their own [Kubernetes version support policy](https://docs.microsoft.com/en-us/azure/aks/supported-kubernetes-versions?tabs=azure-cli#kubernetes-version-support-policy). Please use the Azure portal or CLI to [find the versions supported in your cluster's location](https://docs.microsoft.com/en-us/azure/aks/supported-kubernetes-versions?tabs=azure-cli#azure-portal-and-cli-versions).
 
 For more information on Kubernetes version support, see the [Cluster API book](https://cluster-api.sigs.k8s.io/reference/versions.html).
 
@@ -85,12 +89,12 @@ This repository uses the Kubernetes bots.  See a full list of the commands [here
 
 ### Office hours
 
-The community holds office hours every two weeks, with sessions open to all users and
+The community holds office hours every week, with sessions open to all users and
 developers.
 
-Office hours are hosted on a zoom video chat every other Thursday
-at 08:00 (PT) / 11:00 (ET) / 16:00 (UTC),
-and are published on the [Kubernetes community meetings calendar][gcal].
+Office hours are hosted on a zoom video chat every Thursday
+at 09:00 (PT) / 12:00 (ET) / 17:00 (UTC),
+and are published on the [Kubernetes community meetings calendar][gcal]. Please add your questions or ideas to [the agenda][capz_agenda].
 
 ### Other ways to communicate with the contributors
 
@@ -105,7 +109,7 @@ If you think you have found a bug please follow the instructions below.
 - Please spend a small amount of time giving due diligence to the issue tracker. Your issue might be a duplicate.
 - Get the logs from the cluster controllers. Please paste this into your issue.
 - Open a [bug report][bug_report].
-- Remember users might be searching for your issue in the future, so please give it a meaningful title to helps others.
+- Remember users might be searching for your issue in the future, so please give it a meaningful title to help others.
 - Feel free to reach out to the cluster-api community on [kubernetes slack][slack_info].
 
 ### Tracking new features
@@ -114,7 +118,7 @@ We also use the issue tracker to track features. If you have an idea for a featu
 
 - Open a [feature request][feature_request].
 - Remember users might be searching for your issue in the future, so please
-  give it a meaningful title to helps others.
+  give it a meaningful title to help others.
 - Clearly define the use case, using concrete examples. EG: I type `this` and
   cluster-api-provider-azure does `that`.
 - Some of our larger features will require some design. If you would like to
@@ -135,3 +139,4 @@ We also use the issue tracker to track features. If you have an idea for a featu
 [cluster_api]: https://github.com/kubernetes-sigs/cluster-api
 [quickstart]: https://cluster-api.sigs.k8s.io/user/quick-start.html
 [flavors_doc]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/templates/flavors/README.md
+[capz_agenda]: http://bit.ly/k8s-capz-agenda

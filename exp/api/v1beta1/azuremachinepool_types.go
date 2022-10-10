@@ -19,10 +19,9 @@ package v1beta1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/errors"
-
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
 const (
@@ -88,6 +87,10 @@ type (
 		// SubnetName selects the Subnet where the VMSS will be placed
 		// +optional
 		SubnetName string `json:"subnetName,omitempty"`
+
+		// VMExtensions specifies a list of extensions to be added to the scale set.
+		// +optional
+		VMExtensions []infrav1.VMExtension `json:"vmExtensions,omitempty"`
 	}
 
 	// AzureMachinePoolSpec defines the desired state of AzureMachinePool.

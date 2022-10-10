@@ -19,34 +19,44 @@ package inboundnatrules
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/loadbalancers"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
+
+const serviceName = "inboundnatrules"
 
 // InboundNatScope defines the scope interface for an inbound NAT service.
 type InboundNatScope interface {
 	azure.ClusterDescriber
-	InboundNatSpecs() []azure.InboundNatSpec
+	azure.AsyncStatusUpdater
+	APIServerLBName() string
+	InboundNatSpecs() []azure.ResourceSpecGetter
 }
 
 // Service provides operations on Azure resources.
 type Service struct {
 	Scope InboundNatScope
 	client
-	loadBalancersClient loadbalancers.Client
+	async.Reconciler
 }
 
 // New creates a new service.
 func New(scope InboundNatScope) *Service {
+	client := newClient(scope)
 	return &Service{
-		Scope:               scope,
-		client:              newClient(scope),
-		loadBalancersClient: loadbalancers.NewClient(scope),
+		Scope:      scope,
+		client:     client,
+		Reconciler: async.New(scope, client, client),
 	}
+}
+
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
 }
 
 // Reconcile gets/creates/updates an inbound NAT rule.
@@ -54,101 +64,91 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.Service.Reconcile")
 	defer done()
 
-	for _, inboundNatSpec := range s.Scope.InboundNatSpecs() {
-		log.V(2).Info("creating inbound NAT rule", "NAT rule", inboundNatSpec.Name)
-
-		lb, err := s.loadBalancersClient.Get(ctx, s.Scope.ResourceGroup(), inboundNatSpec.LoadBalancerName)
-		if err != nil {
-			return errors.Wrapf(err, "failed to get Load Balancer %s", inboundNatSpec.LoadBalancerName)
-		}
-
-		if lb.LoadBalancerPropertiesFormat == nil || lb.FrontendIPConfigurations == nil || lb.InboundNatRules == nil {
-			return errors.Errorf("Could not get existing inbound NAT rules from load balancer %s properties", to.String(lb.Name))
-		}
-
-		ports := make(map[int32]struct{})
-		if s.natRuleExists(ports)(ctx, *lb.InboundNatRules, inboundNatSpec.Name) {
-			// Inbound NAT Rule already exists, nothing to do here.
-			continue
-		}
-
-		sshFrontendPort, err := s.getAvailablePort(ctx, ports)
-		if err != nil {
-			return errors.Wrapf(err, "failed to find available SSH Frontend port for NAT Rule %s in load balancer %s", inboundNatSpec.Name, to.String(lb.Name))
-		}
-
-		rule := network.InboundNatRule{
-			Name: to.StringPtr(inboundNatSpec.Name),
-			InboundNatRulePropertiesFormat: &network.InboundNatRulePropertiesFormat{
-				BackendPort:          to.Int32Ptr(22),
-				EnableFloatingIP:     to.BoolPtr(false),
-				IdleTimeoutInMinutes: to.Int32Ptr(4),
-				FrontendIPConfiguration: &network.SubResource{
-					ID: (*lb.FrontendIPConfigurations)[0].ID,
-				},
-				Protocol:     network.TransportProtocolTCP,
-				FrontendPort: &sshFrontendPort,
-			},
-		}
-		log.V(3).Info("Creating rule %s using port %d", "NAT rule", inboundNatSpec.Name, "port", sshFrontendPort)
-
-		err = s.client.CreateOrUpdate(ctx, s.Scope.ResourceGroup(), to.String(lb.Name), inboundNatSpec.Name, rule)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create inbound NAT rule %s", inboundNatSpec.Name)
-		}
-
-		log.V(2).Info("successfully created inbound NAT rule", "NAT rule", inboundNatSpec.Name)
+	// Externally managed clusters might not have an LB
+	if s.Scope.APIServerLBName() == "" {
+		log.V(4).Info("Skipping InboundNatRule reconciliation as the cluster has no LB configured")
+		return nil
 	}
-	return nil
+
+	specs := s.Scope.InboundNatSpecs()
+	if len(specs) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
+
+	existingRules, err := s.client.List(ctx, s.Scope.ResourceGroup(), s.Scope.APIServerLBName())
+	if err != nil {
+		result := errors.Wrapf(err, "failed to get existing NAT rules")
+		s.Scope.UpdatePutStatus(infrav1.InboundNATRulesReadyCondition, serviceName, result)
+		return result
+	}
+
+	portsInUse := make(map[int32]struct{})
+	for _, rule := range existingRules {
+		portsInUse[*rule.InboundNatRulePropertiesFormat.FrontendPort] = struct{}{} // Mark frontend port as in use
+	}
+
+	// We go through the list of InboundNatSpecs to reconcile each one, independently of the result of the previous one.
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error creating) -> operationNotDoneError (i.e. creating in progress) -> no error (i.e. created)
+	var result error
+	for _, spec := range specs {
+		// Find an available SSH port for the rule.
+		sshFrontendPort, err := getAvailableSSHFrontendPort(portsInUse)
+		if err != nil {
+			return errors.Wrapf(err, "failed to find available SSH Frontend port for NAT Rule %s in load balancer %s", spec.ResourceName(), spec.OwnerResourceName())
+		}
+		natRule, ok := spec.(*InboundNatSpec)
+		if !ok {
+			result = errors.Errorf("%T is not of type InboundNatSpec", spec)
+		}
+		natRule.SSHFrontendPort = &sshFrontendPort
+		// Add the SSH frontend port to the list of ports in use
+		portsInUse[sshFrontendPort] = struct{}{}
+		if _, err := s.CreateResource(ctx, natRule, serviceName); err != nil {
+			if !azure.IsOperationNotDoneError(err) || result == nil {
+				result = err
+			}
+		}
+	}
+
+	s.Scope.UpdatePutStatus(infrav1.InboundNATRulesReadyCondition, serviceName, result)
+
+	return result
 }
 
 // Delete deletes the inbound NAT rule with the provided name.
 func (s *Service) Delete(ctx context.Context) error {
-	ctx, log, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.Service.Delete")
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.Service.Delete")
 	defer done()
 
-	for _, inboundNatSpec := range s.Scope.InboundNatSpecs() {
-		log.V(2).Info("deleting inbound NAT rule", "NAT rule", inboundNatSpec.Name)
-		err := s.client.Delete(ctx, s.Scope.ResourceGroup(), inboundNatSpec.LoadBalancerName, inboundNatSpec.Name)
-		if err != nil && !azure.ResourceNotFound(err) {
-			return errors.Wrapf(err, "failed to delete inbound NAT rule %s", inboundNatSpec.Name)
-		}
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
 
-		log.V(2).Info("successfully deleted inbound NAT rule", "NAT rule", inboundNatSpec.Name)
+	specs := s.Scope.InboundNatSpecs()
+	if len(specs) == 0 {
+		return nil
 	}
-	return nil
-}
 
-func (s *Service) natRuleExists(ports map[int32]struct{}) func(context.Context, []network.InboundNatRule, string) bool {
-	return func(ctx context.Context, rules []network.InboundNatRule, name string) bool {
-		_, log, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.Service.natRuleExists")
-		defer done()
-
-		for _, v := range rules {
-			if to.String(v.Name) == name {
-				log.V(2).Info("NAT rule already exists", "NAT rule", name)
-				return true
-			}
-			ports[*v.InboundNatRulePropertiesFormat.FrontendPort] = struct{}{}
-		}
-		return false
-	}
-}
-
-func (s *Service) getAvailablePort(ctx context.Context, ports map[int32]struct{}) (int32, error) {
-	_, log, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.Service.getAvailablePort")
-	defer done()
-
-	var i int32 = 22
-	if _, ok := ports[22]; ok {
-		for i = 2201; i < 2220; i++ {
-			if _, ok := ports[i]; !ok {
-				log.V(2).Info("Found available port", "port", i)
-				return i, nil
+	// We go through the list of InboundNatSpecs to delete each one, independently of the result of the previous one.
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (i.e. error deleting) -> operationNotDoneError (i.e. deleting in progress) -> no error (i.e. deleted)
+	var result error
+	for _, natRule := range specs {
+		if err := s.DeleteResource(ctx, natRule, serviceName); err != nil {
+			if !azure.IsOperationNotDoneError(err) || result == nil {
+				result = err
 			}
 		}
-		return i, errors.Errorf("No available SSH Frontend ports")
 	}
-	log.V(2).Info("Found available port", "port", i)
-	return i, nil
+
+	s.Scope.UpdateDeleteStatus(infrav1.InboundNATRulesReadyCondition, serviceName, result)
+	return result
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO inbound NAT rules.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

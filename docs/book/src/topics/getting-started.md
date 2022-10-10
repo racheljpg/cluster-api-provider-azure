@@ -5,8 +5,14 @@
 ### Requirements
 
 - A [Microsoft Azure account](https://azure.microsoft.com/en-us/)
+  - Note: If using a new subscription, make sure to [register](https://docs.microsoft.com/en-us/azure/azure-resource-manager/management/resource-providers-and-types) the following resource providers:
+    - `Microsoft.Compute`
+    - `Microsoft.Network`
+    - `Microsoft.ContainerService`
+    - `Microsoft.ManagedIdentity`
+    - `Microsoft.Authorization`
 - Install the [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest)
-- A [supported version](https://github.com/kubernetes-sigs/cluster-api-provider-azure#support-policy) of `clusterctl`
+- A [supported version](https://github.com/kubernetes-sigs/cluster-api-provider-azure#compatibility) of `clusterctl`
 
 ### Setting up your Azure environment
 
@@ -40,7 +46,7 @@ An Azure Service Principal is needed for deploying Azure resources. The below in
   NOTE: the "owner" role is required to be able to create role assignments for [system-assigned managed identity](vm-identity.md).
 
   ```bash
-  az ad sp create-for-rbac --role contributor
+  az ad sp create-for-rbac --role contributor --scopes="/subscriptions/${AZURE_SUBSCRIPTION_ID}"
   ```
 
   6. Save the output from the above command in environment variables.
@@ -76,7 +82,7 @@ Check out the [Cluster API Quick Start](https://cluster-api.sigs.k8s.io/user/qui
 
 <h1> Warning </h1> 
 
-Not all versions of clusterctl are supported.  Please see which versions are [currently supported](https://github.com/kubernetes-sigs/cluster-api-provider-azure#support-policy)
+Not all versions of clusterctl are supported.  Please see which versions are [currently supported](https://github.com/kubernetes-sigs/cluster-api-provider-azure#compatibility)
 
 ### Documentation
 

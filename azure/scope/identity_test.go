@@ -20,14 +20,13 @@ import (
 	"context"
 	"testing"
 
+	aadpodid "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity"
 	aadpodv1 "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
 	. "github.com/onsi/gomega"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -215,6 +214,36 @@ func TestCreateAzureIdentityWithBindings(t *testing.T) {
 			},
 		},
 		{
+			name: "create service principal with certificate identity",
+			identity: &infrav1.AzureClusterIdentity{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-identity",
+				},
+				Spec: infrav1.AzureClusterIdentitySpec{
+					Type:         infrav1.ServicePrincipalCertificate,
+					ResourceID:   "my-resource-id",
+					ClientID:     "my-client-id",
+					ClientSecret: corev1.SecretReference{Name: "my-client-secret"},
+					TenantID:     "my-tenant-id",
+				},
+			},
+			identityType:            aadpodv1.IdentityType(aadpodid.ServicePrincipalCertificate),
+			resourceManagerEndpoint: "public-cloud-endpoint",
+			activeDirectoryEndpoint: "active-directory-endpoint",
+			clusterMeta: metav1.ObjectMeta{
+				Name:      "cluster-name",
+				Namespace: "my-namespace",
+			},
+			copiedIdentity: metav1.ObjectMeta{
+				Name:      "cluster-name-my-namespace-test-identity",
+				Namespace: "capz-system",
+			},
+			binding: metav1.ObjectMeta{
+				Name:      "cluster-name-my-namespace-test-identity-binding",
+				Namespace: "capz-system",
+			},
+		},
+		{
 			name: "invalid identity type",
 			identity: &infrav1.AzureClusterIdentity{
 				ObjectMeta: metav1.ObjectMeta{
@@ -228,7 +257,7 @@ func TestCreateAzureIdentityWithBindings(t *testing.T) {
 					TenantID:     "my-tenant-id",
 				},
 			},
-			identityType: 0,
+			identityType: -1,
 			expectedErr:  true,
 		},
 	}
@@ -260,7 +289,66 @@ func TestCreateAzureIdentityWithBindings(t *testing.T) {
 				err = createAzureIdentityWithBindings(context.TODO(), tc.identity, tc.resourceManagerEndpoint, tc.activeDirectoryEndpoint, tc.clusterMeta, fakeClient)
 				g.Expect(err).To(BeNil())
 			} else {
-				g.Expect(err).ToNot(BeNil())
+				g.Expect(err).NotTo(BeNil())
+			}
+		})
+	}
+}
+
+func TestHasClientSecret(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity *infrav1.AzureClusterIdentity
+		want     bool
+	}{
+		{
+			name: "user assigned identity",
+			identity: &infrav1.AzureClusterIdentity{
+				Spec: infrav1.AzureClusterIdentitySpec{
+					Type:       infrav1.UserAssignedMSI,
+					ResourceID: "my-resource-id",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "service principal with secret",
+			identity: &infrav1.AzureClusterIdentity{
+				Spec: infrav1.AzureClusterIdentitySpec{
+					Type:         infrav1.ServicePrincipal,
+					ClientSecret: corev1.SecretReference{Name: "my-client-secret"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "service principal with certificate",
+			identity: &infrav1.AzureClusterIdentity{
+				Spec: infrav1.AzureClusterIdentitySpec{
+					Type:         infrav1.ServicePrincipalCertificate,
+					ClientSecret: corev1.SecretReference{Name: "my-client-secret"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "manual service principal",
+			identity: &infrav1.AzureClusterIdentity{
+				Spec: infrav1.AzureClusterIdentitySpec{
+					Type:         infrav1.ManualServicePrincipal,
+					ClientSecret: corev1.SecretReference{Name: "my-client-secret"},
+				},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &AzureCredentialsProvider{
+				Identity: tt.identity,
+			}
+			if got := p.hasClientSecret(); got != tt.want {
+				t.Errorf("AzureCredentialsProvider.hasClientSecret() = %v, want %v", got, tt.want)
 			}
 		})
 	}

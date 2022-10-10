@@ -26,23 +26,23 @@ func TestAzureManagedControlPlane_SetDefaultSSHPublicKey(t *testing.T) {
 	g := NewWithT(t)
 
 	type test struct {
-		r *AzureManagedControlPlane
+		m *AzureManagedControlPlane
 	}
 
 	existingPublicKey := "testpublickey"
-	publicKeyExistTest := test{r: createAzureManagedControlPlaneWithSSHPublicKey(t, existingPublicKey)}
-	publicKeyNotExistTest := test{r: createAzureManagedControlPlaneWithSSHPublicKey(t, "")}
+	publicKeyExistTest := test{m: createAzureManagedControlPlaneWithSSHPublicKey(existingPublicKey)}
+	publicKeyNotExistTest := test{m: createAzureManagedControlPlaneWithSSHPublicKey("")}
 
-	err := publicKeyExistTest.r.setDefaultSSHPublicKey()
+	err := publicKeyExistTest.m.setDefaultSSHPublicKey()
 	g.Expect(err).To(BeNil())
-	g.Expect(publicKeyExistTest.r.Spec.SSHPublicKey).To(Equal(existingPublicKey))
+	g.Expect(publicKeyExistTest.m.Spec.SSHPublicKey).To(Equal(existingPublicKey))
 
-	err = publicKeyNotExistTest.r.setDefaultSSHPublicKey()
+	err = publicKeyNotExistTest.m.setDefaultSSHPublicKey()
 	g.Expect(err).To(BeNil())
-	g.Expect(publicKeyNotExistTest.r.Spec.SSHPublicKey).NotTo(BeEmpty())
+	g.Expect(publicKeyNotExistTest.m.Spec.SSHPublicKey).NotTo(BeEmpty())
 }
 
-func createAzureManagedControlPlaneWithSSHPublicKey(t *testing.T, sshPublicKey string) *AzureManagedControlPlane {
+func createAzureManagedControlPlaneWithSSHPublicKey(sshPublicKey string) *AzureManagedControlPlane {
 	return hardcodedAzureManagedControlPlaneWithSSHKey(sshPublicKey)
 }
 

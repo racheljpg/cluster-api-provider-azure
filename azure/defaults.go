@@ -22,9 +22,6 @@ import (
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
-	"github.com/blang/semver"
-	"github.com/pkg/errors"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	"sigs.k8s.io/cluster-api-provider-azure/version"
 )
@@ -32,6 +29,8 @@ import (
 const (
 	// DefaultUserName is the default username for a created VM.
 	DefaultUserName = "capi"
+	// DefaultAKSUserName is the default username for a created AKS VM.
+	DefaultAKSUserName = "azureuser"
 )
 
 const (
@@ -50,6 +49,12 @@ const (
 	LinuxOS = "Linux"
 	// WindowsOS is Windows OS value for OSDisk.OSType.
 	WindowsOS = "Windows"
+)
+
+const (
+	// DefaultWindowsOsAndVersion is the default Windows Server version to use when
+	// genearating default images for Windows nodes.
+	DefaultWindowsOsAndVersion = "windows-2019"
 )
 
 const (
@@ -82,11 +87,22 @@ const (
 	// ProviderIDPrefix will be appended to the beginning of Azure resource IDs to form the Kubernetes Provider ID.
 	// NOTE: this format matches the 2 slashes format used in cloud-provider and cluster-autoscaler.
 	ProviderIDPrefix = "azure://"
+	// azureBuiltInContributorID the ID of the Contributor role in Azure
+	// Ref: https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
+	azureBuiltInContributorID = "b24988ac-6180-42a0-ab88-20f7382dd24c"
+)
+
+const (
+	// CustomHeaderPrefix is the prefix of annotations that enable additional cluster / node pool features.
+	// Whatever follows the prefix will be passed as a header to cluster/node pool creation/update requests.
+	// E.g. add `"infrastructure.cluster.x-k8s.io/custom-header-UseGPUDedicatedVHD": "true"` annotation to
+	// AzureManagedMachinePool CR to enable creating GPU nodes by the node pool.
+	CustomHeaderPrefix = "infrastructure.cluster.x-k8s.io/custom-header-"
 )
 
 var (
 	// LinuxBootstrapExtensionCommand is the command the VM bootstrap extension will execute to verify Linux nodes bootstrap completes successfully.
-	LinuxBootstrapExtensionCommand = fmt.Sprintf("for i in $(seq 1 %d); do test -f %s && break; if [ $i -eq %d ]; then return 1; else sleep %d; fi; done", bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionRetries, bootstrapExtensionSleep)
+	LinuxBootstrapExtensionCommand = fmt.Sprintf("for i in $(seq 1 %d); do test -f %s && break; if [ $i -eq %d ]; then exit 1; else sleep %d; fi; done", bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionRetries, bootstrapExtensionSleep)
 	// WindowsBootstrapExtensionCommand is the command the VM bootstrap extension will execute to verify Windows nodes bootstrap completes successfully.
 	WindowsBootstrapExtensionCommand = fmt.Sprintf("powershell.exe -Command \"for ($i = 0; $i -lt %d; $i++) {if (Test-Path '%s') {exit 0} else {Start-Sleep -Seconds %d}} exit -2\"",
 		bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionSleep)
@@ -95,6 +111,16 @@ var (
 // GenerateBackendAddressPoolName generates a load balancer backend address pool name.
 func GenerateBackendAddressPoolName(lbName string) string {
 	return fmt.Sprintf("%s-%s", lbName, "backendPool")
+}
+
+// GenerateSubscriptionScope generates a role assignment scope that applies to all resources in the subscription.
+func GenerateSubscriptionScope(subscriptionID string) string {
+	return fmt.Sprintf("/subscriptions/%s/", subscriptionID)
+}
+
+// GenerateContributorRoleDefinitionID generates the contributor role definition ID.
+func GenerateContributorRoleDefinitionID(subscriptionID string) string {
+	return fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, azureBuiltInContributorID)
 }
 
 // GenerateOutboundBackendAddressPoolName generates a load balancer outbound backend address pool name.
@@ -253,83 +279,6 @@ func NATRuleID(subscriptionID, resourceGroup, loadBalancerName, natRuleName stri
 // AvailabilitySetID returns the azure resource ID for a given availability set.
 func AvailabilitySetID(subscriptionID, resourceGroup, availabilitySetName string) string {
 	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/availabilitySets/%s", subscriptionID, resourceGroup, availabilitySetName)
-}
-
-// GetDefaultImageSKUID gets the SKU ID of the image to use for the provided version of Kubernetes.
-func getDefaultImageSKUID(k8sVersion, os, osVersion string) (string, error) {
-	version, err := semver.ParseTolerant(k8sVersion)
-	if err != nil {
-		return "", errors.Wrapf(err, "unable to parse Kubernetes version \"%s\" in spec, expected valid SemVer string", k8sVersion)
-	}
-	return fmt.Sprintf("k8s-%ddot%ddot%d-%s-%s", version.Major, version.Minor, version.Patch, os, osVersion), nil
-}
-
-// GetDefaultUbuntuImage returns the default image spec for Ubuntu.
-func GetDefaultUbuntuImage(k8sVersion string) (*infrav1.Image, error) {
-	v, err := semver.ParseTolerant(k8sVersion)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to parse Kubernetes version \"%s\"", k8sVersion)
-	}
-	// Default to Ubuntu 20.04 LTS, except for k8s versions which have only 18.04 reference images.
-	osVersion := "2004"
-	if (v.Major == 1 && v.Minor == 21 && v.Patch < 2) ||
-		(v.Major == 1 && v.Minor == 20 && v.Patch < 8) ||
-		(v.Major == 1 && v.Minor == 19 && v.Patch < 12) ||
-		(v.Major == 1 && v.Minor == 18 && v.Patch < 20) ||
-		(v.Major == 1 && v.Minor < 18) {
-		osVersion = "1804"
-	}
-
-	skuID, err := getDefaultImageSKUID(k8sVersion, "ubuntu", osVersion)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get default image")
-	}
-
-	defaultImage := &infrav1.Image{
-		Marketplace: &infrav1.AzureMarketplaceImage{
-			Publisher: DefaultImagePublisherID,
-			Offer:     DefaultImageOfferID,
-			SKU:       skuID,
-			Version:   LatestVersion,
-		},
-	}
-
-	return defaultImage, nil
-}
-
-// GetDefaultWindowsImage returns the default image spec for Windows.
-func GetDefaultWindowsImage(k8sVersion, runtime string) (*infrav1.Image, error) {
-	v122 := semver.MustParse("1.22.0")
-	v, err := semver.ParseTolerant(k8sVersion)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to parse Kubernetes version \"%s\"", k8sVersion)
-	}
-
-	// If containerd is specified we don't currently support less than 1.22
-	if v.LE(v122) && runtime == "containerd" {
-		return nil, errors.New("containerd image only supported in 1.22+")
-	}
-
-	skuID, err := getDefaultImageSKUID(k8sVersion, "windows", "2019")
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to get default image")
-	}
-
-	// Starting with 1.22 we default to containerd for Windows unless the runtime flag is set.
-	if v.GTE(v122) && runtime != "dockershim" {
-		skuID = skuID + "-containerd"
-	}
-
-	defaultImage := &infrav1.Image{
-		Marketplace: &infrav1.AzureMarketplaceImage{
-			Publisher: DefaultImagePublisherID,
-			Offer:     DefaultWindowsImageOfferID,
-			SKU:       skuID,
-			Version:   LatestVersion,
-		},
-	}
-
-	return defaultImage, nil
 }
 
 // GetBootstrappingVMExtension returns the CAPZ Bootstrapping VM extension.

@@ -19,11 +19,10 @@ package v1beta1
 import (
 	"testing"
 
-	"k8s.io/utils/pointer"
-
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/pointer"
 )
 
 func TestClusterNameValidation(t *testing.T) {
@@ -94,7 +93,7 @@ func TestClusterNameValidation(t *testing.T) {
 
 			allErrs := azureCluster.validateClusterName()
 			if tc.wantErr {
-				g.Expect(allErrs).ToNot(BeNil())
+				g.Expect(allErrs).NotTo(BeNil())
 			} else {
 				g.Expect(allErrs).To(BeNil())
 			}
@@ -137,12 +136,14 @@ func TestClusterWithPreexistingVnetInvalid(t *testing.T) {
 	// invalid because it doesn't specify a controlplane subnet
 	testCase.cluster.Spec.NetworkSpec.Subnets[0] = SubnetSpec{
 		Name: "random-subnet",
-		Role: "random",
+		SubnetClassSpec: SubnetClassSpec{
+			Role: "random",
+		},
 	}
 
 	t.Run(testCase.name, func(t *testing.T) {
 		err := testCase.cluster.validateCluster(nil)
-		g.Expect(err).ToNot(BeNil())
+		g.Expect(err).NotTo(BeNil())
 	})
 }
 
@@ -204,7 +205,9 @@ func TestClusterSpecWithPreexistingVnetInvalid(t *testing.T) {
 	// invalid because it doesn't specify a controlplane subnet
 	testCase.cluster.Spec.NetworkSpec.Subnets[0] = SubnetSpec{
 		Name: "random-subnet",
-		Role: "random",
+		SubnetClassSpec: SubnetClassSpec{
+			Role: "random",
+		},
 	}
 
 	t.Run(testCase.name, func(t *testing.T) {
@@ -400,7 +403,7 @@ func TestValidateVnetCIDR(t *testing.T) {
 			if testCase.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(testCase.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -585,7 +588,7 @@ func TestValidateSubnetCIDR(t *testing.T) {
 			},
 		},
 		{
-			name:             "subnet cidr in atleast one vnet's range in case of multiple vnet cidr blocks",
+			name:             "subnet cidr in at least one vnet's range in case of multiple vnet cidr blocks",
 			vnetCidrBlocks:   []string{"10.0.0.0/8", "11.0.0.0/8"},
 			subnetCidrBlocks: []string{"10.1.0.0/16", "10.0.0.0/16", "11.1.0.0/16"},
 			wantErr:          false,
@@ -598,7 +601,7 @@ func TestValidateSubnetCIDR(t *testing.T) {
 				// Searches for expected error in list of thrown errors
 				g.Expect(err).To(ContainElement(MatchError(testCase.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -672,13 +675,15 @@ func TestValidateAPIServerLB(t *testing.T) {
 			name: "invalid SKU",
 			lb: LoadBalancerSpec{
 				Name: "my-awesome-lb",
-				SKU:  "Awesome",
 				FrontendIPs: []FrontendIP{
 					{
 						Name: "ip-config",
 					},
 				},
-				Type: Public,
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					SKU:  "Awesome",
+					Type: Public,
+				},
 			},
 			wantErr: true,
 			expectedErr: field.Error{
@@ -691,7 +696,9 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "invalid Type",
 			lb: LoadBalancerSpec{
-				Type: "Foo",
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: "Foo",
+				},
 			},
 			wantErr: true,
 			expectedErr: field.Error{
@@ -744,12 +751,16 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "public LB with private IP",
 			lb: LoadBalancerSpec{
-				Type: Public,
 				FrontendIPs: []FrontendIP{
 					{
-						Name:             "ip-1",
-						PrivateIPAddress: "10.0.0.4",
+						Name: "ip-1",
+						FrontendIPClass: FrontendIPClass{
+							PrivateIPAddress: "10.0.0.4",
+						},
 					},
+				},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Public,
 				},
 			},
 			wantErr: true,
@@ -762,7 +773,6 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "internal LB with public IP",
 			lb: LoadBalancerSpec{
-				Type: Internal,
 				FrontendIPs: []FrontendIP{
 					{
 						Name: "ip-1",
@@ -770,6 +780,9 @@ func TestValidateAPIServerLB(t *testing.T) {
 							Name: "my-invalid-ip",
 						},
 					},
+				},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
 				},
 			},
 			wantErr: true,
@@ -782,12 +795,16 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "internal LB with invalid private IP",
 			lb: LoadBalancerSpec{
-				Type: Internal,
 				FrontendIPs: []FrontendIP{
 					{
-						Name:             "ip-1",
-						PrivateIPAddress: "NAIP",
+						Name: "ip-1",
+						FrontendIPClass: FrontendIPClass{
+							PrivateIPAddress: "NAIP",
+						},
 					},
+				},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
 				},
 			},
 			wantErr: true,
@@ -801,12 +818,16 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "internal LB with out of range private IP",
 			lb: LoadBalancerSpec{
-				Type: Internal,
 				FrontendIPs: []FrontendIP{
 					{
-						Name:             "ip-1",
-						PrivateIPAddress: "20.1.2.3",
+						Name: "ip-1",
+						FrontendIPClass: FrontendIPClass{
+							PrivateIPAddress: "20.1.2.3",
+						},
 					},
+				},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
 				},
 			},
 			cpCIDRS: []string{"10.0.0.0/24", "10.1.0.0/24"},
@@ -821,15 +842,19 @@ func TestValidateAPIServerLB(t *testing.T) {
 		{
 			name: "internal LB with in range private IP",
 			lb: LoadBalancerSpec{
-				Type: Internal,
-				SKU:  SKUStandard,
-				Name: "my-private-lb",
 				FrontendIPs: []FrontendIP{
 					{
-						Name:             "ip-1",
-						PrivateIPAddress: "10.1.0.3",
+						Name: "ip-1",
+						FrontendIPClass: FrontendIPClass{
+							PrivateIPAddress: "10.1.0.3",
+						},
 					},
 				},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
+					SKU:  SKUStandard,
+				},
+				Name: "my-private-lb",
 			},
 			cpCIDRS: []string{"10.0.0.0/24", "10.1.0.0/24"},
 			wantErr: false,
@@ -844,7 +869,7 @@ func TestValidateAPIServerLB(t *testing.T) {
 			if test.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(test.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -861,8 +886,10 @@ func TestPrivateDNSZoneName(t *testing.T) {
 		{
 			name: "testInvalidPrivateDNSZoneName",
 			network: NetworkSpec{
-				PrivateDNSZoneName: "wrong@d_ns.io",
-				APIServerLB:        createValidAPIServerInternalLB(),
+				NetworkClassSpec: NetworkClassSpec{
+					PrivateDNSZoneName: "wrong@d_ns.io",
+				},
+				APIServerLB: createValidAPIServerInternalLB(),
 			},
 			expectedErr: field.Error{
 				Type:     "FieldValueInvalid",
@@ -875,26 +902,34 @@ func TestPrivateDNSZoneName(t *testing.T) {
 		{
 			name: "testValidPrivateDNSZoneName",
 			network: NetworkSpec{
-				PrivateDNSZoneName: "good.dns.io",
-				APIServerLB:        createValidAPIServerInternalLB(),
+				NetworkClassSpec: NetworkClassSpec{
+					PrivateDNSZoneName: "good.dns.io",
+				},
+				APIServerLB: createValidAPIServerInternalLB(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "testValidPrivateDNSZoneNameWithUnderscore",
 			network: NetworkSpec{
-				PrivateDNSZoneName: "_good.__dns.io",
-				APIServerLB:        createValidAPIServerInternalLB(),
+				NetworkClassSpec: NetworkClassSpec{
+					PrivateDNSZoneName: "_good.__dns.io",
+				},
+				APIServerLB: createValidAPIServerInternalLB(),
 			},
 			wantErr: false,
 		},
 		{
 			name: "testBadAPIServerLBType",
 			network: NetworkSpec{
-				PrivateDNSZoneName: "good.dns.io",
+				NetworkClassSpec: NetworkClassSpec{
+					PrivateDNSZoneName: "good.dns.io",
+				},
 				APIServerLB: LoadBalancerSpec{
 					Name: "my-lb",
-					Type: Public,
+					LoadBalancerClassSpec: LoadBalancerClassSpec{
+						Type: Public,
+					},
 				},
 			},
 			expectedErr: field.Error{
@@ -911,11 +946,11 @@ func TestPrivateDNSZoneName(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			err := validatePrivateDNSZoneName(test.network, field.NewPath("spec", "networkSpec", "privateDNSZoneName"))
+			err := validatePrivateDNSZoneName(test.network.PrivateDNSZoneName, test.network.APIServerLB.Type, field.NewPath("spec", "networkSpec", "privateDNSZoneName"))
 			if test.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(test.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -933,10 +968,14 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 		expectedErr field.Error
 	}{
 		{
-			name:        "no lb for public clusters",
-			lb:          nil,
-			apiServerLB: LoadBalancerSpec{Type: Public},
-			wantErr:     true,
+			name: "no lb for public clusters",
+			lb:   nil,
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Public,
+				},
+			},
+			wantErr: true,
 			expectedErr: field.Error{
 				Type:     "FieldValueRequired",
 				Field:    "nodeOutboundLB",
@@ -945,10 +984,14 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 			},
 		},
 		{
-			name:        "no lb allowed for internal clusters",
-			lb:          nil,
-			apiServerLB: LoadBalancerSpec{Type: Internal},
-			wantErr:     false,
+			name: "no lb allowed for internal clusters",
+			lb:   nil,
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "invalid ID update",
@@ -985,10 +1028,14 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 		{
 			name: "invalid SKU update",
 			lb: &LoadBalancerSpec{
-				SKU: "some-sku",
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					SKU: "some-sku",
+				},
 			},
 			old: &LoadBalancerSpec{
-				SKU: "old-sku",
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					SKU: "old-sku",
+				},
 			},
 			wantErr: true,
 			expectedErr: field.Error{
@@ -1034,6 +1081,7 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 				FrontendIPs: []FrontendIP{{
 					Name: "old-frontend-ip",
 				}},
+				LoadBalancerClassSpec: LoadBalancerClassSpec{},
 			},
 			wantErr: false,
 		},
@@ -1060,7 +1108,7 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 			if test.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(test.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -1078,10 +1126,14 @@ func TestValidateControlPlaneNodeOutboundLB(t *testing.T) {
 		expectedErr field.Error
 	}{
 		{
-			name:        "cp outbound lb cannot be set for public clusters",
-			lb:          &LoadBalancerSpec{Name: "foo"},
-			apiServerLB: LoadBalancerSpec{Type: Public},
-			wantErr:     true,
+			name: "cp outbound lb cannot be set for public clusters",
+			lb:   &LoadBalancerSpec{Name: "foo"},
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Public,
+				},
+			},
+			wantErr: true,
 			expectedErr: field.Error{
 				Type:     "FieldValueForbidden",
 				Field:    "controlPlaneOutboundLB",
@@ -1090,24 +1142,36 @@ func TestValidateControlPlaneNodeOutboundLB(t *testing.T) {
 			},
 		},
 		{
-			name:        "cp outbound lb can be set for private clusters",
-			lb:          &LoadBalancerSpec{Name: "foo"},
-			apiServerLB: LoadBalancerSpec{Type: Internal},
-			wantErr:     false,
+			name: "cp outbound lb can be set for private clusters",
+			lb:   &LoadBalancerSpec{Name: "foo"},
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
+				},
+			},
+			wantErr: false,
 		},
 		{
-			name:        "cp outbound lb can be nil for private clusters",
-			lb:          nil,
-			apiServerLB: LoadBalancerSpec{Type: Internal},
-			wantErr:     false,
+			name: "cp outbound lb can be nil for private clusters",
+			lb:   nil,
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
+				},
+			},
+			wantErr: false,
 		},
 		{
 			name: "frontend ips count exceeds max value",
 			lb: &LoadBalancerSpec{
 				FrontendIPsCount: pointer.Int32Ptr(100),
 			},
-			apiServerLB: LoadBalancerSpec{Type: Internal},
-			wantErr:     true,
+			apiServerLB: LoadBalancerSpec{
+				LoadBalancerClassSpec: LoadBalancerClassSpec{
+					Type: Internal,
+				},
+			},
+			wantErr: true,
 			expectedErr: field.Error{
 				Type:     "FieldValueInvalid",
 				Field:    "controlPlaneOutboundLB.frontendIPsCount",
@@ -1125,7 +1189,7 @@ func TestValidateControlPlaneNodeOutboundLB(t *testing.T) {
 			if test.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(test.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -1216,7 +1280,7 @@ func TestValidateCloudProviderConfigOverrides(t *testing.T) {
 			if testCase.wantErr {
 				g.Expect(err).To(ContainElement(MatchError(testCase.expectedErr.Error())))
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -1249,11 +1313,15 @@ func createValidSubnets() Subnets {
 	return Subnets{
 		{
 			Name: "control-plane-subnet",
-			Role: "control-plane",
+			SubnetClassSpec: SubnetClassSpec{
+				Role: "control-plane",
+			},
 		},
 		{
 			Name: "node-subnet",
-			Role: "node",
+			SubnetClassSpec: SubnetClassSpec{
+				Role: "node",
+			},
 		},
 	}
 }
@@ -1262,14 +1330,15 @@ func createValidVnet() VnetSpec {
 	return VnetSpec{
 		ResourceGroup: "custom-vnet",
 		Name:          "my-vnet",
-		CIDRBlocks:    []string{DefaultVnetCIDR},
+		VnetClassSpec: VnetClassSpec{
+			CIDRBlocks: []string{DefaultVnetCIDR},
+		},
 	}
 }
 
 func createValidAPIServerLB() LoadBalancerSpec {
 	return LoadBalancerSpec{
 		Name: "my-lb",
-		SKU:  SKUStandard,
 		FrontendIPs: []FrontendIP{
 			{
 				Name: "ip-config",
@@ -1279,7 +1348,10 @@ func createValidAPIServerLB() LoadBalancerSpec {
 				},
 			},
 		},
-		Type: Public,
+		LoadBalancerClassSpec: LoadBalancerClassSpec{
+			SKU:  SKUStandard,
+			Type: Public,
+		},
 	}
 }
 
@@ -1292,13 +1364,17 @@ func createValidNodeOutboundLB() *LoadBalancerSpec {
 func createValidAPIServerInternalLB() LoadBalancerSpec {
 	return LoadBalancerSpec{
 		Name: "my-lb",
-		SKU:  SKUStandard,
 		FrontendIPs: []FrontendIP{
 			{
-				Name:             "ip-config-private",
-				PrivateIPAddress: "10.10.1.1",
+				Name: "ip-config-private",
+				FrontendIPClass: FrontendIPClass{
+					PrivateIPAddress: "10.10.1.1",
+				},
 			},
 		},
-		Type: Internal,
+		LoadBalancerClassSpec: LoadBalancerClassSpec{
+			SKU:  SKUStandard,
+			Type: Internal,
+		},
 	}
 }

@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -26,8 +27,6 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
@@ -37,6 +36,7 @@ import (
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // SelfHostedSpecInput is the input for SelfHostedSpec.
@@ -66,10 +66,10 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 	BeforeEach(func() {
 		Expect(ctx).NotTo(BeNil(), "ctx is required for %s spec", specName)
 		input = inputGetter()
-		Expect(input.E2EConfig).ToNot(BeNil(), "Invalid argument. input.E2EConfig can't be nil when calling %s spec", specName)
+		Expect(input.E2EConfig).NotTo(BeNil(), "Invalid argument. input.E2EConfig can't be nil when calling %s spec", specName)
 		Expect(input.ClusterctlConfigPath).To(BeAnExistingFile(), "Invalid argument. input.ClusterctlConfigPath must be an existing file when calling %s spec", specName)
-		Expect(input.BootstrapClusterProxy).ToNot(BeNil(), "Invalid argument. input.BootstrapClusterProxy can't be nil when calling %s spec", specName)
-		Expect(os.MkdirAll(input.ArtifactFolder, 0750)).To(Succeed(), "Invalid argument. input.ArtifactFolder can't be created for %s spec", specName)
+		Expect(input.BootstrapClusterProxy).NotTo(BeNil(), "Invalid argument. input.BootstrapClusterProxy can't be nil when calling %s spec", specName)
+		Expect(os.MkdirAll(input.ArtifactFolder, 0o750)).To(Succeed(), "Invalid argument. input.ArtifactFolder can't be created for %s spec", specName)
 		Expect(input.E2EConfig.Variables).To(HaveKey(capi_e2e.KubernetesVersion))
 
 		// Setup a Namespace where to host objects for this spec and create a watcher for the namespace events.
@@ -94,13 +94,13 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 		Expect(err).NotTo(HaveOccurred())
 
 		identityName := input.E2EConfig.GetVariable(ClusterIdentityName)
-		Expect(os.Setenv(ClusterIdentityName, identityName)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).NotTo(HaveOccurred())
-		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).NotTo(HaveOccurred())
+		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).To(Succeed())
+		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).To(Succeed())
 	})
 
-	// Management clusters do not support Windows nodes becuase of cert manager
+	// Management clusters do not support Windows nodes because of cert manager
 	// We are using the capi specs located in test/e2e/data/infrastructure-azure/v1beta1 that only have linux nodes
 	// to act as the management cluster until Windows nodes are supported for management nodes
 	// Tracking support for cert manager: https://github.com/jetstack/cert-manager/issues/3606
@@ -180,7 +180,7 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 			ClusterName: selfHostedCluster.Name,
 			Namespace:   selfHostedCluster.Namespace,
 		})
-		Expect(controlPlane).ToNot(BeNil())
+		Expect(controlPlane).NotTo(BeNil())
 
 		By("PASSED!")
 	})

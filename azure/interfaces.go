@@ -20,23 +20,21 @@ import (
 	"context"
 
 	"github.com/Azure/go-autorest/autorest"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
-// Reconciler is a generic interface used by components offering a type of service.
-// Example: virtualnetworks service would offer Reconcile/Delete methods.
+// Reconciler is a generic interface for a controller reconciler which has Reconcile and Delete methods.
 type Reconciler interface {
 	Reconcile(ctx context.Context) error
 	Delete(ctx context.Context) error
 }
 
-// CredentialGetter is a Service which knows how to retrieve credentials for an Azure
-// resource in a resource group.
-type CredentialGetter interface {
+// ServiceReconciler is an Azure service reconciler which can reconcile an Azure service.
+type ServiceReconciler interface {
+	Name() string
+	IsManaged(ctx context.Context) (bool, error)
 	Reconciler
-	GetCredentials(ctx context.Context, group string, cluster string) ([]byte, error)
 }
 
 // Authorizer is an interface which can get the subscription ID, base URI, and authorizer for an Azure service.
@@ -62,6 +60,7 @@ type NetworkDescriber interface {
 	SetSubnet(infrav1.SubnetSpec)
 	IsIPv6Enabled() bool
 	ControlPlaneRouteTable() infrav1.RouteTable
+	APIServerLB() *infrav1.LoadBalancerSpec
 	APIServerLBName() string
 	APIServerLBPoolName(string) string
 	IsAPIServerPrivate() bool
@@ -85,8 +84,8 @@ type ClusterDescriber interface {
 // AsyncStatusUpdater is an interface used to keep track of long running operations in Status that has Conditions and Futures.
 type AsyncStatusUpdater interface {
 	SetLongRunningOperationState(*infrav1.Future)
-	GetLongRunningOperationState(string, string) *infrav1.Future
-	DeleteLongRunningOperationState(string, string)
+	GetLongRunningOperationState(string, string, string) *infrav1.Future
+	DeleteLongRunningOperationState(string, string, string)
 	UpdatePutStatus(clusterv1.ConditionType, string, error)
 	UpdateDeleteStatus(clusterv1.ConditionType, string, error)
 	UpdatePatchStatus(clusterv1.ConditionType, string, error)
@@ -96,6 +95,12 @@ type AsyncStatusUpdater interface {
 type ClusterScoper interface {
 	ClusterDescriber
 	NetworkDescriber
+}
+
+// ManagedClusterScoper defines the interface for ManagedClusterScope.
+type ManagedClusterScoper interface {
+	ClusterDescriber
+	NodeResourceGroup() string
 }
 
 // ResourceSpecGetter is an interface for getting all the required information to create/update/delete an Azure resource.
@@ -110,5 +115,12 @@ type ResourceSpecGetter interface {
 	// Parameters takes the existing resource and returns the desired parameters of the resource.
 	// If the resource does not exist, or we do not care about existing parameters to update the resource, existing should be nil.
 	// If no update is needed on the resource, Parameters should return nil.
-	Parameters(existing interface{}) (interface{}, error)
+	Parameters(existing interface{}) (params interface{}, err error)
+}
+
+// ResourceSpecGetterWithHeaders is a ResourceSpecGetter that can return custom headers to be added to API calls.
+type ResourceSpecGetterWithHeaders interface {
+	ResourceSpecGetter
+	// CustomHeaders returns the headers that should be added to Azure API calls.
+	CustomHeaders() map[string]string
 }

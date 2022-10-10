@@ -40,12 +40,15 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capiv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/cluster-api/util/patch"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
@@ -69,8 +72,8 @@ type (
 // AzureClusterToAzureMachinesMapper creates a mapping handler to transform AzureClusters into AzureMachines. The transform
 // requires AzureCluster to map to the owning Cluster, then from the Cluster, collect the Machines belonging to the cluster,
 // then finally projecting the infrastructure reference to the AzureMachine.
-func AzureClusterToAzureMachinesMapper(ctx context.Context, c client.Client, ro runtime.Object, scheme *runtime.Scheme, log logr.Logger) (handler.MapFunc, error) {
-	gvk, err := apiutil.GVKForObject(ro, scheme)
+func AzureClusterToAzureMachinesMapper(ctx context.Context, c client.Client, obj runtime.Object, scheme *runtime.Scheme, log logr.Logger) (handler.MapFunc, error) {
+	gvk, err := apiutil.GVKForObject(obj, scheme)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to find GVK for AzureMachine")
 	}
@@ -212,7 +215,7 @@ func GetCloudProviderSecret(d azure.ClusterScoper, namespace, name string, owner
 	return secret, nil
 }
 
-func systemAssignedIdentityCloudProviderConfig(d azure.ClusterScoper) (*CloudProviderConfig, *CloudProviderConfig) {
+func systemAssignedIdentityCloudProviderConfig(d azure.ClusterScoper) (cpConfig *CloudProviderConfig, wkConfig *CloudProviderConfig) {
 	controlPlaneConfig, workerConfig := newCloudProviderConfig(d)
 	controlPlaneConfig.AadClientID = ""
 	controlPlaneConfig.AadClientSecret = ""
@@ -223,7 +226,7 @@ func systemAssignedIdentityCloudProviderConfig(d azure.ClusterScoper) (*CloudPro
 	return controlPlaneConfig, workerConfig
 }
 
-func userAssignedIdentityCloudProviderConfig(d azure.ClusterScoper, identityID string) (*CloudProviderConfig, *CloudProviderConfig) {
+func userAssignedIdentityCloudProviderConfig(d azure.ClusterScoper, identityID string) (cpConfig *CloudProviderConfig, wkConfig *CloudProviderConfig) {
 	controlPlaneConfig, workerConfig := newCloudProviderConfig(d)
 	controlPlaneConfig.AadClientID = ""
 	controlPlaneConfig.AadClientSecret = ""
@@ -290,6 +293,31 @@ func getOneNodeSubnet(d azure.ClusterScoper) infrav1.SubnetSpec {
 	return infrav1.SubnetSpec{}
 }
 
+// CloudProviderConfig is an abbreviated version of the same struct in k/k.
+type CloudProviderConfig struct {
+	Cloud                        string `json:"cloud"`
+	TenantID                     string `json:"tenantId"`
+	SubscriptionID               string `json:"subscriptionId"`
+	AadClientID                  string `json:"aadClientId,omitempty"`
+	AadClientSecret              string `json:"aadClientSecret,omitempty"`
+	ResourceGroup                string `json:"resourceGroup"`
+	SecurityGroupName            string `json:"securityGroupName"`
+	SecurityGroupResourceGroup   string `json:"securityGroupResourceGroup"`
+	Location                     string `json:"location"`
+	VMType                       string `json:"vmType"`
+	VnetName                     string `json:"vnetName"`
+	VnetResourceGroup            string `json:"vnetResourceGroup"`
+	SubnetName                   string `json:"subnetName"`
+	RouteTableName               string `json:"routeTableName"`
+	LoadBalancerSku              string `json:"loadBalancerSku"`
+	MaximumLoadBalancerRuleCount int    `json:"maximumLoadBalancerRuleCount"`
+	UseManagedIdentityExtension  bool   `json:"useManagedIdentityExtension"`
+	UseInstanceMetadata          bool   `json:"useInstanceMetadata"`
+	UserAssignedIdentityID       string `json:"userAssignedIdentityID,omitempty"`
+	CloudProviderRateLimitConfig
+	BackOffConfig
+}
+
 // overrideFromSpec overrides cloud provider config with the values provided in cluster spec.
 func (cpc *CloudProviderConfig) overrideFromSpec(d azure.ClusterScoper) *CloudProviderConfig {
 	if d.CloudProviderConfigOverrides() == nil {
@@ -350,31 +378,6 @@ func toCloudProviderRateLimitConfig(source infrav1.RateLimitConfig) *RateLimitCo
 	return &rateLimitConfig
 }
 
-// CloudProviderConfig is an abbreviated version of the same struct in k/k.
-type CloudProviderConfig struct {
-	Cloud                        string `json:"cloud"`
-	TenantID                     string `json:"tenantId"`
-	SubscriptionID               string `json:"subscriptionId"`
-	AadClientID                  string `json:"aadClientId,omitempty"`
-	AadClientSecret              string `json:"aadClientSecret,omitempty"`
-	ResourceGroup                string `json:"resourceGroup"`
-	SecurityGroupName            string `json:"securityGroupName"`
-	SecurityGroupResourceGroup   string `json:"securityGroupResourceGroup"`
-	Location                     string `json:"location"`
-	VMType                       string `json:"vmType"`
-	VnetName                     string `json:"vnetName"`
-	VnetResourceGroup            string `json:"vnetResourceGroup"`
-	SubnetName                   string `json:"subnetName"`
-	RouteTableName               string `json:"routeTableName"`
-	LoadBalancerSku              string `json:"loadBalancerSku"`
-	MaximumLoadBalancerRuleCount int    `json:"maximumLoadBalancerRuleCount"`
-	UseManagedIdentityExtension  bool   `json:"useManagedIdentityExtension"`
-	UseInstanceMetadata          bool   `json:"useInstanceMetadata"`
-	UserAssignedIdentityID       string `json:"userAssignedIdentityId,omitempty"`
-	CloudProviderRateLimitConfig
-	BackOffConfig
-}
-
 // CloudProviderRateLimitConfig represents the rate limiting configurations in azure cloud provider config.
 // See: https://kubernetes-sigs.github.io/cloud-provider-azure/install/configs/#per-client-rate-limiting.
 // This is a copy of the struct used in cloud-provider-azure: https://github.com/kubernetes-sigs/cloud-provider-azure/blob/d585c2031925b39c925624302f22f8856e29e352/pkg/provider/azure_ratelimit.go#L25
@@ -432,14 +435,14 @@ func toCloudProviderBackOffConfig(source infrav1.BackOffConfig) BackOffConfig {
 	return backOffConfig
 }
 
-func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner metav1.OwnerReference, new *corev1.Secret, clusterName string) error {
+func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner metav1.OwnerReference, newSecret *corev1.Secret, clusterName string) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.reconcileAzureSecret")
 	defer done()
 
 	// Fetch previous secret, if it exists
 	key := types.NamespacedName{
-		Namespace: new.Namespace,
-		Name:      new.Name,
+		Namespace: newSecret.Namespace,
+		Name:      newSecret.Name,
 	}
 	old := &corev1.Secret{}
 	err := kubeclient.Get(ctx, key, old)
@@ -449,7 +452,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 
 	// Create if it wasn't found
 	if apierrors.IsNotFound(err) {
-		if err := kubeclient.Create(ctx, new); err != nil && !apierrors.IsAlreadyExists(err) {
+		if err := kubeclient.Create(ctx, newSecret); err != nil && !apierrors.IsAlreadyExists(err) {
 			return errors.Wrap(err, "failed to create cluster azure json")
 		}
 		return nil
@@ -471,7 +474,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 		}
 	}
 
-	hasData := equality.Semantic.DeepEqual(old.Data, new.Data)
+	hasData := equality.Semantic.DeepEqual(old.Data, newSecret.Data)
 	if hasData && hasOwner {
 		// no update required
 		log.V(2).Info("returning early from json reconcile, no update needed")
@@ -483,7 +486,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 	}
 
 	if !hasData {
-		old.Data = new.Data
+		old.Data = newSecret.Data
 	}
 
 	log.V(2).Info("updating azure json")
@@ -497,7 +500,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 }
 
 // GetOwnerMachinePool returns the MachinePool object owning the current resource.
-func GetOwnerMachinePool(ctx context.Context, c client.Client, obj metav1.ObjectMeta) (*capiv1exp.MachinePool, error) {
+func GetOwnerMachinePool(ctx context.Context, c client.Client, obj metav1.ObjectMeta) (*expv1.MachinePool, error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.GetOwnerMachinePool")
 	defer done()
 
@@ -510,7 +513,7 @@ func GetOwnerMachinePool(ctx context.Context, c client.Client, obj metav1.Object
 			return nil, errors.WithStack(err)
 		}
 
-		if gv.Group == capiv1exp.GroupVersion.Group {
+		if gv.Group == expv1.GroupVersion.Group {
 			return GetMachinePoolByName(ctx, c, obj.Namespace, ref.Name)
 		}
 	}
@@ -540,11 +543,11 @@ func GetOwnerAzureMachinePool(ctx context.Context, c client.Client, obj metav1.O
 }
 
 // GetMachinePoolByName finds and return a MachinePool object using the specified params.
-func GetMachinePoolByName(ctx context.Context, c client.Client, namespace, name string) (*capiv1exp.MachinePool, error) {
+func GetMachinePoolByName(ctx context.Context, c client.Client, namespace, name string) (*expv1.MachinePool, error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.GetMachinePoolByName")
 	defer done()
 
-	m := &capiv1exp.MachinePool{}
+	m := &expv1.MachinePool{}
 	key := client.ObjectKey{Name: name, Namespace: namespace}
 	if err := c.Get(ctx, key, m); err != nil {
 		return nil, err
@@ -575,7 +578,7 @@ func ShouldDeleteIndividualResources(ctx context.Context, clusterScope *scope.Cl
 		return true
 	}
 	grpSvc := groups.New(clusterScope)
-	managed, err := grpSvc.IsGroupManaged(ctx)
+	managed, err := grpSvc.IsManaged(ctx)
 	// Since this is a best effort attempt to speed up delete, we don't fail the delete if we can't get the RG status.
 	// Instead, take the long way and delete all resources one by one.
 	return err != nil || !managed
@@ -596,4 +599,50 @@ func GetClusterIdentityFromRef(ctx context.Context, c client.Client, azureCluste
 		return identity, nil
 	}
 	return nil, nil
+}
+
+func clusterIdentityFinalizer(prefix, clusterNamespace, clusterName string) string {
+	return fmt.Sprintf("%s/%s-%s", prefix, clusterNamespace, clusterName)
+}
+
+// EnsureClusterIdentity ensures that the identity ref is allowed in the namespace and sets a finalizer.
+func EnsureClusterIdentity(ctx context.Context, c client.Client, object conditions.Setter, identityRef *corev1.ObjectReference, finalizerPrefix string) error {
+	name := object.GetName()
+	namespace := object.GetNamespace()
+	identity, err := GetClusterIdentityFromRef(ctx, c, namespace, identityRef)
+	if err != nil {
+		return err
+	}
+	if !scope.IsClusterNamespaceAllowed(ctx, c, identity.Spec.AllowedNamespaces, namespace) {
+		conditions.MarkFalse(object, infrav1.NetworkInfrastructureReadyCondition, infrav1.NamespaceNotAllowedByIdentity, clusterv1.ConditionSeverityError, "")
+		return errors.New("AzureClusterIdentity list of allowed namespaces doesn't include current cluster namespace")
+	}
+	identityHelper, err := patch.NewHelper(identity, c)
+	if err != nil {
+		return errors.Wrap(err, "failed to init patch helper")
+	}
+	// If the AzureClusterIdentity doesn't have our finalizer, add it.
+	controllerutil.AddFinalizer(identity, clusterIdentityFinalizer(finalizerPrefix, namespace, name))
+	// Register the finalizer immediately to avoid orphaning Azure resources on delete.
+	return identityHelper.Patch(ctx, identity)
+}
+
+// RemoveClusterIdentityFinalizer removes the finalizer on an AzureClusterIdentity.
+func RemoveClusterIdentityFinalizer(ctx context.Context, c client.Client, object client.Object, identityRef *corev1.ObjectReference, finalizerPrefix string) error {
+	name := object.GetName()
+	namespace := object.GetNamespace()
+	identity, err := GetClusterIdentityFromRef(ctx, c, namespace, identityRef)
+	if err != nil {
+		return err
+	}
+	identityHelper, err := patch.NewHelper(identity, c)
+	if err != nil {
+		return errors.Wrap(err, "failed to init patch helper")
+	}
+	controllerutil.RemoveFinalizer(identity, clusterIdentityFinalizer(finalizerPrefix, namespace, name))
+	err = identityHelper.Patch(ctx, identity)
+	if err != nil {
+		return errors.Wrap(err, "failed to patch AzureClusterIdentity")
+	}
+	return nil
 }

@@ -17,20 +17,64 @@ limitations under the License.
 package v1alpha4
 
 import (
-	expv1beta1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	convert "k8s.io/apimachinery/pkg/conversion"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	utilconversion "sigs.k8s.io/cluster-api/util/conversion"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
 // ConvertTo converts this AzureMachinePool to the Hub version (v1beta1).
-func (src *AzureMachinePool) ConvertTo(dstRaw conversion.Hub) error { // nolint
-	dst := dstRaw.(*expv1beta1.AzureMachinePool)
+func (src *AzureMachinePool) ConvertTo(dstRaw conversion.Hub) error {
+	dst := dstRaw.(*infrav1exp.AzureMachinePool)
+	if err := Convert_v1alpha4_AzureMachinePool_To_v1beta1_AzureMachinePool(src, dst, nil); err != nil {
+		return err
+	}
 
-	return Convert_v1alpha4_AzureMachinePool_To_v1beta1_AzureMachinePool(src, dst, nil)
+	// Manually restore data.
+	restored := &infrav1exp.AzureMachinePool{}
+	if ok, err := utilconversion.UnmarshalData(src, restored); err != nil || !ok {
+		return err
+	}
+
+	if restored.Spec.Template.Image != nil && restored.Spec.Template.Image.ComputeGallery != nil {
+		dst.Spec.Template.Image.ComputeGallery = restored.Spec.Template.Image.ComputeGallery
+	}
+
+	if restored.Status.Image != nil && restored.Status.Image.ComputeGallery != nil {
+		dst.Status.Image.ComputeGallery = restored.Status.Image.ComputeGallery
+	}
+
+	if len(restored.Spec.Template.VMExtensions) > 0 {
+		dst.Spec.Template.VMExtensions = restored.Spec.Template.VMExtensions
+	}
+
+	return nil
 }
 
 // ConvertFrom converts from the Hub version (v1beta1) to this version.
-func (dst *AzureMachinePool) ConvertFrom(srcRaw conversion.Hub) error { // nolint
-	src := srcRaw.(*expv1beta1.AzureMachinePool)
+func (dst *AzureMachinePool) ConvertFrom(srcRaw conversion.Hub) error {
+	src := srcRaw.(*infrav1exp.AzureMachinePool)
+	if err := Convert_v1beta1_AzureMachinePool_To_v1alpha4_AzureMachinePool(src, dst, nil); err != nil {
+		return err
+	}
 
-	return Convert_v1beta1_AzureMachinePool_To_v1alpha4_AzureMachinePool(src, dst, nil)
+	// Preserve Hub data on down-conversion.
+	return utilconversion.MarshalData(src, dst)
+}
+
+// ConvertTo converts this AzureMachinePool to the Hub version (v1beta1).
+func (src *AzureMachinePoolList) ConvertTo(dstRaw conversion.Hub) error {
+	dst := dstRaw.(*infrav1exp.AzureMachinePoolList)
+	return Convert_v1alpha4_AzureMachinePoolList_To_v1beta1_AzureMachinePoolList(src, dst, nil)
+}
+
+// ConvertFrom converts from the Hub version (v1beta1) to this version.
+func (dst *AzureMachinePoolList) ConvertFrom(srcRaw conversion.Hub) error {
+	src := srcRaw.(*infrav1exp.AzureMachinePoolList)
+	return Convert_v1beta1_AzureMachinePoolList_To_v1alpha4_AzureMachinePoolList(src, dst, nil)
+}
+
+// Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate converts an Azure Machine Pool Machine Template from v1beta1 to v1alpha4.
+func Convert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(in *infrav1exp.AzureMachinePoolMachineTemplate, out *AzureMachinePoolMachineTemplate, s convert.Scope) error {
+	return autoConvert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha4_AzureMachinePoolMachineTemplate(in, out, s)
 }

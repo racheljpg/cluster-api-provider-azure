@@ -271,13 +271,17 @@ spec:
           path: /run/xtables.lock
           type: FileOrCreate
         name: iptableslock
+      - name: default-path
+        hostPath:
+          path: /etc/default
+          type: DirectoryOrCreate
       - name: kubelet-config
         hostPath:
           path: /etc/default/kubelet
           type: FileOrCreate
       containers:
       - name: nmi
-        image: "mcr.microsoft.com/oss/azure/aad-pod-identity/nmi:v1.8.5"
+        image: "mcr.microsoft.com/oss/azure/aad-pod-identity/nmi:v1.8.9"
         imagePullPolicy: IfNotPresent
         args:
           - "--node=$(NODE_NAME)"
@@ -316,6 +320,9 @@ spec:
         volumeMounts:
         - mountPath: /run/xtables.lock
           name: iptableslock
+        - name: default-path
+          mountPath: /etc/default
+          readOnly: true
         - name: kubelet-config
           mountPath: /etc/default/kubelet
           readOnly: true

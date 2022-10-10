@@ -26,6 +26,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
+	"sigs.k8s.io/cluster-api-provider-azure/util/system"
+	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/predicates"
@@ -35,13 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infraexpv1 "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/feature"
-	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	"sigs.k8s.io/cluster-api-provider-azure/util/system"
-	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 // AzureIdentityReconciler reconciles Azure identity objects.
@@ -64,15 +63,17 @@ func (r *AzureIdentityReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 		WithOptions(options).
 		For(&infrav1.AzureCluster{}).
 		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceIsNotExternallyManaged(log)).
+		Named("AzureIdentity").
 		Build(r)
 	if err != nil {
 		return errors.Wrap(err, "error creating controller")
 	}
 
-	// Add a watch on infraexpv1.AzureManagedControlPlane if aks is enabled.
+	// Add a watch on infrav1exp.AzureManagedControlPlane if aks is enabled.
 	if feature.Gates.Enabled(feature.AKS) {
 		if err = c.Watch(
-			&source.Kind{Type: &infraexpv1.AzureManagedControlPlane{}},
+			&source.Kind{Type: &infrav1exp.AzureManagedControlPlane{}},
 			&handler.EnqueueRequestForObject{},
 			predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue),
 		); err != nil {
@@ -83,7 +84,7 @@ func (r *AzureIdentityReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 	// Add a watch on clusterv1.Cluster object for unpause notifications.
 	if err = c.Watch(
 		&source.Kind{Type: &clusterv1.Cluster{}},
-		handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("AzureCluster"))),
+		handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(ctx, infrav1.GroupVersion.WithKind("AzureCluster"), mgr.GetClient(), &infrav1.AzureCluster{})),
 		predicates.ClusterUnpaused(log),
 		predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue),
 	); err != nil {
@@ -121,7 +122,7 @@ func (r *AzureIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil && apierrors.IsNotFound(err) {
 		if feature.Gates.Enabled(feature.AKS) {
 			// Fetch the AzureManagedControlPlane instance
-			azureManagedControlPlane := &infraexpv1.AzureManagedControlPlane{}
+			azureManagedControlPlane := &infrav1exp.AzureManagedControlPlane{}
 			identityOwner = azureManagedControlPlane
 			err = r.Get(ctx, req.NamespacedName, azureManagedControlPlane)
 			if err != nil && apierrors.IsNotFound(err) {
@@ -171,8 +172,8 @@ func (r *AzureIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					return ctrl.Result{}, errors.Wrap(err, "failed to get AzureCluster")
 				}
 			}
-		case infraexpv1.AzureManagedControlPlane:
-			azManagedControlPlane := &infraexpv1.AzureManagedControlPlane{}
+		case infrav1exp.AzureManagedControlPlane:
+			azManagedControlPlane := &infrav1exp.AzureManagedControlPlane{}
 			if err := r.Get(ctx, key, azManagedControlPlane); err != nil {
 				if apierrors.IsNotFound(err) {
 					bindingsToDelete = append(bindingsToDelete, b)

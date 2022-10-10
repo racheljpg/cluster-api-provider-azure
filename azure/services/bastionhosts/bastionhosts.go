@@ -19,36 +19,40 @@ package bastionhosts
 import (
 	"context"
 
-	"github.com/pkg/errors"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/publicips"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
+const serviceName = "bastionhosts"
+
 // BastionScope defines the scope interface for a bastion host service.
 type BastionScope interface {
-	azure.ClusterDescriber
-	azure.NetworkDescriber
-	BastionSpec() azure.BastionSpec
+	azure.ClusterScoper
+	azure.AsyncStatusUpdater
+	AzureBastionSpec() azure.ResourceSpecGetter
 }
 
 // Service provides operations on Azure resources.
 type Service struct {
 	Scope BastionScope
-	client
-	subnetsClient   subnets.Client
-	publicIPsClient publicips.Client
+	async.Reconciler
 }
 
 // New creates a new service.
 func New(scope BastionScope) *Service {
+	client := newClient(scope)
 	return &Service{
-		Scope:           scope,
-		client:          newClient(scope),
-		subnetsClient:   subnets.NewClient(scope),
-		publicIPsClient: publicips.NewClient(scope),
+		Scope:      scope,
+		Reconciler: async.New(scope, client, client),
 	}
+}
+
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
 }
 
 // Reconcile gets/creates/updates a bastion host.
@@ -56,15 +60,18 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "bastionhosts.Service.Reconcile")
 	defer done()
 
-	azureBastionSpec := s.Scope.BastionSpec().AzureBastion
-	if azureBastionSpec != nil {
-		err := s.ensureAzureBastion(ctx, *azureBastionSpec)
-		if err != nil {
-			return errors.Wrap(err, "error creating Azure Bastion")
-		}
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
+
+	var resultingErr error
+	if bastionSpec := s.Scope.AzureBastionSpec(); bastionSpec != nil {
+		_, resultingErr = s.CreateResource(ctx, bastionSpec, serviceName)
+	} else {
+		return nil
 	}
 
-	return nil
+	s.Scope.UpdatePutStatus(infrav1.BastionHostReadyCondition, serviceName, resultingErr)
+	return resultingErr
 }
 
 // Delete deletes the bastion host with the provided scope.
@@ -72,12 +79,21 @@ func (s *Service) Delete(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "bastionhosts.Service.Delete")
 	defer done()
 
-	azureBastionSpec := s.Scope.BastionSpec().AzureBastion
-	if azureBastionSpec != nil {
-		err := s.ensureAzureBastionDeleted(ctx, *azureBastionSpec)
-		if err != nil {
-			return errors.Wrap(err, "error deleting Azure Bastion")
-		}
+	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
+	defer cancel()
+
+	var resultingErr error
+	if bastionSpec := s.Scope.AzureBastionSpec(); bastionSpec != nil {
+		resultingErr = s.DeleteResource(ctx, bastionSpec, serviceName)
+	} else {
+		return nil
 	}
-	return nil
+
+	s.Scope.UpdateDeleteStatus(infrav1.BastionHostReadyCondition, serviceName, resultingErr)
+	return resultingErr
+}
+
+// IsManaged returns always returns true as CAPZ does not support BYO bastion.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	return true, nil
 }

@@ -17,7 +17,7 @@ limitations under the License.
 package converters
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	corev1 "k8s.io/api/core/v1"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
@@ -44,7 +44,7 @@ type VM struct {
 }
 
 // SDKToVM converts an Azure SDK VirtualMachine to the CAPZ VM type.
-func SDKToVM(v compute.VirtualMachine) (*VM, error) {
+func SDKToVM(v compute.VirtualMachine) *VM {
 	vm := &VM{
 		ID:    to.String(v.ID),
 		Name:  to.String(v.Name),
@@ -63,5 +63,5 @@ func SDKToVM(v compute.VirtualMachine) (*VM, error) {
 		vm.Tags = MapToTags(v.Tags)
 	}
 
-	return vm, nil
+	return vm
 }

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"go/build"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -32,22 +31,20 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/onsi/ginkgo"
 	"k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	clusterv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	infrav1alpha3 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
 	infrav1alpha4 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha4"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/internal/test/record"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 var (
@@ -61,14 +58,14 @@ func init() {
 	// Calculate the scheme.
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
-	utilruntime.Must(clusterv1exp.AddToScheme(scheme))
+	utilruntime.Must(expv1.AddToScheme(scheme))
 	utilruntime.Must(infrav1.AddToScheme(scheme))
 	utilruntime.Must(infrav1exp.AddToScheme(scheme))
 	utilruntime.Must(infrav1alpha3.AddToScheme(scheme))
 	utilruntime.Must(infrav1alpha4.AddToScheme(scheme))
 
 	// Get the root of the current file to use in CRD paths.
-	_, filename, _, _ := goruntime.Caller(0) //nolint
+	_, filename, _, _ := goruntime.Caller(0) //nolint:dogsled // Ignore "declaration has 3 blank identifiers" check.
 	root := path.Join(path.Dir(filename), "..", "..", "..")
 
 	crdPaths := []string{
@@ -92,7 +89,7 @@ type (
 		manager.Manager
 		client.Client
 		Config      *rest.Config
-		Log         logr.Logger
+		Log         logr.LogSink
 		LogRecorder *record.Logger
 		doneMgr     chan struct{}
 	}
@@ -125,16 +122,18 @@ func NewTestEnvironment() *TestEnvironment {
 	}
 }
 
+// StartManager starts the test environment manager and blocks until the context is canceled.
 func (t *TestEnvironment) StartManager() error {
 	return t.Manager.Start(context.Background())
 }
 
+// Stop stops the test environment.
 func (t *TestEnvironment) Stop() error {
 	return env.Stop()
 }
 
 func getFilePathToCAPICRDs(root string) string {
-	modBits, err := ioutil.ReadFile(filepath.Join(root, "go.mod"))
+	modBits, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		return ""
 	}

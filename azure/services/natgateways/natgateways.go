@@ -19,7 +19,7 @@ package natgateways
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-02-01/network"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -53,6 +53,11 @@ func New(scope NatGatewayScope) *Service {
 	}
 }
 
+// Name returns the service name.
+func (s *Service) Name() string {
+	return serviceName
+}
+
 // Reconcile gets/creates/updates a NAT gateway.
 // Only when the NAT gateway 'Name' property is defined we create the NAT gateway: it's opt-in.
 func (s *Service) Reconcile(ctx context.Context) error {
@@ -62,18 +67,23 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	if !s.Scope.Vnet().IsManaged(s.Scope.ClusterName()) {
+	if managed, err := s.IsManaged(ctx); err == nil && !managed {
 		log.V(4).Info("Skipping nat gateways reconcile in custom vnet mode")
-
-		s.Scope.UpdatePutStatus(infrav1.NATGatewaysReadyCondition, serviceName, nil)
 		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "failed to check if NAT gateways are managed")
 	}
 
 	// We go through the list of NatGatewaySpecs to reconcile each one, independently of the resultingErr of the previous one.
-	// If multiple errors occur, we return the most pressing one
-	// order of precedence is: error creating -> creating in progress -> created (no error)
+	specs := s.Scope.NatGatewaySpecs()
+	if len(specs) == 0 {
+		return nil
+	}
+
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (ie. error creating) -> operationNotDoneError (ie. creating in progress) -> no error (ie. created)
 	var resultingErr error
-	for _, natGatewaySpec := range s.Scope.NatGatewaySpecs() {
+	for _, natGatewaySpec := range specs {
 		result, err := s.CreateResource(ctx, natGatewaySpec, serviceName)
 		if err != nil {
 			if !azure.IsOperationNotDoneError(err) || resultingErr == nil {
@@ -83,7 +93,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		if err == nil {
 			natGateway, ok := result.(network.NatGateway)
 			if !ok {
-				// Return out of loop since this would be an unexepcted fatal error
+				// Return out of loop since this would be an unexpected fatal error
 				resultingErr = errors.Errorf("created resource %T is not a network.NatGateway", result)
 				break
 			}
@@ -105,19 +115,23 @@ func (s *Service) Delete(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultAzureServiceReconcileTimeout)
 	defer cancel()
 
-	if !s.Scope.Vnet().IsManaged(s.Scope.ClusterName()) {
+	if managed, err := s.IsManaged(ctx); err == nil && !managed {
 		log.V(4).Info("Skipping nat gateway deletion in custom vnet mode")
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "failed to check if NAT gateways are managed")
+	}
 
-		s.Scope.UpdateDeleteStatus(infrav1.NATGatewaysReadyCondition, serviceName, nil)
+	specs := s.Scope.NatGatewaySpecs()
+	if len(specs) == 0 {
 		return nil
 	}
 
-	var resultingErr error
-
 	// We go through the list of NatGatewaySpecs to delete each one, independently of the resultingErr of the previous one.
-	// If multiple errors occur, we return the most pressing one
-	// order of precedence is: error deleting -> deleting in progress -> deleted (no error)
-	for _, natGatewaySpec := range s.Scope.NatGatewaySpecs() {
+	// If multiple errors occur, we return the most pressing one.
+	//  Order of precedence (highest -> lowest) is: error that is not an operationNotDoneError (ie. error creating) -> operationNotDoneError (ie. creating in progress) -> no error (ie. created)
+	var resultingErr error
+	for _, natGatewaySpec := range specs {
 		if err := s.DeleteResource(ctx, natGatewaySpec, serviceName); err != nil {
 			if !azure.IsOperationNotDoneError(err) || resultingErr == nil {
 				resultingErr = err
@@ -126,4 +140,12 @@ func (s *Service) Delete(ctx context.Context) error {
 	}
 	s.Scope.UpdateDeleteStatus(infrav1.NATGatewaysReadyCondition, serviceName, resultingErr)
 	return resultingErr
+}
+
+// IsManaged returns true if the NAT gateways' lifecycles are managed.
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	_, _, done := tele.StartSpanWithLogger(ctx, "natgateways.Service.IsManaged")
+	defer done()
+
+	return s.Scope.IsVnetManaged(), nil
 }

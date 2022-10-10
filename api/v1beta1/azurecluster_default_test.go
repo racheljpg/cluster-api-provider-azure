@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/Azure/go-autorest/autorest/to"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -99,17 +98,23 @@ func TestVnetDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							ResourceGroup: "custom-vnet",
 							Name:          "my-vnet",
-							CIDRBlocks:    []string{DefaultVnetCIDR},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{DefaultVnetCIDR},
+							},
 						},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -117,7 +122,6 @@ func TestVnetDefaults(t *testing.T) {
 						},
 						APIServerLB: LoadBalancerSpec{
 							Name: "my-lb",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{
 								{
 									Name: "ip-config",
@@ -127,7 +131,11 @@ func TestVnetDefaults(t *testing.T) {
 									},
 								},
 							},
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU: SKUStandard,
+
+								Type: Public,
+							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
 							FrontendIPsCount: to.Int32Ptr(1),
@@ -156,7 +164,9 @@ func TestVnetDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							ResourceGroup: "cluster-test",
 							Name:          "cluster-test-vnet",
-							CIDRBlocks:    []string{DefaultVnetCIDR},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{DefaultVnetCIDR},
+							},
 						},
 					},
 				},
@@ -172,7 +182,9 @@ func TestVnetDefaults(t *testing.T) {
 					ResourceGroup: "cluster-test",
 					NetworkSpec: NetworkSpec{
 						Vnet: VnetSpec{
-							CIDRBlocks: []string{"10.0.0.0/16"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{"10.0.0.0/16"},
+							},
 						},
 					},
 				},
@@ -187,7 +199,9 @@ func TestVnetDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							ResourceGroup: "cluster-test",
 							Name:          "cluster-test-vnet",
-							CIDRBlocks:    []string{"10.0.0.0/16"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{"10.0.0.0/16"},
+							},
 						},
 					},
 				},
@@ -203,7 +217,9 @@ func TestVnetDefaults(t *testing.T) {
 					ResourceGroup: "cluster-test",
 					NetworkSpec: NetworkSpec{
 						Vnet: VnetSpec{
-							CIDRBlocks: []string{DefaultVnetCIDR, "2001:1234:5678:9a00::/56"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{DefaultVnetCIDR, "2001:1234:5678:9a00::/56"},
+							},
 						},
 					},
 				},
@@ -218,7 +234,9 @@ func TestVnetDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							ResourceGroup: "cluster-test",
 							Name:          "cluster-test-vnet",
-							CIDRBlocks:    []string{DefaultVnetCIDR, "2001:1234:5678:9a00::/56"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{DefaultVnetCIDR, "2001:1234:5678:9a00::/56"},
+							},
 						},
 					},
 				},
@@ -264,16 +282,20 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								},
 								Name:          "cluster-test-controlplane-subnet",
-								CIDRBlocks:    []string{DefaultControlPlaneSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+								},
 								Name:          "cluster-test-node-subnet",
-								CIDRBlocks:    []string{DefaultNodeSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
@@ -292,15 +314,23 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:       SubnetControlPlane,
-								Name:       "my-controlplane-subnet",
-								CIDRBlocks: []string{"10.0.0.16/24"},
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{"10.0.0.16/24"},
+								},
+								Name: "my-controlplane-subnet",
 							},
 							{
-								Role:       SubnetNode,
-								Name:       "my-node-subnet",
-								CIDRBlocks: []string{"10.1.0.16/24"},
-								NatGateway: NatGateway{Name: "foo-natgw"},
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"10.1.0.16/24"},
+								},
+								Name: "my-node-subnet",
+								NatGateway: NatGateway{
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "foo-natgw",
+									},
+								},
 							},
 						},
 					},
@@ -314,20 +344,26 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{"10.0.0.16/24"},
+								},
 								Name:          "my-controlplane-subnet",
-								CIDRBlocks:    []string{"10.0.0.16/24"},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"10.1.0.16/24"},
+								},
 								Name:          "my-node-subnet",
-								CIDRBlocks:    []string{"10.1.0.16/24"},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 								NatGateway: NatGateway{
-									Name: "foo-natgw",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "foo-natgw",
+									},
 									NatGatewayIP: PublicIPSpec{
 										Name: "pip-cluster-test-my-node-subnet-natgw",
 									},
@@ -348,11 +384,15 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role: SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name: "cluster-test-controlplane-subnet",
 							},
 							{
-								Role: SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name: "cluster-test-node-subnet",
 							},
 						},
@@ -367,16 +407,21 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								},
+
 								Name:          "cluster-test-controlplane-subnet",
-								CIDRBlocks:    []string{DefaultControlPlaneSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+								},
 								Name:          "cluster-test-node-subnet",
-								CIDRBlocks:    []string{DefaultNodeSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
@@ -395,14 +440,18 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role: SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name: "cluster-test-controlplane-subnet",
 								RouteTable: RouteTable{
 									Name: "control-plane-custom-route-table",
 								},
 							},
 							{
-								Role: SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name: "cluster-test-node-subnet",
 							},
 						},
@@ -417,16 +466,20 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								},
 								Name:          "cluster-test-controlplane-subnet",
-								CIDRBlocks:    []string{DefaultControlPlaneSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{Name: "control-plane-custom-route-table"},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+								},
 								Name:          "cluster-test-node-subnet",
-								CIDRBlocks:    []string{DefaultNodeSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
@@ -445,7 +498,9 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role: SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name: "my-node-subnet",
 							},
 						},
@@ -460,16 +515,20 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+								},
 								Name:          "my-node-subnet",
-								CIDRBlocks:    []string{DefaultNodeSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								},
 								Name:          "cluster-test-controlplane-subnet",
-								CIDRBlocks:    []string{DefaultControlPlaneSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{},
 							},
@@ -487,18 +546,24 @@ func TestSubnetDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						Vnet: VnetSpec{
-							CIDRBlocks: []string{"2001:be00::1/56"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{"2001:be00::1/56"},
+							},
 						},
 						Subnets: Subnets{
 							{
-								Name:       "cluster-test-controlplane-subnet",
-								Role:       "control-plane",
-								CIDRBlocks: []string{"2001:beef::1/64"},
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "control-plane",
+									CIDRBlocks: []string{"2001:beef::1/64"},
+								},
+								Name: "cluster-test-controlplane-subnet",
 							},
 							{
-								Name:       "cluster-test-node-subnet",
-								Role:       "node",
-								CIDRBlocks: []string{"2001:beea::1/64"},
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "node",
+									CIDRBlocks: []string{"2001:beea::1/64"},
+								},
+								Name: "cluster-test-node-subnet",
 							},
 						},
 					},
@@ -511,20 +576,26 @@ func TestSubnetDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						Vnet: VnetSpec{
-							CIDRBlocks: []string{"2001:be00::1/56"},
+							VnetClassSpec: VnetClassSpec{
+								CIDRBlocks: []string{"2001:be00::1/56"},
+							},
 						},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetControlPlane,
+									CIDRBlocks: []string{"2001:beef::1/64"},
+								},
 								Name:          "cluster-test-controlplane-subnet",
-								CIDRBlocks:    []string{"2001:beef::1/64"},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-controlplane-nsg"},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2001:beea::1/64"},
+								},
 								Name:          "cluster-test-node-subnet",
-								CIDRBlocks:    []string{"2001:beea::1/64"},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
@@ -543,22 +614,26 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: "control-plane",
+								},
 								Name: "cluster-test-controlplane-subnet",
-								Role: "control-plane",
 								SecurityGroup: SecurityGroup{
-									Name: "my-custom-sg",
-									SecurityRules: []SecurityRule{
-										{
-											Name:             "allow_port_50000",
-											Description:      "allow port 50000",
-											Protocol:         "*",
-											Priority:         2202,
-											SourcePorts:      to.StringPtr("*"),
-											DestinationPorts: to.StringPtr("*"),
-											Source:           to.StringPtr("*"),
-											Destination:      to.StringPtr("*"),
+									SecurityGroupClass: SecurityGroupClass{
+										SecurityRules: []SecurityRule{
+											{
+												Name:             "allow_port_50000",
+												Description:      "allow port 50000",
+												Protocol:         "*",
+												Priority:         2202,
+												SourcePorts:      to.StringPtr("*"),
+												DestinationPorts: to.StringPtr("*"),
+												Source:           to.StringPtr("*"),
+												Destination:      to.StringPtr("*"),
+											},
 										},
 									},
+									Name: "my-custom-sg",
 								},
 							},
 						},
@@ -573,30 +648,36 @@ func TestSubnetDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Name:       "cluster-test-controlplane-subnet",
-								Role:       "control-plane",
-								CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "control-plane",
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+								},
+								Name: "cluster-test-controlplane-subnet",
 								SecurityGroup: SecurityGroup{
-									Name: "my-custom-sg",
-									SecurityRules: []SecurityRule{
-										{
-											Name:             "allow_port_50000",
-											Description:      "allow port 50000",
-											Protocol:         "*",
-											Priority:         2202,
-											SourcePorts:      to.StringPtr("*"),
-											DestinationPorts: to.StringPtr("*"),
-											Source:           to.StringPtr("*"),
-											Destination:      to.StringPtr("*"),
-											Direction:        SecurityRuleDirectionInbound,
+									SecurityGroupClass: SecurityGroupClass{
+										SecurityRules: []SecurityRule{
+											{
+												Name:             "allow_port_50000",
+												Description:      "allow port 50000",
+												Protocol:         "*",
+												Priority:         2202,
+												SourcePorts:      to.StringPtr("*"),
+												DestinationPorts: to.StringPtr("*"),
+												Source:           to.StringPtr("*"),
+												Destination:      to.StringPtr("*"),
+												Direction:        SecurityRuleDirectionInbound,
+											},
 										},
 									},
+									Name: "my-custom-sg",
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+								},
 								Name:          "cluster-test-node-subnet",
-								CIDRBlocks:    []string{DefaultNodeSubnetCIDR},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
 							},
@@ -658,8 +739,8 @@ func TestVnetPeeringDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							Peerings: VnetPeerings{
 								{
-									RemoteVnetName: "my-vnet",
-									ResourceGroup:  "cluster-test",
+									VnetPeeringClassSpec: VnetPeeringClassSpec{RemoteVnetName: "my-vnet"},
+									ResourceGroup:        "cluster-test",
 								},
 							},
 						},
@@ -676,8 +757,8 @@ func TestVnetPeeringDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							Peerings: VnetPeerings{
 								{
-									RemoteVnetName: "my-vnet",
-									ResourceGroup:  "cluster-test",
+									VnetPeeringClassSpec: VnetPeeringClassSpec{RemoteVnetName: "my-vnet"},
+									ResourceGroup:        "cluster-test",
 								},
 							},
 						},
@@ -697,7 +778,7 @@ func TestVnetPeeringDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							Peerings: VnetPeerings{
 								{
-									RemoteVnetName: "my-vnet",
+									VnetPeeringClassSpec: VnetPeeringClassSpec{RemoteVnetName: "my-vnet"},
 								},
 							},
 						},
@@ -714,8 +795,8 @@ func TestVnetPeeringDefaults(t *testing.T) {
 						Vnet: VnetSpec{
 							Peerings: VnetPeerings{
 								{
-									RemoteVnetName: "my-vnet",
-									ResourceGroup:  "cluster-test",
+									VnetPeeringClassSpec: VnetPeeringClassSpec{RemoteVnetName: "my-vnet"},
+									ResourceGroup:        "cluster-test",
 								},
 							},
 						},
@@ -763,7 +844,6 @@ func TestAPIServerLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
 							Name: "cluster-test-public-lb",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{
 								{
 									Name: "cluster-test-public-lb-frontEnd",
@@ -773,8 +853,11 @@ func TestAPIServerLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							Type:                 Public,
-							IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							},
 						},
 					},
 				},
@@ -789,7 +872,9 @@ func TestAPIServerLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Internal,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Internal,
+							},
 						},
 					},
 				},
@@ -801,16 +886,20 @@ func TestAPIServerLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Name: "cluster-test-internal-lb",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{
 								{
-									Name:             "cluster-test-internal-lb-frontEnd",
-									PrivateIPAddress: DefaultInternalLBIPAddress,
+									Name: "cluster-test-internal-lb-frontEnd",
+									FrontendIPClass: FrontendIPClass{
+										PrivateIPAddress: DefaultInternalLBIPAddress,
+									},
 								},
 							},
-							Type:                 Internal,
-							IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Internal,
+								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							},
+							Name: "cluster-test-internal-lb",
 						},
 					},
 				},
@@ -849,7 +938,9 @@ func TestAzureEnviromentDefault(t *testing.T) {
 					Name: "foo",
 				},
 				Spec: AzureClusterSpec{
-					AzureEnvironment: DefaultAzureCloud,
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						AzureEnvironment: DefaultAzureCloud,
+					},
 				},
 			},
 		},
@@ -859,7 +950,9 @@ func TestAzureEnviromentDefault(t *testing.T) {
 					Name: "foo",
 				},
 				Spec: AzureClusterSpec{
-					AzureEnvironment: DefaultAzureCloud,
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						AzureEnvironment: DefaultAzureCloud,
+					},
 				},
 			},
 			output: &AzureCluster{
@@ -867,7 +960,9 @@ func TestAzureEnviromentDefault(t *testing.T) {
 					Name: "foo",
 				},
 				Spec: AzureClusterSpec{
-					AzureEnvironment: DefaultAzureCloud,
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						AzureEnvironment: DefaultAzureCloud,
+					},
 				},
 			},
 		},
@@ -877,7 +972,9 @@ func TestAzureEnviromentDefault(t *testing.T) {
 					Name: "foo",
 				},
 				Spec: AzureClusterSpec{
-					AzureEnvironment: "AzureGermanCloud",
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						AzureEnvironment: "AzureGermanCloud",
+					},
 				},
 			},
 			output: &AzureCluster{
@@ -885,7 +982,9 @@ func TestAzureEnviromentDefault(t *testing.T) {
 					Name: "foo",
 				},
 				Spec: AzureClusterSpec{
-					AzureEnvironment: "AzureGermanCloud",
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						AzureEnvironment: "AzureGermanCloud",
+					},
 				},
 			},
 		},
@@ -919,16 +1018,20 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -945,33 +1048,41 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 						},
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
 							Name: "cluster-test",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{{
 								Name: "cluster-test-frontEnd",
 								PublicIP: &PublicIPSpec{
 									Name: "pip-cluster-test-node-outbound",
 								},
 							}},
-							Type:                 Public,
-							FrontendIPsCount:     to.Int32Ptr(1),
-							IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							FrontendIPsCount: to.Int32Ptr(1),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							},
 						},
 					},
 				},
@@ -985,21 +1096,27 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "node-natgateway",
+									},
 								},
 							},
 						},
@@ -1014,23 +1131,31 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "node-natgateway",
+									},
 								},
 							},
 						},
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 					},
 				},
@@ -1044,25 +1169,33 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "node-natgateway",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -1079,42 +1212,55 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 						},
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
 							Name: "cluster-test",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{{
 								Name: "cluster-test-frontEnd",
 								PublicIP: &PublicIPSpec{
 									Name: "pip-cluster-test-node-outbound",
 								},
 							}},
-							Type:                 Public,
-							FrontendIPsCount:     to.Int32Ptr(1),
-							IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							FrontendIPsCount: to.Int32Ptr(1),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							},
 						},
 					},
 				},
@@ -1128,28 +1274,36 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-3",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -1166,45 +1320,57 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-3",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 						},
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
-							Name: "cluster-test",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{{
 								Name: "cluster-test-frontEnd",
 								PublicIP: &PublicIPSpec{
 									Name: "pip-cluster-test-node-outbound",
 								},
 							}},
-							Type:                 Public,
-							FrontendIPsCount:     to.Int32Ptr(1),
-							IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							FrontendIPsCount: to.Int32Ptr(1),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+							},
+							Name: "cluster-test",
 						},
 					},
 				},
@@ -1218,39 +1384,56 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway-2",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway-2",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-3",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway-3",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway-3",
+									},
 								},
 							},
 						},
@@ -1265,41 +1448,60 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						Subnets: Subnets{
 							{
-								Role:          SubnetControlPlane,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+								},
 								Name:          "control-plane-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-2",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway-2",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway-2",
+									},
 								},
 							},
 							{
-								Role:          SubnetNode,
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetNode,
+								},
 								Name:          "node-subnet-3",
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
 								NatGateway: NatGateway{
-									Name: "node-natgateway-3",
+									NatGatewayClassSpec: NatGatewayClassSpec{
+
+										Name: "node-natgateway-3",
+									},
 								},
 							},
 						},
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 					},
 				},
@@ -1313,7 +1515,7 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Internal},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Internal}},
 					},
 				},
 			},
@@ -1324,7 +1526,9 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Internal,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Internal,
+							},
 						},
 					},
 				},
@@ -1338,10 +1542,12 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						NodeOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount:     to.Int32Ptr(2),
-							IdleTimeoutInMinutes: to.Int32Ptr(15),
+							FrontendIPsCount: to.Int32Ptr(2),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								IdleTimeoutInMinutes: to.Int32Ptr(15),
+							},
 						},
 					},
 				},
@@ -1353,11 +1559,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
-							Name: "cluster-test",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{
 								{
 									Name: "cluster-test-frontEnd-1",
@@ -1372,9 +1578,13 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							Type:                 Public,
-							FrontendIPsCount:     to.Int32Ptr(2),  // we expect the original value to be respected here
-							IdleTimeoutInMinutes: to.Int32Ptr(15), // we expect the original value to be respected here
+							FrontendIPsCount: to.Int32Ptr(2), // we expect the original value to be respected here
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(15), // we expect the original value to be respected here
+							},
+							Name: "cluster-test",
 						},
 					},
 				},
@@ -1386,7 +1596,7 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 		tc := c
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.cluster.setNodeOutboundLBDefaults()
+			tc.cluster.SetNodeOutboundLBDefaults()
 			if !reflect.DeepEqual(tc.cluster, tc.output) {
 				expected, _ := json.MarshalIndent(tc.output, "", "\t")
 				actual, _ := json.MarshalIndent(tc.cluster, "", "\t")
@@ -1410,7 +1620,7 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Public},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 					},
 				},
 			},
@@ -1421,7 +1631,9 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Public,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
 						},
 					},
 				},
@@ -1435,7 +1647,7 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Internal},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Internal}},
 					},
 				},
 			},
@@ -1446,7 +1658,9 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Internal,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Internal,
+							},
 						},
 					},
 				},
@@ -1460,10 +1674,12 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{Type: Internal},
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Internal}},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount:     to.Int32Ptr(2),
-							IdleTimeoutInMinutes: to.Int32Ptr(15),
+							FrontendIPsCount: to.Int32Ptr(2),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								IdleTimeoutInMinutes: to.Int32Ptr(15),
+							},
 						},
 					},
 				},
@@ -1475,11 +1691,12 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 				Spec: AzureClusterSpec{
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{
-							Type: Internal,
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Internal,
+							},
 						},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
 							Name: "cluster-test-outbound-lb",
-							SKU:  SKUStandard,
 							FrontendIPs: []FrontendIP{
 								{
 									Name: "cluster-test-outbound-lb-frontEnd-1",
@@ -1494,9 +1711,12 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							Type:                 Public,
-							FrontendIPsCount:     to.Int32Ptr(2),
-							IdleTimeoutInMinutes: to.Int32Ptr(15),
+							FrontendIPsCount: to.Int32Ptr(2),
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								SKU:                  SKUStandard,
+								Type:                 Public,
+								IdleTimeoutInMinutes: to.Int32Ptr(15),
+							},
 						},
 					},
 				},
@@ -1508,7 +1728,7 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 		tc := c
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.cluster.setControlPlaneOutboundLBDefaults()
+			tc.cluster.SetControlPlaneOutboundLBDefaults()
 			if !reflect.DeepEqual(tc.cluster, tc.output) {
 				expected, _ := json.MarshalIndent(tc.output, "", "\t")
 				actual, _ := json.MarshalIndent(tc.cluster, "", "\t")
@@ -1557,8 +1777,11 @@ func TestBastionDefault(t *testing.T) {
 						AzureBastion: &AzureBastion{
 							Name: "foo-azure-bastion",
 							Subnet: SubnetSpec{
-								Name:       "AzureBastionSubnet",
-								CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+								Name: "AzureBastionSubnet",
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+									Role:       DefaultAzureBastionSubnetRole,
+								},
 							},
 							PublicIP: PublicIPSpec{
 								Name: "foo-azure-bastion-pip",
@@ -1590,8 +1813,11 @@ func TestBastionDefault(t *testing.T) {
 						AzureBastion: &AzureBastion{
 							Name: "my-fancy-name",
 							Subnet: SubnetSpec{
-								Name:       "AzureBastionSubnet",
-								CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+								Name: "AzureBastionSubnet",
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+									Role:       DefaultAzureBastionSubnetRole,
+								},
 							},
 							PublicIP: PublicIPSpec{
 								Name: "foo-azure-bastion-pip",
@@ -1623,8 +1849,11 @@ func TestBastionDefault(t *testing.T) {
 						AzureBastion: &AzureBastion{
 							Name: "foo-azure-bastion",
 							Subnet: SubnetSpec{
-								Name:       "AzureBastionSubnet",
-								CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+								Name: "AzureBastionSubnet",
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+									Role:       DefaultAzureBastionSubnetRole,
+								},
 							},
 							PublicIP: PublicIPSpec{
 								Name: "foo-azure-bastion-pip",
@@ -1643,8 +1872,10 @@ func TestBastionDefault(t *testing.T) {
 					BastionSpec: BastionSpec{
 						AzureBastion: &AzureBastion{
 							Subnet: SubnetSpec{
-								Name:       "my-superfancy-name",
-								CIDRBlocks: []string{"10.10.0.0/16"},
+								Name: "my-superfancy-name",
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{"10.10.0.0/16"},
+								},
 							},
 						},
 					},
@@ -1659,8 +1890,11 @@ func TestBastionDefault(t *testing.T) {
 						AzureBastion: &AzureBastion{
 							Name: "foo-azure-bastion",
 							Subnet: SubnetSpec{
-								Name:       "my-superfancy-name",
-								CIDRBlocks: []string{"10.10.0.0/16"},
+								Name: "my-superfancy-name",
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{"10.10.0.0/16"},
+									Role:       DefaultAzureBastionSubnetRole,
+								},
 							},
 							PublicIP: PublicIPSpec{
 								Name: "foo-azure-bastion-pip",
@@ -1694,8 +1928,11 @@ func TestBastionDefault(t *testing.T) {
 						AzureBastion: &AzureBastion{
 							Name: "foo-azure-bastion",
 							Subnet: SubnetSpec{
-								Name:       "AzureBastionSubnet",
-								CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+								SubnetClassSpec: SubnetClassSpec{
+									CIDRBlocks: []string{DefaultAzureBastionSubnetCIDR},
+									Role:       DefaultAzureBastionSubnetRole,
+								},
+								Name: "AzureBastionSubnet",
 							},
 							PublicIP: PublicIPSpec{
 								Name: "my-ultrafancy-pip-name",

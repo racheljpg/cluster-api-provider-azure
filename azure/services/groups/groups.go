@@ -29,7 +29,8 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
-const serviceName = "group"
+// ServiceName is the name of this service.
+const ServiceName = "group"
 
 // Service provides operations on Azure resources.
 type Service struct {
@@ -56,6 +57,11 @@ func New(scope GroupScope) *Service {
 	}
 }
 
+// Name returns the service name.
+func (s *Service) Name() string {
+	return ServiceName
+}
+
 // Reconcile gets/creates/updates a resource group.
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "groups.Service.Reconcile")
@@ -65,9 +71,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	defer cancel()
 
 	groupSpec := s.Scope.GroupSpec()
+	if groupSpec == nil {
+		return nil
+	}
 
-	_, err := s.CreateResource(ctx, groupSpec, serviceName)
-	s.Scope.UpdatePutStatus(infrav1.ResourceGroupReadyCondition, serviceName, err)
+	_, err := s.CreateResource(ctx, groupSpec, ServiceName)
+	s.Scope.UpdatePutStatus(infrav1.ResourceGroupReadyCondition, ServiceName, err)
 	return err
 }
 
@@ -80,32 +89,35 @@ func (s *Service) Delete(ctx context.Context) error {
 	defer cancel()
 
 	groupSpec := s.Scope.GroupSpec()
+	if groupSpec == nil {
+		return nil
+	}
 
 	// check that the resource group is not BYO.
-	managed, err := s.IsGroupManaged(ctx)
+	managed, err := s.IsManaged(ctx)
 	if err != nil {
 		if azure.ResourceNotFound(err) {
 			// already deleted or doesn't exist, cleanup status and return.
-			s.Scope.DeleteLongRunningOperationState(groupSpec.ResourceName(), serviceName)
-			s.Scope.UpdateDeleteStatus(infrav1.ResourceGroupReadyCondition, serviceName, nil)
+			s.Scope.DeleteLongRunningOperationState(groupSpec.ResourceName(), ServiceName, infrav1.DeleteFuture)
+			s.Scope.UpdateDeleteStatus(infrav1.ResourceGroupReadyCondition, ServiceName, nil)
 			return nil
 		}
 		return errors.Wrap(err, "could not get resource group management state")
 	}
 	if !managed {
-		log.V(2).Info("Should not delete resource group in unmanaged mode")
-		return azure.ErrNotOwned
+		log.V(2).Info("Skipping resource group deletion in unmanaged mode")
+		return nil
 	}
 
-	err = s.DeleteResource(ctx, groupSpec, serviceName)
-	s.Scope.UpdateDeleteStatus(infrav1.ResourceGroupReadyCondition, serviceName, err)
+	err = s.DeleteResource(ctx, groupSpec, ServiceName)
+	s.Scope.UpdateDeleteStatus(infrav1.ResourceGroupReadyCondition, ServiceName, err)
 	return err
 }
 
-// IsGroupManaged returns true if the resource group has an owned tag with the cluster name as value,
+// IsManaged returns true if the resource group has an owned tag with the cluster name as value,
 // meaning that the resource group's lifecycle is managed.
-func (s *Service) IsGroupManaged(ctx context.Context) (bool, error) {
-	ctx, _, done := tele.StartSpanWithLogger(ctx, "groups.Service.IsGroupManaged")
+func (s *Service) IsManaged(ctx context.Context) (bool, error) {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "groups.Service.IsManaged")
 	defer done()
 
 	groupSpec := s.Scope.GroupSpec()

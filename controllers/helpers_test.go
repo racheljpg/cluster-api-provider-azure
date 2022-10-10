@@ -24,6 +24,7 @@ import (
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/go-logr/logr"
 	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
@@ -56,9 +57,10 @@ func TestAzureClusterToAzureMachinesMapper(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	defer mockCtrl.Finish()
 
-	log := mock_log.NewMockLogger(mockCtrl)
-	log.EXPECT().WithValues("AzureCluster", "my-cluster", "Namespace", "default")
-	mapper, err := AzureClusterToAzureMachinesMapper(context.Background(), client, &infrav1.AzureMachine{}, scheme, log)
+	sink := mock_log.NewMockLogSink(mockCtrl)
+	sink.EXPECT().Init(logr.RuntimeInfo{CallDepth: 1})
+	sink.EXPECT().WithValues("AzureCluster", "my-cluster", "Namespace", "default")
+	mapper, err := AzureClusterToAzureMachinesMapper(context.Background(), client, &infrav1.AzureMachine{}, scheme, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
 
 	requests := mapper(&infrav1.AzureCluster{
@@ -84,10 +86,9 @@ func TestGetCloudProviderConfig(t *testing.T) {
 	_ = infrav1.AddToScheme(scheme)
 
 	cluster := newCluster("foo")
-	cluster.Default()
-	azureCluster := newAzureCluster("foo", "bar")
+	azureCluster := newAzureCluster("bar")
 	azureCluster.Default()
-	azureClusterCustomVnet := newAzureClusterWithCustomVnet("foo", "bar")
+	azureClusterCustomVnet := newAzureClusterWithCustomVnet("bar")
 	azureClusterCustomVnet.Default()
 
 	cases := map[string]struct {
@@ -253,11 +254,10 @@ func TestReconcileAzureSecret(t *testing.T) {
 	}
 
 	cluster := newCluster("foo")
-	azureCluster := newAzureCluster("foo", "bar")
+	azureCluster := newAzureCluster("bar")
 
-	cluster.Default()
 	azureCluster.Default()
-	azureCluster.ClusterName = "testCluster"
+	cluster.Name = "testCluster"
 
 	scheme := setupScheme(g)
 	kubeclient := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -291,7 +291,7 @@ func TestReconcileAzureSecret(t *testing.T) {
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(cloudConfig.Data).NotTo(BeNil())
 
-			if err := reconcileAzureSecret(context.Background(), kubeclient, owner, cloudConfig, azureCluster.ClusterName); err != nil {
+			if err := reconcileAzureSecret(context.Background(), kubeclient, owner, cloudConfig, cluster.Name); err != nil {
 				t.Error(err)
 			}
 
@@ -316,9 +316,9 @@ func TestReconcileAzureSecret(t *testing.T) {
 
 func setupScheme(g *WithT) *runtime.Scheme {
 	scheme := runtime.NewScheme()
-	g.Expect(clientgoscheme.AddToScheme(scheme)).ToNot(HaveOccurred())
-	g.Expect(infrav1.AddToScheme(scheme)).ToNot(HaveOccurred())
-	g.Expect(clusterv1.AddToScheme(scheme)).ToNot(HaveOccurred())
+	g.Expect(clientgoscheme.AddToScheme(scheme)).To(Succeed())
+	g.Expect(infrav1.AddToScheme(scheme)).To(Succeed())
+	g.Expect(clusterv1.AddToScheme(scheme)).To(Succeed())
 	return scheme
 }
 
@@ -354,19 +354,21 @@ func newCluster(name string) *clusterv1.Cluster {
 	}
 }
 
-func newAzureCluster(name, location string) *infrav1.AzureCluster {
+func newAzureCluster(location string) *infrav1.AzureCluster {
 	return &infrav1.AzureCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
 			Namespace: "default",
 		},
 		Spec: infrav1.AzureClusterSpec{
-			Location: location,
+			AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+				Location:       location,
+				SubscriptionID: "baz",
+			},
 			NetworkSpec: infrav1.NetworkSpec{
 				Vnet: infrav1.VnetSpec{},
 			},
-			ResourceGroup:  "bar",
-			SubscriptionID: "baz",
+			ResourceGroup: "bar",
 		},
 	}
 }
@@ -405,14 +407,17 @@ func withbackOffConfig(ac infrav1.AzureCluster) *infrav1.AzureCluster {
 	return &ac
 }
 
-func newAzureClusterWithCustomVnet(name, location string) *infrav1.AzureCluster {
+func newAzureClusterWithCustomVnet(location string) *infrav1.AzureCluster {
 	return &infrav1.AzureCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo",
 			Namespace: "default",
 		},
 		Spec: infrav1.AzureClusterSpec{
-			Location: location,
+			AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+				Location:       location,
+				SubscriptionID: "baz",
+			},
 			NetworkSpec: infrav1.NetworkSpec{
 				Vnet: infrav1.VnetSpec{
 					Name:          "custom-vnet",
@@ -421,16 +426,19 @@ func newAzureClusterWithCustomVnet(name, location string) *infrav1.AzureCluster 
 				Subnets: infrav1.Subnets{
 					infrav1.SubnetSpec{
 						Name: "foo-controlplane-subnet",
-						Role: infrav1.SubnetControlPlane,
+						SubnetClassSpec: infrav1.SubnetClassSpec{
+							Role: infrav1.SubnetControlPlane,
+						},
 					},
 					infrav1.SubnetSpec{
 						Name: "foo-node-subnet",
-						Role: infrav1.SubnetNode,
+						SubnetClassSpec: infrav1.SubnetClassSpec{
+							Role: infrav1.SubnetNode,
+						},
 					},
 				},
 			},
-			ResourceGroup:  "bar",
-			SubscriptionID: "baz",
+			ResourceGroup: "bar",
 		},
 	}
 }
@@ -456,7 +464,7 @@ const (
     "useManagedIdentityExtension": false,
     "useInstanceMetadata": true
 }`
-	//nolint:gosec
+	//nolint:gosec // Ignore "G101: Potential hardcoded credentials" check.
 	spWorkerNodeCloudConfig = `{
     "cloud": "AzurePublicCloud",
     "tenantId": "fooTenant",
@@ -532,7 +540,7 @@ const (
     "maximumLoadBalancerRuleCount": 250,
     "useManagedIdentityExtension": true,
     "useInstanceMetadata": true,
-    "userAssignedIdentityId": "foobar"
+    "userAssignedIdentityID": "foobar"
 }`
 	userAssignedWorkerNodeCloudConfig = `{
     "cloud": "AzurePublicCloud",
@@ -551,7 +559,7 @@ const (
     "maximumLoadBalancerRuleCount": 250,
     "useManagedIdentityExtension": true,
     "useInstanceMetadata": true,
-    "userAssignedIdentityId": "foobar"
+    "userAssignedIdentityID": "foobar"
 }`
 	spCustomVnetControlPlaneCloudConfig = `{
     "cloud": "AzurePublicCloud",

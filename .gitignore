@@ -54,6 +54,7 @@ bazel-*
 .tiltbuild
 /tilt.d
 tilt-settings.json
+tilt-settings.yaml
 tilt_config.json
 
 # e2e output
@@ -75,3 +76,6 @@ hack/boilerplate/*.pyc
 
 # release notes
 _releasenotes
+
+# calico manifests archive
+release-*/manifests/calico-*.yaml

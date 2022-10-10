@@ -18,6 +18,8 @@ package v1beta1
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
@@ -26,6 +28,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/util/maps"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -33,23 +36,29 @@ import (
 //+kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedmachinepools,verbs=create;update,versions=v1beta1,name=default.azuremanagedmachinepools.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type.
-func (r *AzureManagedMachinePool) Default(client client.Client) {
-	if r.Labels == nil {
-		r.Labels = make(map[string]string)
+func (m *AzureManagedMachinePool) Default(client client.Client) {
+	if m.Labels == nil {
+		m.Labels = make(map[string]string)
 	}
-	r.Labels[LabelAgentPoolMode] = r.Spec.Mode
+	m.Labels[LabelAgentPoolMode] = m.Spec.Mode
 
-	if r.Spec.Name == nil || *r.Spec.Name == "" {
-		r.Spec.Name = &r.Name
+	if m.Spec.Name == nil || *m.Spec.Name == "" {
+		m.Spec.Name = &m.Name
+	}
+
+	if m.Spec.OSType == nil {
+		m.Spec.OSType = to.StringPtr(DefaultOSType)
 	}
 }
 
 //+kubebuilder:webhook:verbs=update;delete,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool,mutating=false,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedmachinepools,versions=v1beta1,name=validation.azuremanagedmachinepools.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (r *AzureManagedMachinePool) ValidateCreate(client client.Client) error {
+func (m *AzureManagedMachinePool) ValidateCreate(client client.Client) error {
 	validators := []func() error{
-		r.validateMaxPods,
+		m.validateMaxPods,
+		m.validateOSType,
+		m.validateName,
 	}
 
 	var errs []error
@@ -63,111 +72,178 @@ func (r *AzureManagedMachinePool) ValidateCreate(client client.Client) error {
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (r *AzureManagedMachinePool) ValidateUpdate(oldRaw runtime.Object, client client.Client) error {
+func (m *AzureManagedMachinePool) ValidateUpdate(oldRaw runtime.Object, client client.Client) error {
 	old := oldRaw.(*AzureManagedMachinePool)
 	var allErrs field.ErrorList
 
-	if r.Spec.SKU != old.Spec.SKU {
+	if old.Spec.OSType != nil {
+		// Prevent OSType modification if it was already set to some value
+		if m.Spec.OSType == nil {
+			// unsetting the field is not allowed
+			allErrs = append(allErrs,
+				field.Invalid(
+					field.NewPath("Spec", "OSType"),
+					m.Spec.OSType,
+					"field is immutable, unsetting is not allowed"))
+		} else if *m.Spec.OSType != *old.Spec.OSType {
+			// changing the field is not allowed
+			allErrs = append(allErrs,
+				field.Invalid(
+					field.NewPath("Spec", "OSType"),
+					*m.Spec.OSType,
+					"field is immutable"))
+		}
+	}
+
+	if m.Spec.SKU != old.Spec.SKU {
 		allErrs = append(allErrs,
 			field.Invalid(
 				field.NewPath("Spec", "SKU"),
-				r.Spec.SKU,
+				m.Spec.SKU,
 				"field is immutable"))
 	}
 
 	if old.Spec.OSDiskSizeGB != nil {
 		// Prevent OSDiskSizeGB modification if it was already set to some value
-		if r.Spec.OSDiskSizeGB == nil {
+		if m.Spec.OSDiskSizeGB == nil {
 			// unsetting the field is not allowed
 			allErrs = append(allErrs,
 				field.Invalid(
 					field.NewPath("Spec", "OSDiskSizeGB"),
-					r.Spec.OSDiskSizeGB,
+					m.Spec.OSDiskSizeGB,
 					"field is immutable, unsetting is not allowed"))
-		} else if *r.Spec.OSDiskSizeGB != *old.Spec.OSDiskSizeGB {
+		} else if *m.Spec.OSDiskSizeGB != *old.Spec.OSDiskSizeGB {
 			// changing the field is not allowed
 			allErrs = append(allErrs,
 				field.Invalid(
 					field.NewPath("Spec", "OSDiskSizeGB"),
-					*r.Spec.OSDiskSizeGB,
+					*m.Spec.OSDiskSizeGB,
 					"field is immutable"))
 		}
 	}
 
-	if !ensureStringSlicesAreEqual(r.Spec.AvailabilityZones, old.Spec.AvailabilityZones) {
+	if !reflect.DeepEqual(m.Spec.Taints, old.Spec.Taints) {
 		allErrs = append(allErrs,
 			field.Invalid(
-				field.NewPath("Spec", "AvailabilityZones"),
-				r.Spec.AvailabilityZones,
+				field.NewPath("Spec", "Taints"),
+				m.Spec.Taints,
 				"field is immutable"))
 	}
 
-	if r.Spec.Mode != string(NodePoolModeSystem) && old.Spec.Mode == string(NodePoolModeSystem) {
+	// custom headers are immutable
+	oldCustomHeaders := maps.FilterByKeyPrefix(old.ObjectMeta.Annotations, azure.CustomHeaderPrefix)
+	newCustomHeaders := maps.FilterByKeyPrefix(m.ObjectMeta.Annotations, azure.CustomHeaderPrefix)
+	if !reflect.DeepEqual(oldCustomHeaders, newCustomHeaders) {
+		allErrs = append(allErrs,
+			field.Invalid(
+				field.NewPath("metadata", "annotations"),
+				m.ObjectMeta.Annotations,
+				fmt.Sprintf("annotations with '%s' prefix are immutable", azure.CustomHeaderPrefix)))
+	}
+
+	if !ensureStringSlicesAreEqual(m.Spec.AvailabilityZones, old.Spec.AvailabilityZones) {
+		allErrs = append(allErrs,
+			field.Invalid(
+				field.NewPath("Spec", "AvailabilityZones"),
+				m.Spec.AvailabilityZones,
+				"field is immutable"))
+	}
+
+	if m.Spec.Mode != string(NodePoolModeSystem) && old.Spec.Mode == string(NodePoolModeSystem) {
 		// validate for last system node pool
-		if err := r.validateLastSystemNodePool(client); err != nil {
+		if err := m.validateLastSystemNodePool(client); err != nil {
 			allErrs = append(allErrs, field.Invalid(
 				field.NewPath("Spec", "Mode"),
-				r.Spec.Mode,
+				m.Spec.Mode,
 				"Last system node pool cannot be mutated to user node pool"))
 		}
 	}
 
 	if old.Spec.MaxPods != nil {
 		// Prevent MaxPods modification if it was already set to some value
-		if r.Spec.MaxPods == nil {
+		if m.Spec.MaxPods == nil {
 			// unsetting the field is not allowed
 			allErrs = append(allErrs,
 				field.Invalid(
 					field.NewPath("Spec", "MaxPods"),
-					r.Spec.MaxPods,
+					m.Spec.MaxPods,
 					"field is immutable, unsetting is not allowed"))
-		} else if *r.Spec.MaxPods != *old.Spec.MaxPods {
+		} else if *m.Spec.MaxPods != *old.Spec.MaxPods {
 			// changing the field is not allowed
 			allErrs = append(allErrs,
 				field.Invalid(
 					field.NewPath("Spec", "MaxPods"),
-					*r.Spec.MaxPods,
+					*m.Spec.MaxPods,
 					"field is immutable"))
 		}
 	}
 
+	if old.Spec.OsDiskType != nil {
+		// Prevent OSDiskType modification if it was already set to some value
+		if m.Spec.OsDiskType == nil || to.String(m.Spec.OsDiskType) == "" {
+			// unsetting the field is not allowed
+			allErrs = append(allErrs,
+				field.Invalid(
+					field.NewPath("Spec", "OsDiskType"),
+					m.Spec.OsDiskType,
+					"field is immutable, unsetting is not allowed"))
+		} else if *m.Spec.OsDiskType != *old.Spec.OsDiskType {
+			// changing the field is not allowed
+			allErrs = append(allErrs,
+				field.Invalid(
+					field.NewPath("Spec", "OsDiskType"),
+					m.Spec.OsDiskType,
+					"field is immutable"))
+		}
+	}
+
+	if err := validateBoolPtrImmutable(
+		field.NewPath("Spec", "EnableUltraSSD"),
+		old.Spec.EnableUltraSSD,
+		m.Spec.EnableUltraSSD); err != nil {
+		allErrs = append(allErrs, err)
+	}
+	if err := validateBoolPtrImmutable(
+		field.NewPath("Spec", "EnableNodePublicIP"),
+		old.Spec.EnableNodePublicIP,
+		m.Spec.EnableNodePublicIP); err != nil {
+		allErrs = append(allErrs, err)
+	}
+
 	if len(allErrs) != 0 {
-		return apierrors.NewInvalid(GroupVersion.WithKind("AzureManagedMachinePool").GroupKind(), r.Name, allErrs)
+		return apierrors.NewInvalid(GroupVersion.WithKind("AzureManagedMachinePool").GroupKind(), m.Name, allErrs)
 	}
 
 	return nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (r *AzureManagedMachinePool) ValidateDelete(client client.Client) error {
-	if r.Spec.Mode != string(NodePoolModeSystem) {
+func (m *AzureManagedMachinePool) ValidateDelete(client client.Client) error {
+	if m.Spec.Mode != string(NodePoolModeSystem) {
 		return nil
 	}
 
-	return errors.Wrapf(r.validateLastSystemNodePool(client), "if the delete is triggered via owner MachinePool please refer to trouble shooting section in https://capz.sigs.k8s.io/topics/managedcluster.html")
+	return errors.Wrapf(m.validateLastSystemNodePool(client), "if the delete is triggered via owner MachinePool please refer to trouble shooting section in https://capz.sigs.k8s.io/topics/managedcluster.html")
 }
 
 // validateLastSystemNodePool is used to check if the existing system node pool is the last system node pool.
 // If it is a last system node pool it cannot be deleted or mutated to user node pool as AKS expects min 1 system node pool.
-func (r *AzureManagedMachinePool) validateLastSystemNodePool(cli client.Client) error {
+func (m *AzureManagedMachinePool) validateLastSystemNodePool(cli client.Client) error {
 	ctx := context.Background()
 
 	// Fetch the Cluster.
-	clusterName, ok := r.Labels[clusterv1.ClusterLabelName]
+	clusterName, ok := m.Labels[clusterv1.ClusterLabelName]
 	if !ok {
 		return nil
 	}
 
 	ownerCluster := &clusterv1.Cluster{}
 	key := client.ObjectKey{
-		Namespace: r.Namespace,
+		Namespace: m.Namespace,
 		Name:      clusterName,
 	}
 
 	if err := cli.Get(ctx, key, ownerCluster); err != nil {
-		if azure.ResourceNotFound(err) {
-			return nil
-		}
 		return err
 	}
 
@@ -175,7 +251,7 @@ func (r *AzureManagedMachinePool) validateLastSystemNodePool(cli client.Client) 
 		return nil
 	}
 
-	opt1 := client.InNamespace(r.Namespace)
+	opt1 := client.InNamespace(m.Namespace)
 	opt2 := client.MatchingLabels(map[string]string{
 		clusterv1.ClusterLabelName: clusterName,
 		LabelAgentPoolMode:         string(NodePoolModeSystem),
@@ -192,13 +268,38 @@ func (r *AzureManagedMachinePool) validateLastSystemNodePool(cli client.Client) 
 	return nil
 }
 
-func (r *AzureManagedMachinePool) validateMaxPods() error {
-	if r.Spec.MaxPods != nil {
-		if to.Int32(r.Spec.MaxPods) < 10 || to.Int32(r.Spec.MaxPods) > 250 {
+func (m *AzureManagedMachinePool) validateMaxPods() error {
+	if m.Spec.MaxPods != nil {
+		if to.Int32(m.Spec.MaxPods) < 10 || to.Int32(m.Spec.MaxPods) > 250 {
 			return field.Invalid(
 				field.NewPath("Spec", "MaxPods"),
-				r.Spec.MaxPods,
+				m.Spec.MaxPods,
 				"MaxPods must be between 10 and 250")
+		}
+	}
+
+	return nil
+}
+
+func (m *AzureManagedMachinePool) validateOSType() error {
+	if m.Spec.Mode == string(NodePoolModeSystem) {
+		if m.Spec.OSType != nil && *m.Spec.OSType != azure.LinuxOS {
+			return field.Forbidden(
+				field.NewPath("Spec", "OSType"),
+				"System node pooll must have OSType 'Linux'")
+		}
+	}
+
+	return nil
+}
+
+func (m *AzureManagedMachinePool) validateName() error {
+	if m.Spec.OSType != nil && *m.Spec.OSType == azure.WindowsOS {
+		if len(m.Name) > 6 {
+			return field.Invalid(
+				field.NewPath("Name"),
+				m.Name,
+				"Windows agent pool name can not be longer than 6 characters.")
 		}
 	}
 
@@ -221,4 +322,22 @@ func ensureStringSlicesAreEqual(a []string, b []string) bool {
 		}
 	}
 	return true
+}
+
+func validateBoolPtrImmutable(path *field.Path, oldVal, newVal *bool) *field.Error {
+	if oldVal != nil {
+		// Prevent modification if it was already set to some value
+		if newVal == nil {
+			// unsetting the field is not allowed
+			return field.Invalid(path, newVal, "field is immutable, unsetting is not allowed")
+		}
+		if *newVal != *oldVal {
+			// changing the field is not allowed
+			return field.Invalid(path, newVal, "field is immutable")
+		}
+	} else if newVal != nil {
+		return field.Invalid(path, newVal, "field is immutable, setting is not allowed")
+	}
+
+	return nil
 }

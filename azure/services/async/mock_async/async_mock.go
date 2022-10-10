@@ -55,29 +55,29 @@ func (m *MockFutureScope) EXPECT() *MockFutureScopeMockRecorder {
 }
 
 // DeleteLongRunningOperationState mocks base method.
-func (m *MockFutureScope) DeleteLongRunningOperationState(arg0, arg1 string) {
+func (m *MockFutureScope) DeleteLongRunningOperationState(arg0, arg1, arg2 string) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "DeleteLongRunningOperationState", arg0, arg1)
+	m.ctrl.Call(m, "DeleteLongRunningOperationState", arg0, arg1, arg2)
 }
 
 // DeleteLongRunningOperationState indicates an expected call of DeleteLongRunningOperationState.
-func (mr *MockFutureScopeMockRecorder) DeleteLongRunningOperationState(arg0, arg1 interface{}) *gomock.Call {
+func (mr *MockFutureScopeMockRecorder) DeleteLongRunningOperationState(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLongRunningOperationState", reflect.TypeOf((*MockFutureScope)(nil).DeleteLongRunningOperationState), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLongRunningOperationState", reflect.TypeOf((*MockFutureScope)(nil).DeleteLongRunningOperationState), arg0, arg1, arg2)
 }
 
 // GetLongRunningOperationState mocks base method.
-func (m *MockFutureScope) GetLongRunningOperationState(arg0, arg1 string) *v1beta1.Future {
+func (m *MockFutureScope) GetLongRunningOperationState(arg0, arg1, arg2 string) *v1beta1.Future {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetLongRunningOperationState", arg0, arg1)
+	ret := m.ctrl.Call(m, "GetLongRunningOperationState", arg0, arg1, arg2)
 	ret0, _ := ret[0].(*v1beta1.Future)
 	return ret0
 }
 
 // GetLongRunningOperationState indicates an expected call of GetLongRunningOperationState.
-func (mr *MockFutureScopeMockRecorder) GetLongRunningOperationState(arg0, arg1 interface{}) *gomock.Call {
+func (mr *MockFutureScopeMockRecorder) GetLongRunningOperationState(arg0, arg1, arg2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLongRunningOperationState", reflect.TypeOf((*MockFutureScope)(nil).GetLongRunningOperationState), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLongRunningOperationState", reflect.TypeOf((*MockFutureScope)(nil).GetLongRunningOperationState), arg0, arg1, arg2)
 }
 
 // SetLongRunningOperationState mocks base method.
@@ -181,6 +181,44 @@ func (mr *MockFutureHandlerMockRecorder) Result(ctx, future, futureType interfac
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Result", reflect.TypeOf((*MockFutureHandler)(nil).Result), ctx, future, futureType)
 }
 
+// MockGetter is a mock of Getter interface.
+type MockGetter struct {
+	ctrl     *gomock.Controller
+	recorder *MockGetterMockRecorder
+}
+
+// MockGetterMockRecorder is the mock recorder for MockGetter.
+type MockGetterMockRecorder struct {
+	mock *MockGetter
+}
+
+// NewMockGetter creates a new mock instance.
+func NewMockGetter(ctrl *gomock.Controller) *MockGetter {
+	mock := &MockGetter{ctrl: ctrl}
+	mock.recorder = &MockGetterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockGetter) EXPECT() *MockGetterMockRecorder {
+	return m.recorder
+}
+
+// Get mocks base method.
+func (m *MockGetter) Get(ctx context.Context, spec azure0.ResourceSpecGetter) (interface{}, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Get", ctx, spec)
+	ret0, _ := ret[0].(interface{})
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Get indicates an expected call of Get.
+func (mr *MockGetterMockRecorder) Get(ctx, spec interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockGetter)(nil).Get), ctx, spec)
+}
+
 // MockCreator is a mock of Creator interface.
 type MockCreator struct {
 	ctrl     *gomock.Controller
@@ -205,9 +243,9 @@ func (m *MockCreator) EXPECT() *MockCreatorMockRecorder {
 }
 
 // CreateOrUpdateAsync mocks base method.
-func (m *MockCreator) CreateOrUpdateAsync(ctx context.Context, spec azure0.ResourceSpecGetter, existingResource interface{}) (interface{}, azure.FutureAPI, error) {
+func (m *MockCreator) CreateOrUpdateAsync(ctx context.Context, spec azure0.ResourceSpecGetter, parameters interface{}) (interface{}, azure.FutureAPI, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CreateOrUpdateAsync", ctx, spec, existingResource)
+	ret := m.ctrl.Call(m, "CreateOrUpdateAsync", ctx, spec, parameters)
 	ret0, _ := ret[0].(interface{})
 	ret1, _ := ret[1].(azure.FutureAPI)
 	ret2, _ := ret[2].(error)
@@ -215,9 +253,9 @@ func (m *MockCreator) CreateOrUpdateAsync(ctx context.Context, spec azure0.Resou
 }
 
 // CreateOrUpdateAsync indicates an expected call of CreateOrUpdateAsync.
-func (mr *MockCreatorMockRecorder) CreateOrUpdateAsync(ctx, spec, existingResource interface{}) *gomock.Call {
+func (mr *MockCreatorMockRecorder) CreateOrUpdateAsync(ctx, spec, parameters interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateOrUpdateAsync", reflect.TypeOf((*MockCreator)(nil).CreateOrUpdateAsync), ctx, spec, existingResource)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateOrUpdateAsync", reflect.TypeOf((*MockCreator)(nil).CreateOrUpdateAsync), ctx, spec, parameters)
 }
 
 // Get mocks base method.

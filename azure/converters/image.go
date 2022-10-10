@@ -19,10 +19,9 @@ package converters
 import (
 	"fmt"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
-
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -34,8 +33,8 @@ func ImageToSDK(image *infrav1.Image) (*compute.ImageReference, error) {
 	if image.Marketplace != nil {
 		return mpImageToSDK(image)
 	}
-	if image.SharedGallery != nil {
-		return sigImageToSDK(image)
+	if image.ComputeGallery != nil || image.SharedGallery != nil {
+		return computeImageToSDK(image)
 	}
 
 	return nil, errors.New("unable to convert image as no options set")
@@ -50,16 +49,40 @@ func mpImageToSDK(image *infrav1.Image) (*compute.ImageReference, error) {
 	}, nil
 }
 
-func sigImageToSDK(image *infrav1.Image) (*compute.ImageReference, error) {
-	imageID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/galleries/%s/images/%s/versions/%s",
-		image.SharedGallery.SubscriptionID,
-		image.SharedGallery.ResourceGroup,
-		image.SharedGallery.Gallery,
-		image.SharedGallery.Name,
-		image.SharedGallery.Version)
+func computeImageToSDK(image *infrav1.Image) (*compute.ImageReference, error) {
+	idTemplate := "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/galleries/%s/images/%s/versions/%s"
+
+	if image.SharedGallery != nil {
+		return &compute.ImageReference{
+			ID: to.StringPtr(fmt.Sprintf(idTemplate,
+				image.SharedGallery.SubscriptionID,
+				image.SharedGallery.ResourceGroup,
+				image.SharedGallery.Gallery,
+				image.SharedGallery.Name,
+				image.SharedGallery.Version,
+			)),
+		}, nil
+	}
+
+	// For private Azure Compute Gallery consumption both resource group and subscription ID must be provided.
+	// If they are not, we assume use of community gallery.
+	if image.ComputeGallery.ResourceGroup != nil && image.ComputeGallery.SubscriptionID != nil {
+		return &compute.ImageReference{
+			ID: to.StringPtr(fmt.Sprintf(idTemplate,
+				image.ComputeGallery.SubscriptionID,
+				image.ComputeGallery.ResourceGroup,
+				image.ComputeGallery.Gallery,
+				image.ComputeGallery.Name,
+				image.ComputeGallery.Version,
+			)),
+		}, nil
+	}
 
 	return &compute.ImageReference{
-		ID: &imageID,
+		CommunityGalleryImageID: to.StringPtr(fmt.Sprintf("/CommunityGalleries/%s/Images/%s/Versions/%s",
+			image.ComputeGallery.Gallery,
+			image.ComputeGallery.Name,
+			image.ComputeGallery.Version)),
 	}, nil
 }
 
@@ -86,6 +109,15 @@ func ImageToPlan(image *infrav1.Image) *compute.Plan {
 			Publisher: to.StringPtr(image.Marketplace.Publisher),
 			Name:      to.StringPtr(image.Marketplace.SKU),
 			Product:   to.StringPtr(image.Marketplace.Offer),
+		}
+	}
+
+	// Plan is needed when using a Azure Compute Gallery image with Plan details.
+	if image.ComputeGallery != nil && image.ComputeGallery.Plan != nil {
+		return &compute.Plan{
+			Publisher: to.StringPtr(image.ComputeGallery.Plan.Publisher),
+			Name:      to.StringPtr(image.ComputeGallery.Plan.SKU),
+			Product:   to.StringPtr(image.ComputeGallery.Plan.Offer),
 		}
 	}
 

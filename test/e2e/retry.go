@@ -1,3 +1,4 @@
+//go:build e2e
 // +build e2e
 
 /*
@@ -32,23 +33,20 @@ const (
 	retryBackoffSteps           = 3
 )
 
-// retryWithExponentialBackOff retries the function until it returns nil,
-// or until the number of attempts (steps) has reached the maximum value.
-func retryWithExponentialBackOff(fn func() error) error {
-	backoff := wait.Backoff{
-		Duration: retryBackoffInitialDuration,
-		Factor:   retryBackoffFactor,
-		Jitter:   retryBackoffJitter,
-		Steps:    retryBackoffSteps,
-	}
-	retryFn := func(fn func() error) func() (bool, error) {
-		return func() (bool, error) {
-			err := fn()
-			if err == nil {
-				return true, nil
-			}
-			return false, err
+// retryWithTimeout retries a function that returns an error until a timeout is reached
+func retryWithTimeout(interval, timeout time.Duration, fn func() error) error {
+	var pollError error
+	err := wait.PollImmediate(interval, timeout, func() (bool, error) {
+		pollError = nil
+		err := fn()
+		if err != nil {
+			pollError = err
+			return false, nil //nolint:nilerr // We don't want to return err here
 		}
+		return true, nil
+	})
+	if pollError != nil {
+		return pollError
 	}
-	return wait.ExponentialBackoff(backoff, retryFn(fn))
+	return err
 }

@@ -19,10 +19,7 @@ package scope
 import (
 	"context"
 	"encoding/base64"
-	"strings"
 	"time"
-
-	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
@@ -30,20 +27,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/pointer"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	machinepool "sigs.k8s.io/cluster-api-provider-azure/azure/scope/strategies/machinepool_deployments"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
+	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/controllers/noderefutil"
 	capierrors "sigs.k8s.io/cluster-api/errors"
-	capiv1exp "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	machinepool "sigs.k8s.io/cluster-api-provider-azure/azure/scope/strategies/machinepool_deployments"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 // ScalesetsServiceName is the name of the scalesets service.
@@ -55,7 +55,7 @@ type (
 	// MachinePoolScopeParams defines the input parameters used to create a new MachinePoolScope.
 	MachinePoolScopeParams struct {
 		Client           client.Client
-		MachinePool      *capiv1exp.MachinePool
+		MachinePool      *expv1.MachinePool
 		AzureMachinePool *infrav1exp.AzureMachinePool
 		ClusterScope     azure.ClusterScoper
 	}
@@ -64,7 +64,7 @@ type (
 	MachinePoolScope struct {
 		azure.ClusterScoper
 		AzureMachinePool *infrav1exp.AzureMachinePool
-		MachinePool      *capiv1exp.MachinePool
+		MachinePool      *expv1.MachinePool
 		client           client.Client
 		patchHelper      *patch.Helper
 		vmssState        *azure.VMSS
@@ -297,7 +297,9 @@ func (m *MachinePoolScope) applyAzureMachinePoolMachines(ctx context.Context) er
 		return nil
 	}
 
-	if futures.Has(m.AzureMachinePool, m.Name(), ScalesetsServiceName) {
+	if futures.Has(m.AzureMachinePool, m.Name(), ScalesetsServiceName, infrav1.PatchFuture) ||
+		futures.Has(m.AzureMachinePool, m.Name(), ScalesetsServiceName, infrav1.PutFuture) ||
+		futures.Has(m.AzureMachinePool, m.Name(), ScalesetsServiceName, infrav1.DeleteFuture) {
 		log.V(4).Info("exiting early due an in-progress long running operation on the ScaleSet")
 		// exit early to be less greedy about delete
 		return nil
@@ -338,7 +340,7 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 
 	ampm := infrav1exp.AzureMachinePoolMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      strings.Join([]string{m.AzureMachinePool.Name, machine.InstanceID}, "-"),
+			Name:      m.AzureMachinePool.Name + "-" + machine.InstanceID,
 			Namespace: m.AzureMachinePool.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -377,13 +379,13 @@ func (m *MachinePoolScope) SetLongRunningOperationState(future *infrav1.Future) 
 }
 
 // GetLongRunningOperationState will get the future on the AzureMachinePool status.
-func (m *MachinePoolScope) GetLongRunningOperationState(name, service string) *infrav1.Future {
-	return futures.Get(m.AzureMachinePool, name, service)
+func (m *MachinePoolScope) GetLongRunningOperationState(name, service, futureType string) *infrav1.Future {
+	return futures.Get(m.AzureMachinePool, name, service, futureType)
 }
 
 // DeleteLongRunningOperationState will delete the future from the AzureMachinePool status.
-func (m *MachinePoolScope) DeleteLongRunningOperationState(name, service string) {
-	futures.Delete(m.AzureMachinePool, name, service)
+func (m *MachinePoolScope) DeleteLongRunningOperationState(name, service, futureType string) {
+	futures.Delete(m.AzureMachinePool, name, service, futureType)
 }
 
 // setProvisioningStateAndConditions sets the AzureMachinePool provisioning state and conditions.
@@ -486,15 +488,25 @@ func (m *MachinePoolScope) SetAnnotation(key, value string) {
 	m.AzureMachinePool.Annotations[key] = value
 }
 
-// PatchObject persists the machine spec and status.
+// PatchObject persists the AzureMachinePool spec and status.
 func (m *MachinePoolScope) PatchObject(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.PatchObject")
 	defer done()
 
-	return m.patchHelper.Patch(ctx, m.AzureMachinePool)
+	conditions.SetSummary(m.AzureMachinePool)
+	return m.patchHelper.Patch(
+		ctx,
+		m.AzureMachinePool,
+		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
+			clusterv1.ReadyCondition,
+			infrav1.BootstrapSucceededCondition,
+			infrav1.ScaleSetDesiredReplicasCondition,
+			infrav1.ScaleSetModelUpdatedCondition,
+			infrav1.ScaleSetRunningCondition,
+		}})
 }
 
-// Close the MachineScope by updating the machine spec, machine status.
+// Close the MachinePoolScope by updating the AzureMachinePool spec and AzureMachinePool status.
 func (m *MachinePoolScope) Close(ctx context.Context) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.Close")
 	defer done()
@@ -511,17 +523,17 @@ func (m *MachinePoolScope) Close(ctx context.Context) error {
 		}
 	}
 
-	return m.patchHelper.Patch(ctx, m.AzureMachinePool)
+	return m.PatchObject(ctx)
 }
 
-// GetBootstrapData returns the bootstrap data from the secret in the Machine's bootstrap.dataSecretName.
+// GetBootstrapData returns the bootstrap data from the secret in the MachinePool's bootstrap.dataSecretName.
 func (m *MachinePoolScope) GetBootstrapData(ctx context.Context) (string, error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.GetBootstrapData")
 	defer done()
 
 	dataSecretName := m.MachinePool.Spec.Template.Spec.Bootstrap.DataSecretName
 	if dataSecretName == nil {
-		return "", errors.New("error retrieving bootstrap data: linked Machine Spec's bootstrap.dataSecretName is nil")
+		return "", errors.New("error retrieving bootstrap data: linked MachinePool Spec's bootstrap.dataSecretName is nil")
 	}
 	secret := &corev1.Secret{}
 	key := types.NamespacedName{Namespace: m.AzureMachinePool.Namespace, Name: *dataSecretName}
@@ -536,7 +548,7 @@ func (m *MachinePoolScope) GetBootstrapData(ctx context.Context) (string, error)
 	return base64.StdEncoding.EncodeToString(value), nil
 }
 
-// GetVMImage picks an image from the machine configuration, or uses a default one.
+// GetVMImage picks an image from the AzureMachinePool configuration, or uses a default one.
 func (m *MachinePoolScope) GetVMImage(ctx context.Context) (*infrav1.Image, error) {
 	_, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.GetVMImage")
 	defer done()
@@ -546,16 +558,19 @@ func (m *MachinePoolScope) GetVMImage(ctx context.Context) (*infrav1.Image, erro
 		return m.AzureMachinePool.Spec.Template.Image, nil
 	}
 
+	svc := virtualmachineimages.New(m)
+
 	var (
 		err          error
 		defaultImage *infrav1.Image
 	)
 	if m.AzureMachinePool.Spec.Template.OSDisk.OSType == azure.WindowsOS {
 		runtime := m.AzureMachinePool.Annotations["runtime"]
-		log.V(4).Info("No image specified for machine, using default Windows Image", "machine", m.MachinePool.GetName(), "runtime", runtime)
-		defaultImage, err = azure.GetDefaultWindowsImage(to.String(m.MachinePool.Spec.Template.Spec.Version), runtime)
+		windowsServerVersion := m.AzureMachinePool.Annotations["windowsServerVersion"]
+		log.V(4).Info("No image specified for machine, using default Windows Image", "machine", m.MachinePool.GetName(), "runtime", runtime, "windowsServerVersion", windowsServerVersion)
+		defaultImage, err = svc.GetDefaultWindowsImage(ctx, m.Location(), to.String(m.MachinePool.Spec.Template.Spec.Version), runtime, windowsServerVersion)
 	} else {
-		defaultImage, err = azure.GetDefaultUbuntuImage(to.String(m.MachinePool.Spec.Template.Spec.Version))
+		defaultImage, err = svc.GetDefaultUbuntuImage(ctx, m.Location(), to.String(m.MachinePool.Spec.Template.Spec.Version))
 	}
 
 	if err != nil {
@@ -571,26 +586,57 @@ func (m *MachinePoolScope) SaveVMImageToStatus(image *infrav1.Image) {
 }
 
 // RoleAssignmentSpecs returns the role assignment specs.
-func (m *MachinePoolScope) RoleAssignmentSpecs() []azure.RoleAssignmentSpec {
-	if m.AzureMachinePool.Spec.Identity == infrav1.VMIdentitySystemAssigned {
-		return []azure.RoleAssignmentSpec{
-			{
-				MachineName:  m.Name(),
-				Name:         m.AzureMachinePool.Spec.RoleAssignmentName,
-				ResourceType: azure.VirtualMachineScaleSet,
-			},
+func (m *MachinePoolScope) RoleAssignmentSpecs(principalID *string) []azure.ResourceSpecGetter {
+	roles := make([]azure.ResourceSpecGetter, 1)
+	if m.HasSystemAssignedIdentity() {
+		roles[0] = &roleassignments.RoleAssignmentSpec{
+			Name:          m.AzureMachinePool.Spec.RoleAssignmentName,
+			MachineName:   m.Name(),
+			ResourceGroup: m.ResourceGroup(),
+			ResourceType:  azure.VirtualMachineScaleSet,
+			PrincipalID:   principalID,
 		}
+		return roles
 	}
-	return []azure.RoleAssignmentSpec{}
+	return []azure.ResourceSpecGetter{}
 }
 
-// VMSSExtensionSpecs returns the vmss extension specs.
-func (m *MachinePoolScope) VMSSExtensionSpecs() []azure.ExtensionSpec {
-	var extensionSpecs = []azure.ExtensionSpec{}
-	extensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachinePool.Spec.Template.OSDisk.OSType, m.CloudEnvironment(), m.Name())
+// RoleAssignmentResourceType returns the role assignment resource type.
+func (m *MachinePoolScope) RoleAssignmentResourceType() string {
+	return azure.VirtualMachineScaleSet
+}
 
-	if extensionSpec != nil {
-		extensionSpecs = append(extensionSpecs, *extensionSpec)
+// HasSystemAssignedIdentity returns true if the azure machine pool has system
+// assigned identity.
+func (m *MachinePoolScope) HasSystemAssignedIdentity() bool {
+	return m.AzureMachinePool.Spec.Identity == infrav1.VMIdentitySystemAssigned
+}
+
+// VMSSExtensionSpecs returns the VMSS extension specs.
+func (m *MachinePoolScope) VMSSExtensionSpecs() []azure.ResourceSpecGetter {
+	var extensionSpecs = []azure.ResourceSpecGetter{}
+
+	for _, extension := range m.AzureMachinePool.Spec.Template.VMExtensions {
+		extensionSpecs = append(extensionSpecs, &scalesets.VMSSExtensionSpec{
+			ExtensionSpec: azure.ExtensionSpec{
+				Name:              extension.Name,
+				VMName:            m.Name(),
+				Publisher:         extension.Publisher,
+				Version:           extension.Version,
+				Settings:          extension.Settings,
+				ProtectedSettings: extension.ProtectedSettings,
+			},
+			ResourceGroup: m.ResourceGroup(),
+		})
+	}
+
+	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachinePool.Spec.Template.OSDisk.OSType, m.CloudEnvironment(), m.Name())
+
+	if bootstrapExtensionSpec != nil {
+		extensionSpecs = append(extensionSpecs, &scalesets.VMSSExtensionSpec{
+			ExtensionSpec: *bootstrapExtensionSpec,
+			ResourceGroup: m.ResourceGroup(),
+		})
 	}
 
 	return extensionSpecs
@@ -628,8 +674,6 @@ func (m *MachinePoolScope) UpdateDeleteStatus(condition clusterv1.ConditionType,
 	switch {
 	case err == nil:
 		conditions.MarkFalse(m.AzureMachinePool, condition, infrav1.DeletedReason, clusterv1.ConditionSeverityInfo, "%s successfully deleted", service)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(m.AzureMachinePool, condition, infrav1.DeletingReason, clusterv1.ConditionSeverityInfo, "%s deleting", service)
 	default:
@@ -642,8 +686,6 @@ func (m *MachinePoolScope) UpdatePutStatus(condition clusterv1.ConditionType, se
 	switch {
 	case err == nil:
 		conditions.MarkTrue(m.AzureMachinePool, condition)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(m.AzureMachinePool, condition, infrav1.CreatingReason, clusterv1.ConditionSeverityInfo, "%s creating or updating", service)
 	default:
@@ -656,8 +698,6 @@ func (m *MachinePoolScope) UpdatePatchStatus(condition clusterv1.ConditionType, 
 	switch {
 	case err == nil:
 		conditions.MarkTrue(m.AzureMachinePool, condition)
-	case errors.Is(err, azure.ErrNotOwned):
-		// do nothing
 	case azure.IsOperationNotDoneError(err):
 		conditions.MarkFalse(m.AzureMachinePool, condition, infrav1.UpdatingReason, clusterv1.ConditionSeverityInfo, "%s updating", service)
 	default:

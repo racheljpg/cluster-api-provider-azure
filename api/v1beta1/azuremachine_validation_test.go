@@ -23,11 +23,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/google/uuid"
-
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest/to"
-
+	"github.com/google/uuid"
 	. "github.com/onsi/gomega"
 	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -62,9 +60,9 @@ func TestAzureMachine_ValidateSSHKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateSSHKey(tc.sshKey, field.NewPath("sshPublicKey"))
 			if tc.wantErr {
-				g.Expect(err).ToNot(HaveLen(0))
+				g.Expect(err).NotTo(BeEmpty())
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -139,9 +137,9 @@ func TestAzureMachine_ValidateOSDisk(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			err := ValidateOSDisk(test.osDisk, field.NewPath("osDisk"))
 			if test.wantErr {
-				g.Expect(err).NotTo(HaveLen(0))
+				g.Expect(err).NotTo(BeEmpty())
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -387,15 +385,60 @@ func TestAzureMachine_ValidateDataDisks(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "valid combination of managed disk storage account type UltraSSD_LRS and cachingType None",
+			disks: []DataDisk{
+				{
+					NameSuffix: "my_disk_1",
+					DiskSizeGB: 64,
+					ManagedDisk: &ManagedDiskParameters{
+						StorageAccountType: string(compute.StorageAccountTypesUltraSSDLRS),
+					},
+					Lun:         to.Int32Ptr(0),
+					CachingType: string(compute.CachingTypesNone),
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid combination of managed disk storage account type UltraSSD_LRS and cachingType ReadWrite",
+			disks: []DataDisk{
+				{
+					NameSuffix: "my_disk_1",
+					DiskSizeGB: 64,
+					ManagedDisk: &ManagedDiskParameters{
+						StorageAccountType: string(compute.StorageAccountTypesUltraSSDLRS),
+					},
+					Lun:         to.Int32Ptr(0),
+					CachingType: string(compute.CachingTypesReadWrite),
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid combination of managed disk storage account type UltraSSD_LRS and cachingType ReadOnly",
+			disks: []DataDisk{
+				{
+					NameSuffix: "my_disk_1",
+					DiskSizeGB: 64,
+					ManagedDisk: &ManagedDiskParameters{
+						StorageAccountType: string(compute.StorageAccountTypesUltraSSDLRS),
+					},
+					Lun:         to.Int32Ptr(0),
+					CachingType: string(compute.CachingTypesReadOnly),
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, test := range testcases {
 		t.Run(test.name, func(t *testing.T) {
 			err := ValidateDataDisks(test.disks, field.NewPath("dataDisks"))
 			if test.wantErr {
-				g.Expect(err).NotTo(HaveLen(0))
+				g.Expect(err).NotTo(BeEmpty())
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -448,9 +491,9 @@ func TestAzureMachine_ValidateSystemAssignedIdentity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateSystemAssignedIdentity(tc.Identity, tc.old, tc.roleAssignmentName, field.NewPath("sshPublicKey"))
 			if tc.wantErr {
-				g.Expect(err).ToNot(HaveLen(0))
+				g.Expect(err).NotTo(BeEmpty())
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}
@@ -644,9 +687,9 @@ func TestAzureMachine_ValidateDataDisksUpdate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			err := ValidateDataDisksUpdate(test.oldDisks, test.disks, field.NewPath("dataDisks"))
 			if test.wantErr {
-				g.Expect(err).NotTo(HaveLen(0))
+				g.Expect(err).NotTo(BeEmpty())
 			} else {
-				g.Expect(err).To(HaveLen(0))
+				g.Expect(err).To(BeEmpty())
 			}
 		})
 	}

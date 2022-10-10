@@ -156,16 +156,6 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*AzureMarketplaceImage)(nil), (*v1beta1.AzureMarketplaceImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(a.(*AzureMarketplaceImage), b.(*v1beta1.AzureMarketplaceImage), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.AzureMarketplaceImage)(nil), (*AzureMarketplaceImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(a.(*v1beta1.AzureMarketplaceImage), b.(*AzureMarketplaceImage), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*AzureSharedGalleryImage)(nil), (*v1beta1.AzureSharedGalleryImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_AzureSharedGalleryImage_To_v1beta1_AzureSharedGalleryImage(a.(*AzureSharedGalleryImage), b.(*v1beta1.AzureSharedGalleryImage), scope)
 	}); err != nil {
@@ -211,38 +201,13 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*FrontendIP)(nil), (*v1beta1.FrontendIP)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(a.(*FrontendIP), b.(*v1beta1.FrontendIP), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.FrontendIP)(nil), (*FrontendIP)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(a.(*v1beta1.FrontendIP), b.(*FrontendIP), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*Image)(nil), (*v1beta1.Image)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_Image_To_v1beta1_Image(a.(*Image), b.(*v1beta1.Image), scope)
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.Image)(nil), (*Image)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_Image_To_v1alpha3_Image(a.(*v1beta1.Image), b.(*Image), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*LoadBalancerSpec)(nil), (*v1beta1.LoadBalancerSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec(a.(*LoadBalancerSpec), b.(*v1beta1.LoadBalancerSpec), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*PublicIPSpec)(nil), (*v1beta1.PublicIPSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_PublicIPSpec_To_v1beta1_PublicIPSpec(a.(*PublicIPSpec), b.(*v1beta1.PublicIPSpec), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.PublicIPSpec)(nil), (*PublicIPSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(a.(*v1beta1.PublicIPSpec), b.(*PublicIPSpec), scope)
 	}); err != nil {
 		return err
 	}
@@ -311,6 +276,16 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*AzureMarketplaceImage)(nil), (*v1beta1.AzureMarketplaceImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(a.(*AzureMarketplaceImage), b.(*v1beta1.AzureMarketplaceImage), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*FrontendIP)(nil), (*v1beta1.FrontendIP)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(a.(*FrontendIP), b.(*v1beta1.FrontendIP), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*Future)(nil), (*v1beta1.Future)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_Future_To_v1beta1_Future(a.(*Future), b.(*v1beta1.Future), scope)
 	}); err != nil {
@@ -318,6 +293,11 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddConversionFunc((*IngressRule)(nil), (*v1beta1.SecurityRule)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_IngressRule_To_v1beta1_SecurityRule(a.(*IngressRule), b.(*v1beta1.SecurityRule), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*LoadBalancerSpec)(nil), (*v1beta1.LoadBalancerSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec(a.(*LoadBalancerSpec), b.(*v1beta1.LoadBalancerSpec), scope)
 	}); err != nil {
 		return err
 	}
@@ -381,13 +361,28 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*v1beta1.AzureMarketplaceImage)(nil), (*AzureMarketplaceImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(a.(*v1beta1.AzureMarketplaceImage), b.(*AzureMarketplaceImage), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*v1beta1.AzureSharedGalleryImage)(nil), (*AzureSharedGalleryImage)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_AzureSharedGalleryImage_To_v1alpha3_AzureSharedGalleryImage(a.(*v1beta1.AzureSharedGalleryImage), b.(*AzureSharedGalleryImage), scope)
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*v1beta1.FrontendIP)(nil), (*FrontendIP)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(a.(*v1beta1.FrontendIP), b.(*FrontendIP), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*v1beta1.Future)(nil), (*Future)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_Future_To_v1alpha3_Future(a.(*v1beta1.Future), b.(*Future), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.Image)(nil), (*Image)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_Image_To_v1alpha3_Image(a.(*v1beta1.Image), b.(*Image), scope)
 	}); err != nil {
 		return err
 	}
@@ -408,6 +403,11 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddConversionFunc((*v1beta1.OSDisk)(nil), (*OSDisk)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_OSDisk_To_v1alpha3_OSDisk(a.(*v1beta1.OSDisk), b.(*OSDisk), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.PublicIPSpec)(nil), (*PublicIPSpec)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(a.(*v1beta1.PublicIPSpec), b.(*PublicIPSpec), scope)
 	}); err != nil {
 		return err
 	}
@@ -669,31 +669,26 @@ func autoConvert_v1alpha3_AzureClusterSpec_To_v1beta1_AzureClusterSpec(in *Azure
 		return err
 	}
 	out.ResourceGroup = in.ResourceGroup
-	out.SubscriptionID = in.SubscriptionID
-	out.Location = in.Location
+	// WARNING: in.SubscriptionID requires manual conversion: does not exist in peer-type
+	// WARNING: in.Location requires manual conversion: does not exist in peer-type
 	if err := apiv1alpha3.Convert_v1alpha3_APIEndpoint_To_v1beta1_APIEndpoint(&in.ControlPlaneEndpoint, &out.ControlPlaneEndpoint, s); err != nil {
 		return err
 	}
-	out.AdditionalTags = *(*v1beta1.Tags)(unsafe.Pointer(&in.AdditionalTags))
-	out.IdentityRef = (*v1.ObjectReference)(unsafe.Pointer(in.IdentityRef))
+	// WARNING: in.AdditionalTags requires manual conversion: does not exist in peer-type
+	// WARNING: in.IdentityRef requires manual conversion: does not exist in peer-type
 	return nil
 }
 
 func autoConvert_v1beta1_AzureClusterSpec_To_v1alpha3_AzureClusterSpec(in *v1beta1.AzureClusterSpec, out *AzureClusterSpec, s conversion.Scope) error {
+	// WARNING: in.AzureClusterClassSpec requires manual conversion: does not exist in peer-type
 	if err := Convert_v1beta1_NetworkSpec_To_v1alpha3_NetworkSpec(&in.NetworkSpec, &out.NetworkSpec, s); err != nil {
 		return err
 	}
 	out.ResourceGroup = in.ResourceGroup
-	out.SubscriptionID = in.SubscriptionID
-	out.Location = in.Location
+	// WARNING: in.BastionSpec requires manual conversion: does not exist in peer-type
 	if err := apiv1alpha3.Convert_v1beta1_APIEndpoint_To_v1alpha3_APIEndpoint(&in.ControlPlaneEndpoint, &out.ControlPlaneEndpoint, s); err != nil {
 		return err
 	}
-	out.AdditionalTags = *(*Tags)(unsafe.Pointer(&in.AdditionalTags))
-	out.IdentityRef = (*v1.ObjectReference)(unsafe.Pointer(in.IdentityRef))
-	// WARNING: in.AzureEnvironment requires manual conversion: does not exist in peer-type
-	// WARNING: in.BastionSpec requires manual conversion: does not exist in peer-type
-	// WARNING: in.CloudProviderConfigOverrides requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -904,12 +899,15 @@ func autoConvert_v1beta1_AzureMachineSpec_To_v1alpha3_AzureMachineSpec(in *v1bet
 	}
 	out.SSHPublicKey = in.SSHPublicKey
 	out.AdditionalTags = *(*Tags)(unsafe.Pointer(&in.AdditionalTags))
+	// WARNING: in.AdditionalCapabilities requires manual conversion: does not exist in peer-type
 	out.AllocatePublicIP = in.AllocatePublicIP
 	out.EnableIPForwarding = in.EnableIPForwarding
 	out.AcceleratedNetworking = (*bool)(unsafe.Pointer(in.AcceleratedNetworking))
 	out.SpotVMOptions = (*SpotVMOptions)(unsafe.Pointer(in.SpotVMOptions))
 	out.SecurityProfile = (*SecurityProfile)(unsafe.Pointer(in.SecurityProfile))
 	// WARNING: in.SubnetName requires manual conversion: does not exist in peer-type
+	// WARNING: in.DNSServers requires manual conversion: does not exist in peer-type
+	// WARNING: in.VMExtensions requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1067,31 +1065,19 @@ func Convert_v1beta1_AzureMachineTemplateSpec_To_v1alpha3_AzureMachineTemplateSp
 }
 
 func autoConvert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(in *AzureMarketplaceImage, out *v1beta1.AzureMarketplaceImage, s conversion.Scope) error {
-	out.Publisher = in.Publisher
-	out.Offer = in.Offer
-	out.SKU = in.SKU
+	// WARNING: in.Publisher requires manual conversion: does not exist in peer-type
+	// WARNING: in.Offer requires manual conversion: does not exist in peer-type
+	// WARNING: in.SKU requires manual conversion: does not exist in peer-type
 	out.Version = in.Version
 	out.ThirdPartyImage = in.ThirdPartyImage
 	return nil
-}
-
-// Convert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage is an autogenerated conversion function.
-func Convert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(in *AzureMarketplaceImage, out *v1beta1.AzureMarketplaceImage, s conversion.Scope) error {
-	return autoConvert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(in, out, s)
 }
 
 func autoConvert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(in *v1beta1.AzureMarketplaceImage, out *AzureMarketplaceImage, s conversion.Scope) error {
-	out.Publisher = in.Publisher
-	out.Offer = in.Offer
-	out.SKU = in.SKU
+	// WARNING: in.ImagePlan requires manual conversion: does not exist in peer-type
 	out.Version = in.Version
 	out.ThirdPartyImage = in.ThirdPartyImage
 	return nil
-}
-
-// Convert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage is an autogenerated conversion function.
-func Convert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(in *v1beta1.AzureMarketplaceImage, out *AzureMarketplaceImage, s conversion.Scope) error {
-	return autoConvert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(in, out, s)
 }
 
 func autoConvert_v1alpha3_AzureSharedGalleryImage_To_v1beta1_AzureSharedGalleryImage(in *AzureSharedGalleryImage, out *v1beta1.AzureSharedGalleryImage, s conversion.Scope) error {
@@ -1236,26 +1222,32 @@ func Convert_v1beta1_DiskEncryptionSetParameters_To_v1alpha3_DiskEncryptionSetPa
 
 func autoConvert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(in *FrontendIP, out *v1beta1.FrontendIP, s conversion.Scope) error {
 	out.Name = in.Name
-	out.PrivateIPAddress = in.PrivateIPAddress
-	out.PublicIP = (*v1beta1.PublicIPSpec)(unsafe.Pointer(in.PublicIP))
+	// WARNING: in.PrivateIPAddress requires manual conversion: does not exist in peer-type
+	if in.PublicIP != nil {
+		in, out := &in.PublicIP, &out.PublicIP
+		*out = new(v1beta1.PublicIPSpec)
+		if err := Convert_v1alpha3_PublicIPSpec_To_v1beta1_PublicIPSpec(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.PublicIP = nil
+	}
 	return nil
-}
-
-// Convert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP is an autogenerated conversion function.
-func Convert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(in *FrontendIP, out *v1beta1.FrontendIP, s conversion.Scope) error {
-	return autoConvert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(in, out, s)
 }
 
 func autoConvert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(in *v1beta1.FrontendIP, out *FrontendIP, s conversion.Scope) error {
 	out.Name = in.Name
-	out.PrivateIPAddress = in.PrivateIPAddress
-	out.PublicIP = (*PublicIPSpec)(unsafe.Pointer(in.PublicIP))
+	if in.PublicIP != nil {
+		in, out := &in.PublicIP, &out.PublicIP
+		*out = new(PublicIPSpec)
+		if err := Convert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.PublicIP = nil
+	}
+	// WARNING: in.FrontendIPClass requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP is an autogenerated conversion function.
-func Convert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(in *v1beta1.FrontendIP, out *FrontendIP, s conversion.Scope) error {
-	return autoConvert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(in, out, s)
 }
 
 func autoConvert_v1alpha3_Future_To_v1beta1_Future(in *Future, out *v1beta1.Future, s conversion.Scope) error {
@@ -1286,7 +1278,15 @@ func autoConvert_v1alpha3_Image_To_v1beta1_Image(in *Image, out *v1beta1.Image, 
 	} else {
 		out.SharedGallery = nil
 	}
-	out.Marketplace = (*v1beta1.AzureMarketplaceImage)(unsafe.Pointer(in.Marketplace))
+	if in.Marketplace != nil {
+		in, out := &in.Marketplace, &out.Marketplace
+		*out = new(v1beta1.AzureMarketplaceImage)
+		if err := Convert_v1alpha3_AzureMarketplaceImage_To_v1beta1_AzureMarketplaceImage(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.Marketplace = nil
+	}
 	return nil
 }
 
@@ -1306,37 +1306,54 @@ func autoConvert_v1beta1_Image_To_v1alpha3_Image(in *v1beta1.Image, out *Image, 
 	} else {
 		out.SharedGallery = nil
 	}
-	out.Marketplace = (*AzureMarketplaceImage)(unsafe.Pointer(in.Marketplace))
+	if in.Marketplace != nil {
+		in, out := &in.Marketplace, &out.Marketplace
+		*out = new(AzureMarketplaceImage)
+		if err := Convert_v1beta1_AzureMarketplaceImage_To_v1alpha3_AzureMarketplaceImage(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.Marketplace = nil
+	}
+	// WARNING: in.ComputeGallery requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_Image_To_v1alpha3_Image is an autogenerated conversion function.
-func Convert_v1beta1_Image_To_v1alpha3_Image(in *v1beta1.Image, out *Image, s conversion.Scope) error {
-	return autoConvert_v1beta1_Image_To_v1alpha3_Image(in, out, s)
 }
 
 func autoConvert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec(in *LoadBalancerSpec, out *v1beta1.LoadBalancerSpec, s conversion.Scope) error {
 	out.ID = in.ID
 	out.Name = in.Name
-	out.SKU = v1beta1.SKU(in.SKU)
-	out.FrontendIPs = *(*[]v1beta1.FrontendIP)(unsafe.Pointer(&in.FrontendIPs))
-	out.Type = v1beta1.LBType(in.Type)
+	// WARNING: in.SKU requires manual conversion: does not exist in peer-type
+	if in.FrontendIPs != nil {
+		in, out := &in.FrontendIPs, &out.FrontendIPs
+		*out = make([]v1beta1.FrontendIP, len(*in))
+		for i := range *in {
+			if err := Convert_v1alpha3_FrontendIP_To_v1beta1_FrontendIP(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.FrontendIPs = nil
+	}
+	// WARNING: in.Type requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec is an autogenerated conversion function.
-func Convert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec(in *LoadBalancerSpec, out *v1beta1.LoadBalancerSpec, s conversion.Scope) error {
-	return autoConvert_v1alpha3_LoadBalancerSpec_To_v1beta1_LoadBalancerSpec(in, out, s)
 }
 
 func autoConvert_v1beta1_LoadBalancerSpec_To_v1alpha3_LoadBalancerSpec(in *v1beta1.LoadBalancerSpec, out *LoadBalancerSpec, s conversion.Scope) error {
 	out.ID = in.ID
 	out.Name = in.Name
-	out.SKU = SKU(in.SKU)
-	out.FrontendIPs = *(*[]FrontendIP)(unsafe.Pointer(&in.FrontendIPs))
-	out.Type = LBType(in.Type)
+	if in.FrontendIPs != nil {
+		in, out := &in.FrontendIPs, &out.FrontendIPs
+		*out = make([]FrontendIP, len(*in))
+		for i := range *in {
+			if err := Convert_v1beta1_FrontendIP_To_v1alpha3_FrontendIP(&(*in)[i], &(*out)[i], s); err != nil {
+				return err
+			}
+		}
+	} else {
+		out.FrontendIPs = nil
+	}
 	// WARNING: in.FrontendIPsCount requires manual conversion: does not exist in peer-type
-	// WARNING: in.IdleTimeoutInMinutes requires manual conversion: does not exist in peer-type
+	// WARNING: in.LoadBalancerClassSpec requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1381,7 +1398,7 @@ func autoConvert_v1beta1_NetworkSpec_To_v1alpha3_NetworkSpec(in *v1beta1.Network
 	}
 	// WARNING: in.NodeOutboundLB requires manual conversion: does not exist in peer-type
 	// WARNING: in.ControlPlaneOutboundLB requires manual conversion: does not exist in peer-type
-	// WARNING: in.PrivateDNSZoneName requires manual conversion: does not exist in peer-type
+	// WARNING: in.NetworkClassSpec requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1399,12 +1416,8 @@ func Convert_v1alpha3_PublicIPSpec_To_v1beta1_PublicIPSpec(in *PublicIPSpec, out
 func autoConvert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(in *v1beta1.PublicIPSpec, out *PublicIPSpec, s conversion.Scope) error {
 	out.Name = in.Name
 	out.DNSName = in.DNSName
+	// WARNING: in.IPTags requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec is an autogenerated conversion function.
-func Convert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(in *v1beta1.PublicIPSpec, out *PublicIPSpec, s conversion.Scope) error {
-	return autoConvert_v1beta1_PublicIPSpec_To_v1alpha3_PublicIPSpec(in, out, s)
 }
 
 func autoConvert_v1alpha3_RouteTable_To_v1beta1_RouteTable(in *RouteTable, out *v1beta1.RouteTable, s conversion.Scope) error {
@@ -1433,15 +1446,14 @@ func autoConvert_v1alpha3_SecurityGroup_To_v1beta1_SecurityGroup(in *SecurityGro
 	out.ID = in.ID
 	out.Name = in.Name
 	// WARNING: in.IngressRules requires manual conversion: does not exist in peer-type
-	out.Tags = *(*v1beta1.Tags)(unsafe.Pointer(&in.Tags))
+	// WARNING: in.Tags requires manual conversion: does not exist in peer-type
 	return nil
 }
 
 func autoConvert_v1beta1_SecurityGroup_To_v1alpha3_SecurityGroup(in *v1beta1.SecurityGroup, out *SecurityGroup, s conversion.Scope) error {
 	out.ID = in.ID
 	out.Name = in.Name
-	// WARNING: in.SecurityRules requires manual conversion: does not exist in peer-type
-	out.Tags = *(*Tags)(unsafe.Pointer(&in.Tags))
+	// WARNING: in.SecurityGroupClass requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1486,11 +1498,11 @@ func Convert_v1beta1_SpotVMOptions_To_v1alpha3_SpotVMOptions(in *v1beta1.SpotVMO
 }
 
 func autoConvert_v1alpha3_SubnetSpec_To_v1beta1_SubnetSpec(in *SubnetSpec, out *v1beta1.SubnetSpec, s conversion.Scope) error {
-	out.Role = v1beta1.SubnetRole(in.Role)
+	// WARNING: in.Role requires manual conversion: does not exist in peer-type
 	out.ID = in.ID
 	out.Name = in.Name
 	// WARNING: in.CidrBlock requires manual conversion: does not exist in peer-type
-	out.CIDRBlocks = *(*[]string)(unsafe.Pointer(&in.CIDRBlocks))
+	// WARNING: in.CIDRBlocks requires manual conversion: does not exist in peer-type
 	// WARNING: in.InternalLBIPAddress requires manual conversion: does not exist in peer-type
 	if err := Convert_v1alpha3_SecurityGroup_To_v1beta1_SecurityGroup(&in.SecurityGroup, &out.SecurityGroup, s); err != nil {
 		return err
@@ -1502,10 +1514,8 @@ func autoConvert_v1alpha3_SubnetSpec_To_v1beta1_SubnetSpec(in *SubnetSpec, out *
 }
 
 func autoConvert_v1beta1_SubnetSpec_To_v1alpha3_SubnetSpec(in *v1beta1.SubnetSpec, out *SubnetSpec, s conversion.Scope) error {
-	out.Role = SubnetRole(in.Role)
 	out.ID = in.ID
 	out.Name = in.Name
-	out.CIDRBlocks = *(*[]string)(unsafe.Pointer(&in.CIDRBlocks))
 	if err := Convert_v1beta1_SecurityGroup_To_v1alpha3_SecurityGroup(&in.SecurityGroup, &out.SecurityGroup, s); err != nil {
 		return err
 	}
@@ -1513,6 +1523,7 @@ func autoConvert_v1beta1_SubnetSpec_To_v1alpha3_SubnetSpec(in *v1beta1.SubnetSpe
 		return err
 	}
 	// WARNING: in.NatGateway requires manual conversion: does not exist in peer-type
+	// WARNING: in.SubnetClassSpec requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1541,8 +1552,8 @@ func autoConvert_v1alpha3_VnetSpec_To_v1beta1_VnetSpec(in *VnetSpec, out *v1beta
 	out.ID = in.ID
 	out.Name = in.Name
 	// WARNING: in.CidrBlock requires manual conversion: does not exist in peer-type
-	out.CIDRBlocks = *(*[]string)(unsafe.Pointer(&in.CIDRBlocks))
-	out.Tags = *(*v1beta1.Tags)(unsafe.Pointer(&in.Tags))
+	// WARNING: in.CIDRBlocks requires manual conversion: does not exist in peer-type
+	// WARNING: in.Tags requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -1550,8 +1561,7 @@ func autoConvert_v1beta1_VnetSpec_To_v1alpha3_VnetSpec(in *v1beta1.VnetSpec, out
 	out.ResourceGroup = in.ResourceGroup
 	out.ID = in.ID
 	out.Name = in.Name
-	out.CIDRBlocks = *(*[]string)(unsafe.Pointer(&in.CIDRBlocks))
 	// WARNING: in.Peerings requires manual conversion: does not exist in peer-type
-	out.Tags = *(*Tags)(unsafe.Pointer(&in.Tags))
+	// WARNING: in.VnetClassSpec requires manual conversion: does not exist in peer-type
 	return nil
 }

@@ -19,11 +19,10 @@ package v1beta1
 import (
 	"testing"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/utils/pointer"
-
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/pointer"
 )
 
 var (
@@ -41,67 +40,67 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 	}{
 		{
 			name:    "azuremachine with marketplace image - full",
-			machine: createMachineWithtMarketPlaceImage(t, "PUB1234", "OFFER1234", "SKU1234", "1.0.0"),
+			machine: createMachineWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0"),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine with marketplace image - missing publisher",
-			machine: createMachineWithtMarketPlaceImage(t, "", "OFFER1234", "SKU1234", "1.0.0"),
+			machine: createMachineWithMarketPlaceImage("", "OFFER1235", "SKU1235", "2.0.0"),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with shared gallery image - full",
-			machine: createMachineWithSharedImage(t, "SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0"),
+			machine: createMachineWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0"),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine with marketplace image - missing subscription",
-			machine: createMachineWithSharedImage(t, "", "RG123", "NAME123", "GALLERY1", "1.0.0"),
+			machine: createMachineWithSharedImage("", "RG124", "NAME124", "GALLERY1", "2.0.0"),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with image by - with id",
-			machine: createMachineWithImageByID(t, "ID123"),
+			machine: createMachineWithImageByID("ID123"),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine with image by - without id",
-			machine: createMachineWithImageByID(t, ""),
+			machine: createMachineWithImageByID(""),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with valid SSHPublicKey",
-			machine: createMachineWithSSHPublicKey(t, validSSHPublicKey),
+			machine: createMachineWithSSHPublicKey(validSSHPublicKey),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine without SSHPublicKey",
-			machine: createMachineWithSSHPublicKey(t, ""),
+			machine: createMachineWithSSHPublicKey(""),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with invalid SSHPublicKey",
-			machine: createMachineWithSSHPublicKey(t, "invalid ssh key"),
+			machine: createMachineWithSSHPublicKey("invalid ssh key"),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with list of user-assigned identities",
-			machine: createMachineWithUserAssignedIdentities(t, []UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
+			machine: createMachineWithUserAssignedIdentities([]UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine with empty list of user-assigned identities",
-			machine: createMachineWithUserAssignedIdentities(t, []UserAssignedIdentity{}),
+			machine: createMachineWithUserAssignedIdentities([]UserAssignedIdentity{}),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachine with valid osDisk cache type",
-			machine: createMachineWithOsDiskCacheType(t, string(compute.PossibleCachingTypesValues()[1])),
+			machine: createMachineWithOsDiskCacheType(string(compute.PossibleCachingTypesValues()[1])),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachine with invalid osDisk cache type",
-			machine: createMachineWithOsDiskCacheType(t, "invalid_cache_type"),
+			machine: createMachineWithOsDiskCacheType("invalid_cache_type"),
 			wantErr: true,
 		},
 	}
@@ -531,8 +530,8 @@ func TestAzureMachine_Default(t *testing.T) {
 	}
 
 	existingPublicKey := validSSHPublicKey
-	publicKeyExistTest := test{machine: createMachineWithSSHPublicKey(t, existingPublicKey)}
-	publicKeyNotExistTest := test{machine: createMachineWithSSHPublicKey(t, "")}
+	publicKeyExistTest := test{machine: createMachineWithSSHPublicKey(existingPublicKey)}
+	publicKeyNotExistTest := test{machine: createMachineWithSSHPublicKey("")}
 
 	publicKeyExistTest.machine.Default()
 	g.Expect(publicKeyExistTest.machine.Spec.SSHPublicKey).To(Equal(existingPublicKey))
@@ -551,7 +550,7 @@ func TestAzureMachine_Default(t *testing.T) {
 	}
 }
 
-func createMachineWithSharedImage(t *testing.T, subscriptionID, resourceGroup, name, gallery, version string) *AzureMachine {
+func createMachineWithSharedImage(subscriptionID, resourceGroup, name, gallery, version string) *AzureMachine {
 	image := &Image{
 		SharedGallery: &AzureSharedGalleryImage{
 			SubscriptionID: subscriptionID,
@@ -571,13 +570,15 @@ func createMachineWithSharedImage(t *testing.T, subscriptionID, resourceGroup, n
 	}
 }
 
-func createMachineWithtMarketPlaceImage(t *testing.T, publisher, offer, sku, version string) *AzureMachine {
+func createMachineWithMarketPlaceImage(publisher, offer, sku, version string) *AzureMachine {
 	image := &Image{
 		Marketplace: &AzureMarketplaceImage{
-			Publisher: publisher,
-			Offer:     offer,
-			SKU:       sku,
-			Version:   version,
+			ImagePlan: ImagePlan{
+				Publisher: publisher,
+				Offer:     offer,
+				SKU:       sku,
+			},
+			Version: version,
 		},
 	}
 
@@ -590,7 +591,7 @@ func createMachineWithtMarketPlaceImage(t *testing.T, publisher, offer, sku, ver
 	}
 }
 
-func createMachineWithImageByID(t *testing.T, imageID string) *AzureMachine {
+func createMachineWithImageByID(imageID string) *AzureMachine {
 	image := &Image{
 		ID: &imageID,
 	}
@@ -604,7 +605,7 @@ func createMachineWithImageByID(t *testing.T, imageID string) *AzureMachine {
 	}
 }
 
-func createMachineWithOsDiskCacheType(t *testing.T, cacheType string) *AzureMachine {
+func createMachineWithOsDiskCacheType(cacheType string) *AzureMachine {
 	machine := &AzureMachine{
 		Spec: AzureMachineSpec{
 			SSHPublicKey: validSSHPublicKey,
@@ -612,5 +613,17 @@ func createMachineWithOsDiskCacheType(t *testing.T, cacheType string) *AzureMach
 		},
 	}
 	machine.Spec.OSDisk.CachingType = cacheType
+	return machine
+}
+
+func createMachineWithRoleAssignmentName() *AzureMachine {
+	machine := &AzureMachine{
+		Spec: AzureMachineSpec{
+			SSHPublicKey:       validSSHPublicKey,
+			OSDisk:             validOSDisk,
+			Identity:           VMIdentitySystemAssigned,
+			RoleAssignmentName: "c6e3443d-bc11-4335-8819-ab6637b10586",
+		},
+	}
 	return machine
 }

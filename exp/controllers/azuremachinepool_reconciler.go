@@ -20,26 +20,20 @@ import (
 	"context"
 
 	"github.com/pkg/errors"
-
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vmssextensions"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 // azureMachinePoolService is the group of services called by the AzureMachinePool controller.
 type azureMachinePoolService struct {
-	scope                      *scope.MachinePoolScope
-	virtualMachinesScaleSetSvc azure.Reconciler
-	skuCache                   *resourceskus.Cache
-	roleAssignmentsSvc         azure.Reconciler
-	vmssExtensionSvc           azure.Reconciler
+	scope    *scope.MachinePoolScope
+	skuCache *resourceskus.Cache
+	services []azure.ServiceReconciler
 }
-
-var _ azure.Reconciler = (*azureMachinePoolService)(nil)
 
 // newAzureMachinePoolService populates all the services based on input scope.
 func newAzureMachinePoolService(machinePoolScope *scope.MachinePoolScope) (*azureMachinePoolService, error) {
@@ -49,11 +43,12 @@ func newAzureMachinePoolService(machinePoolScope *scope.MachinePoolScope) (*azur
 	}
 
 	return &azureMachinePoolService{
-		scope:                      machinePoolScope,
-		virtualMachinesScaleSetSvc: scalesets.NewService(machinePoolScope, cache),
-		skuCache:                   cache,
-		roleAssignmentsSvc:         roleassignments.New(machinePoolScope),
-		vmssExtensionSvc:           vmssextensions.New(machinePoolScope),
+		scope: machinePoolScope,
+		services: []azure.ServiceReconciler{
+			scalesets.New(machinePoolScope, cache),
+			roleassignments.New(machinePoolScope),
+		},
+		skuCache: cache,
 	}, nil
 }
 
@@ -66,16 +61,10 @@ func (s *azureMachinePoolService) Reconcile(ctx context.Context) error {
 		return errors.Wrap(err, "failed defaulting subnet name")
 	}
 
-	if err := s.virtualMachinesScaleSetSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "failed to create scale set")
-	}
-
-	if err := s.roleAssignmentsSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "unable to create role assignment")
-	}
-
-	if err := s.vmssExtensionSvc.Reconcile(ctx); err != nil {
-		return errors.Wrap(err, "unable to create vmss extension")
+	for _, service := range s.services {
+		if err := service.Reconcile(ctx); err != nil {
+			return errors.Wrapf(err, "failed to reconcile AzureMachinePool service %s", service.Name())
+		}
 	}
 
 	return nil
@@ -86,8 +75,12 @@ func (s *azureMachinePoolService) Delete(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureMachinePoolService.Delete")
 	defer done()
 
-	if err := s.virtualMachinesScaleSetSvc.Delete(ctx); err != nil {
-		return errors.Wrap(err, "failed to delete scale set")
+	// Delete services in reverse order of creation.
+	for i := len(s.services) - 1; i >= 0; i-- {
+		if err := s.services[i].Delete(ctx); err != nil {
+			return errors.Wrapf(err, "failed to delete AzureMachinePool service %s", s.services[i].Name())
+		}
 	}
+
 	return nil
 }
