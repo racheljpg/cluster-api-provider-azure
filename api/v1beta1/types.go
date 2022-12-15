@@ -113,15 +113,15 @@ type VnetSpec struct {
 
 // VnetPeeringSpec specifies an existing remote virtual network to peer with the AzureCluster's virtual network.
 type VnetPeeringSpec struct {
-	// ResourceGroup is the resource group name of the remote virtual network.
-	// +optional
-	ResourceGroup string `json:"resourceGroup,omitempty"`
-
 	VnetPeeringClassSpec `json:",inline"`
 }
 
 // VnetPeeringClassSpec specifies a virtual network peering class.
 type VnetPeeringClassSpec struct {
+	// ResourceGroup is the resource group name of the remote virtual network.
+	// +optional
+	ResourceGroup string `json:"resourceGroup,omitempty"`
+
 	// RemoteVnetName defines name of the remote virtual network.
 	RemoteVnetName string `json:"remoteVnetName"`
 }
@@ -135,7 +135,14 @@ func (v *VnetSpec) IsManaged(clusterName string) bool {
 }
 
 // Subnets is a slice of Subnet.
+// +listType=map
+// +listMapKey=name
 type Subnets []SubnetSpec
+
+// ServiceEndpoints is a slice of string.
+// +listType=map
+// +listMapKey=service
+type ServiceEndpoints []ServiceEndpointSpec
 
 // SecurityGroup defines an Azure security group.
 type SecurityGroup struct {
@@ -230,6 +237,8 @@ type SecurityRule struct {
 }
 
 // SecurityRules is a slice of Azure security rules for security groups.
+// +listType=map
+// +listMapKey=name
 type SecurityRules []SecurityRule
 
 // LoadBalancerSpec defines an Azure load balancer.
@@ -245,6 +254,9 @@ type LoadBalancerSpec struct {
 	// FrontendIPsCount specifies the number of frontend IP addresses for the load balancer.
 	// +optional
 	FrontendIPsCount *int32 `json:"frontendIPsCount,omitempty"`
+	// BackendPool describes the backend pool of the load balancer.
+	// +optional
+	BackendPool BackendPool `json:"backendPool,omitempty"`
 
 	LoadBalancerClassSpec `json:",inline"`
 }
@@ -455,6 +467,17 @@ const (
 	VMIdentityUserAssigned VMIdentity = "UserAssigned"
 )
 
+// SpotEvictionPolicy defines the eviction policy for spot VMs, if configured.
+// +kubebuilder:validation:Enum=Deallocate;Delete
+type SpotEvictionPolicy string
+
+const (
+	// SpotEvictionPolicyDeallocate is the default eviction policy and will deallocate the VM when the node is marked for eviction.
+	SpotEvictionPolicyDeallocate SpotEvictionPolicy = "Deallocate"
+	// SpotEvictionPolicyDelete will delete the VM when the node is marked for eviction.
+	SpotEvictionPolicyDelete SpotEvictionPolicy = "Delete"
+)
+
 // UserAssignedIdentity defines the user-assigned identities provided
 // by the user to be assigned to Azure resources.
 type UserAssignedIdentity struct {
@@ -471,7 +494,7 @@ const (
 )
 
 // IdentityType represents different types of identities.
-// +kubebuilder:validation:Enum=ServicePrincipal;ManualServicePrincipal;UserAssignedMSI
+// +kubebuilder:validation:Enum=ServicePrincipal;UserAssignedMSI;ManualServicePrincipal;ServicePrincipalCertificate
 type IdentityType string
 
 const (
@@ -590,9 +613,6 @@ type SubnetSpec struct {
 	// +optional
 	ID string `json:"id,omitempty"`
 
-	// Name defines a name for the subnet resource.
-	Name string `json:"name"`
-
 	// SecurityGroup defines the NSG (network security group) that should be attached to this subnet.
 	// +optional
 	SecurityGroup SecurityGroup `json:"securityGroup,omitempty"`
@@ -606,6 +626,13 @@ type SubnetSpec struct {
 	NatGateway NatGateway `json:"natGateway,omitempty"`
 
 	SubnetClassSpec `json:",inline"`
+}
+
+// ServiceEndpointSpec configures an Azure Service Endpoint.
+type ServiceEndpointSpec struct {
+	Service string `json:"service"`
+
+	Locations []string `json:"locations"`
 }
 
 // GetControlPlaneSubnet returns the cluster control plane subnet.
@@ -756,7 +783,75 @@ type AzureBastion struct {
 	PublicIP PublicIPSpec `json:"publicIP,omitempty"`
 }
 
+// BackendPool describes the backend pool of the load balancer.
+type BackendPool struct {
+	// Name specifies the name of backend pool for the load balancer. If not specified, the default name will
+	// be set, depending on the load balancer role.
+	// +optional
+	Name string `json:"name,omitempty"`
+}
+
 // IsTerminalProvisioningState returns true if the ProvisioningState is a terminal state for an Azure resource.
 func IsTerminalProvisioningState(state ProvisioningState) bool {
 	return state == Failed || state == Succeeded
+}
+
+// Diagnostics is used to configure the diagnostic settings of the virtual machine.
+type Diagnostics struct {
+	// Boot configures the boot diagnostics settings for the virtual machine.
+	// This allows to configure capturing serial output from the virtual machine on boot.
+	// This is useful for debugging software based launch issues.
+	// If not specified then Boot diagnostics (Managed) will be enabled.
+	// +optional
+	Boot *BootDiagnostics `json:"boot,omitempty"`
+}
+
+// BootDiagnostics configures the boot diagnostics settings for the virtual machine.
+// This allows you to configure capturing serial output from the virtual machine on boot.
+// This is useful for debugging software based launch issues.
+// +union
+type BootDiagnostics struct {
+	// StorageAccountType determines if the storage account for storing the diagnostics data
+	// should be disabled (Disabled), provisioned by Azure (Managed) or by the user (UserManaged).
+	// +kubebuilder:validation:Required
+	// +unionDiscriminator
+	StorageAccountType BootDiagnosticsStorageAccountType `json:"storageAccountType"`
+
+	// UserManaged provides a reference to the user-managed storage account.
+	// +optional
+	UserManaged *UserManagedBootDiagnostics `json:"userManaged,omitempty"`
+}
+
+// BootDiagnosticsStorageAccountType defines the list of valid storage account types
+// for the boot diagnostics.
+// +kubebuilder:validation:Enum:="Managed";"UserManaged";"Disabled"
+type BootDiagnosticsStorageAccountType string
+
+const (
+	// DisabledDiagnosticsStorage is used to determine that the diagnostics storage account
+	// should be disabled.
+	DisabledDiagnosticsStorage BootDiagnosticsStorageAccountType = "Disabled"
+
+	// ManagedDiagnosticsStorage is used to determine that the diagnostics storage account
+	// should be provisioned by Azure.
+	ManagedDiagnosticsStorage BootDiagnosticsStorageAccountType = "Managed"
+
+	// UserManagedDiagnosticsStorage is used to determine that the diagnostics storage account
+	// should be provisioned by the User.
+	UserManagedDiagnosticsStorage BootDiagnosticsStorageAccountType = "UserManaged"
+)
+
+// UserManagedBootDiagnostics provides a reference to a user-managed
+// storage account.
+type UserManagedBootDiagnostics struct {
+	// StorageAccountURI is the URI of the user-managed storage account.
+	// The URI typically will be `https://<mystorageaccountname>.blob.core.windows.net/`
+	// but may differ if you are using Azure DNS zone endpoints.
+	// You can find the correct endpoint by looking for the Blob Primary Endpoint in the
+	// endpoints tab in the Azure console or with the CLI by issuing
+	// `az storage account list --query='[].{name: name, "resource group": resourceGroup, "blob endpoint": primaryEndpoints.blob}'`.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^https://`
+	// +kubebuilder:validation:MaxLength=1024
+	StorageAccountURI string `json:"storageAccountURI"`
 }

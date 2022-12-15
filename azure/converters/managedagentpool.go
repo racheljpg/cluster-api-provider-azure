@@ -23,25 +23,32 @@ import (
 // AgentPoolToManagedClusterAgentPoolProfile converts a AgentPoolSpec to an Azure SDK ManagedClusterAgentPoolProfile used in managedcluster reconcile.
 func AgentPoolToManagedClusterAgentPoolProfile(pool containerservice.AgentPool) containerservice.ManagedClusterAgentPoolProfile {
 	properties := pool.ManagedClusterAgentPoolProfileProperties
-	return containerservice.ManagedClusterAgentPoolProfile{
-		Name:                pool.Name, // Note: if converting from agentPoolSpec.Parameters(), this field will not be set
-		VMSize:              properties.VMSize,
-		OsType:              properties.OsType,
-		OsDiskSizeGB:        properties.OsDiskSizeGB,
-		Count:               properties.Count,
-		Type:                properties.Type,
-		OrchestratorVersion: properties.OrchestratorVersion,
-		VnetSubnetID:        properties.VnetSubnetID,
-		Mode:                properties.Mode,
-		EnableAutoScaling:   properties.EnableAutoScaling,
-		MaxCount:            properties.MaxCount,
-		MinCount:            properties.MinCount,
-		NodeTaints:          properties.NodeTaints,
-		AvailabilityZones:   properties.AvailabilityZones,
-		MaxPods:             properties.MaxPods,
-		OsDiskType:          properties.OsDiskType,
-		NodeLabels:          properties.NodeLabels,
-		EnableUltraSSD:      properties.EnableUltraSSD,
-		EnableNodePublicIP:  properties.EnableNodePublicIP,
+	agentPool := containerservice.ManagedClusterAgentPoolProfile{
+		Name:                 pool.Name, // Note: if converting from agentPoolSpec.Parameters(), this field will not be set
+		VMSize:               properties.VMSize,
+		OsType:               properties.OsType,
+		OsDiskSizeGB:         properties.OsDiskSizeGB,
+		Count:                properties.Count,
+		Type:                 properties.Type,
+		OrchestratorVersion:  properties.OrchestratorVersion,
+		VnetSubnetID:         properties.VnetSubnetID,
+		Mode:                 properties.Mode,
+		EnableAutoScaling:    properties.EnableAutoScaling,
+		MaxCount:             properties.MaxCount,
+		MinCount:             properties.MinCount,
+		NodeTaints:           properties.NodeTaints,
+		AvailabilityZones:    properties.AvailabilityZones,
+		MaxPods:              properties.MaxPods,
+		OsDiskType:           properties.OsDiskType,
+		NodeLabels:           properties.NodeLabels,
+		EnableUltraSSD:       properties.EnableUltraSSD,
+		EnableNodePublicIP:   properties.EnableNodePublicIP,
+		NodePublicIPPrefixID: properties.NodePublicIPPrefixID,
+		ScaleSetPriority:     properties.ScaleSetPriority,
+		Tags:                 properties.Tags,
 	}
+	if properties.KubeletConfig != nil {
+		agentPool.KubeletConfig = properties.KubeletConfig
+	}
+	return agentPool
 }

@@ -44,6 +44,10 @@ func (src *AzureMachineTemplate) ConvertTo(dstRaw conversion.Hub) error {
 		dst.Spec.Template.Spec.AdditionalCapabilities = restored.Spec.Template.Spec.AdditionalCapabilities
 	}
 
+	if restored.Spec.Template.Spec.Diagnostics != nil {
+		dst.Spec.Template.Spec.Diagnostics = restored.Spec.Template.Spec.Diagnostics
+	}
+
 	dst.Spec.Template.ObjectMeta = restored.Spec.Template.ObjectMeta
 
 	if len(restored.Spec.Template.Spec.DNSServers) > 0 {
@@ -52,6 +56,10 @@ func (src *AzureMachineTemplate) ConvertTo(dstRaw conversion.Hub) error {
 
 	if len(restored.Spec.Template.Spec.VMExtensions) > 0 {
 		dst.Spec.Template.Spec.VMExtensions = restored.Spec.Template.Spec.VMExtensions
+	}
+
+	if restored.Spec.Template.Spec.SpotVMOptions != nil && restored.Spec.Template.Spec.SpotVMOptions.EvictionPolicy != nil {
+		dst.Spec.Template.Spec.SpotVMOptions.EvictionPolicy = restored.Spec.Template.Spec.SpotVMOptions.EvictionPolicy
 	}
 
 	return nil

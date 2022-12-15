@@ -18,8 +18,12 @@ package async
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/Azure/go-autorest/autorest"
 	azureautorest "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
@@ -76,7 +80,7 @@ func processOngoingOperation(ctx context.Context, scope FutureScope, client Futu
 
 		// Operation is still in progress, update conditions and requeue.
 		log.V(2).Info("long running operation is still ongoing", "service", serviceName, "resource", resourceName)
-		return nil, azure.WithTransientError(azure.NewOperationNotDoneError(future), retryAfter(sdkFuture))
+		return nil, azure.WithTransientError(azure.NewOperationNotDoneError(future), getRequeueAfterFromFuture(sdkFuture))
 	}
 	if err != nil {
 		log.V(2).Error(err, "error checking long running operation status after it finished")
@@ -93,9 +97,9 @@ func processOngoingOperation(ctx context.Context, scope FutureScope, client Futu
 	return client.Result(ctx, sdkFuture, future.Type)
 }
 
-// CreateResource implements the logic for creating a resource Asynchronously.
-func (s *Service) CreateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error) {
-	ctx, log, done := tele.StartSpanWithLogger(ctx, "async.Service.CreateResource")
+// CreateOrUpdateResource implements the logic for creating a new, or updating an existing, resource Asynchronously.
+func (s *Service) CreateOrUpdateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error) {
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "async.Service.CreateOrUpdateResource")
 	defer done()
 
 	resourceName := spec.ResourceName()
@@ -111,7 +115,8 @@ func (s *Service) CreateResource(ctx context.Context, spec azure.ResourceSpecGet
 	// Get the resource if it already exists, and use it to construct the desired resource parameters.
 	var existingResource interface{}
 	if existing, err := s.Creator.Get(ctx, spec); err != nil && !azure.ResourceNotFound(err) {
-		return nil, errors.Wrapf(err, "failed to get existing resource %s/%s (service: %s)", rgName, resourceName, serviceName)
+		errWrapped := errors.Wrapf(err, "failed to get existing resource %s/%s (service: %s)", rgName, resourceName, serviceName)
+		return nil, azure.WithTransientError(errWrapped, getRetryAfterFromError(err))
 	} else if err == nil {
 		existingResource = existing
 		log.V(2).Info("successfully got existing resource", "service", serviceName, "resource", resourceName, "resourceGroup", rgName)
@@ -128,20 +133,25 @@ func (s *Service) CreateResource(ctx context.Context, spec azure.ResourceSpecGet
 	}
 
 	// Create or update the resource with the desired parameters.
-	log.V(2).Info("creating resource", "service", serviceName, "resource", resourceName, "resourceGroup", rgName)
+	logMessageVerbPrefix := "creat"
+	if existingResource != nil {
+		logMessageVerbPrefix = "updat"
+	}
+	log.V(2).Info(fmt.Sprintf("%sing resource", logMessageVerbPrefix), "service", serviceName, "resource", resourceName, "resourceGroup", rgName)
 	result, sdkFuture, err := s.Creator.CreateOrUpdateAsync(ctx, spec, parameters)
+	errWrapped := errors.Wrapf(err, fmt.Sprintf("failed to %se resource %s/%s (service: %s)", logMessageVerbPrefix, rgName, resourceName, serviceName))
 	if sdkFuture != nil {
 		future, err := converters.SDKToFuture(sdkFuture, infrav1.PutFuture, serviceName, resourceName, rgName)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to create resource %s/%s (service: %s)", rgName, resourceName, serviceName)
+			return nil, errWrapped
 		}
 		s.Scope.SetLongRunningOperationState(future)
-		return nil, azure.WithTransientError(azure.NewOperationNotDoneError(future), retryAfter(sdkFuture))
+		return nil, azure.WithTransientError(azure.NewOperationNotDoneError(future), getRequeueAfterFromFuture(sdkFuture))
 	} else if err != nil {
-		return nil, errors.Wrapf(err, "failed to create resource %s/%s (service: %s)", rgName, resourceName, serviceName)
+		return nil, errWrapped
 	}
 
-	log.V(2).Info("successfully created resource", "service", serviceName, "resource", resourceName, "resourceGroup", rgName)
+	log.V(2).Info(fmt.Sprintf("successfully %sed resource", logMessageVerbPrefix), "service", serviceName, "resource", resourceName, "resourceGroup", rgName)
 	return result, nil
 }
 
@@ -170,7 +180,7 @@ func (s *Service) DeleteResource(ctx context.Context, spec azure.ResourceSpecGet
 			return errors.Wrapf(err, "failed to delete resource %s/%s (service: %s)", rgName, resourceName, serviceName)
 		}
 		s.Scope.SetLongRunningOperationState(future)
-		return azure.WithTransientError(azure.NewOperationNotDoneError(future), retryAfter(sdkFuture))
+		return azure.WithTransientError(azure.NewOperationNotDoneError(future), getRequeueAfterFromFuture(sdkFuture))
 	} else if err != nil {
 		if azure.ResourceNotFound(err) {
 			// already deleted
@@ -183,12 +193,40 @@ func (s *Service) DeleteResource(ctx context.Context, spec azure.ResourceSpecGet
 	return nil
 }
 
-// retryAfter returns the max between the `RETRY-AFTER` header and the default requeue time.
+// getRequeueAfterFromFuture returns the max between the `RETRY-AFTER` header and the default requeue time.
 // This ensures we respect the retry-after header if it is set and avoid retrying too often during an API throttling event.
-func retryAfter(sdkFuture azureautorest.FutureAPI) time.Duration {
+func getRequeueAfterFromFuture(sdkFuture azureautorest.FutureAPI) time.Duration {
 	retryAfter, _ := sdkFuture.GetPollingDelay()
 	if retryAfter < reconciler.DefaultReconcilerRequeue {
 		retryAfter = reconciler.DefaultReconcilerRequeue
 	}
 	return retryAfter
+}
+
+// getRetryAfterFromError returns the time.Duration from the http.Response in the autorest.DetailedError.
+// If there is no Response object, or if there is no meaningful Retry-After header data, we return a default.
+func getRetryAfterFromError(err error) time.Duration {
+	// In case we aren't able to introspect Retry-After from the error type, we'll return this default
+	ret := reconciler.DefaultReconcilerRequeue
+	var detailedError autorest.DetailedError
+	// if we have a strongly typed autorest.DetailedError then we can introspect the HTTP response data
+	if errors.As(err, &detailedError) {
+		if detailedError.Response != nil {
+			// If we have Retry-After HTTP header data for any reason, prefer it
+			if retryAfter := detailedError.Response.Header.Get("Retry-After"); retryAfter != "" {
+				// This handles the case where Retry-After data is in the form of units of seconds
+				if rai, err := strconv.Atoi(retryAfter); err == nil {
+					ret = time.Duration(rai) * time.Second
+					// This handles the case where Retry-After data is in the form of absolute time
+				} else if t, err := time.Parse(time.RFC1123, retryAfter); err == nil {
+					ret = time.Until(t)
+				}
+				// If we didn't find Retry-After HTTP header data but the response type is 429,
+				// we'll have to come up with our sane default.
+			} else if detailedError.Response.StatusCode == http.StatusTooManyRequests {
+				ret = reconciler.DefaultHTTP429RetryAfter
+			}
+		}
+	}
+	return ret
 }

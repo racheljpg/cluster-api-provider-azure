@@ -21,6 +21,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-05-01/resources"
 	"github.com/Azure/go-autorest/autorest"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 )
 
 var (
@@ -57,8 +59,8 @@ var (
 	}
 	fakeExistingResource   = resources.GenericResource{}
 	fakeResourceParameters = resources.GenericResource{}
-	fakeInternalError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal Server Error")
-	fakeNotFoundError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not Found")
+	fakeInternalError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
+	fakeNotFoundError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not Found")
 	errCtxExceeded         = errors.New("ctx exceeded")
 )
 
@@ -203,8 +205,8 @@ func TestProcessOngoingOperation(t *testing.T) {
 	}
 }
 
-// TestCreateResource tests the CreateResource function.
-func TestCreateResource(t *testing.T) {
+// TestCreateOrUpdateResource tests the CreateOrUpdateResource function.
+func TestCreateOrUpdateResource(t *testing.T) {
 	testcases := []struct {
 		name           string
 		serviceName    string
@@ -289,7 +291,7 @@ func TestCreateResource(t *testing.T) {
 		},
 		{
 			name:          "error occurs while running async create",
-			expectedError: "failed to create resource test-group/test-resource (service: test-service)",
+			expectedError: "failed to update resource test-group/test-resource (service: test-service)",
 			serviceName:   "test-service",
 			expect: func(s *mock_async.MockFutureScopeMockRecorder, c *mock_async.MockCreatorMockRecorder, r *mock_azure.MockResourceSpecGetterMockRecorder) {
 				r.ResourceName().Return("test-resource")
@@ -331,7 +333,7 @@ func TestCreateResource(t *testing.T) {
 			tc.expect(scopeMock.EXPECT(), creatorMock.EXPECT(), specMock.EXPECT())
 
 			s := New(scopeMock, creatorMock, nil)
-			result, err := s.CreateResource(context.TODO(), specMock, tc.serviceName)
+			result, err := s.CreateOrUpdateResource(context.TODO(), specMock, tc.serviceName)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -430,6 +432,89 @@ func TestDeleteResource(t *testing.T) {
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestGetRetryAfterFromError(t *testing.T) {
+	cases := []struct {
+		name                   string
+		input                  error
+		expected               time.Duration
+		expectedRangeTolerance time.Duration
+	}{
+		{
+			name: "Retry-After header data present in the form of units of seconds",
+			input: autorest.DetailedError{
+				Response: &http.Response{
+					Header: http.Header{
+						"Retry-After": []string{"2"},
+					},
+				},
+			},
+			expected: 2 * time.Second,
+		},
+		{
+			name: "Retry-After header data present in the form of units of absolute time",
+			input: autorest.DetailedError{
+				Response: &http.Response{
+					Header: http.Header{
+						"Retry-After": []string{time.Now().Add(1 * time.Hour).Format(time.RFC1123)},
+					},
+				},
+			},
+			expected:               1 * time.Hour,
+			expectedRangeTolerance: 5 * time.Second,
+		},
+		{
+			name: "Retry-After header data not present",
+			input: autorest.DetailedError{
+				Response: &http.Response{
+					Header: http.Header{
+						"foo": []string{"bar"},
+					},
+				},
+			},
+			expected: reconciler.DefaultReconcilerRequeue,
+		},
+		{
+			name: "Retry-After header data not present in HTTP 429",
+			input: autorest.DetailedError{
+				Response: &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Header: http.Header{
+						"foo": []string{"bar"},
+					},
+				},
+			},
+			expected: reconciler.DefaultHTTP429RetryAfter,
+		},
+		{
+			name: "nil http.Response",
+			input: autorest.DetailedError{
+				Response: nil,
+			},
+			expected: reconciler.DefaultReconcilerRequeue,
+		},
+		{
+			name:     "error type is not autorest.DetailedError",
+			input:    errors.New("error"),
+			expected: reconciler.DefaultReconcilerRequeue,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+			ret := getRetryAfterFromError(c.input)
+			if c.expectedRangeTolerance > 0 {
+				g.Expect(ret).To(BeNumerically("<", c.expected))
+				g.Expect(ret + c.expectedRangeTolerance).To(BeNumerically(">", c.expected))
+			} else {
+				g.Expect(ret).To(Equal(c.expected))
 			}
 		})
 	}

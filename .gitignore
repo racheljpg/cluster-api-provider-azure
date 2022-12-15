@@ -11,6 +11,7 @@ bin
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage.*
 
 # Ansible
 *.retry
@@ -28,6 +29,7 @@ kind.kubeconfig
 minikube.kubeconfig
 kubeconfig
 !kubeconfig/
+*.kubeconfig
 
 # ssh keys
 .ssh*
@@ -79,3 +81,7 @@ _releasenotes
 
 # calico manifests archive
 release-*/manifests/calico-*.yaml
+
+# mentioned in the capz book
+/sp.json
+/cluster.yaml

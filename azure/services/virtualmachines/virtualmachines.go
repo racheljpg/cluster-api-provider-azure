@@ -25,15 +25,17 @@ import (
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	azprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/networkinterfaces"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/publicips"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 const serviceName = "virtualmachine"
@@ -47,6 +49,7 @@ type VMScope interface {
 	SetProviderID(string)
 	SetAddresses([]corev1.NodeAddress)
 	SetVMState(infrav1.ProvisioningState)
+	SetConditionFalse(clusterv1.ConditionType, string, clusterv1.ConditionSeverity, string)
 }
 
 // Service provides operations on Azure resources.
@@ -55,6 +58,7 @@ type Service struct {
 	async.Reconciler
 	interfacesGetter async.Getter
 	publicIPsGetter  async.Getter
+	identitiesGetter identities.Client
 }
 
 // New creates a new service.
@@ -64,6 +68,7 @@ func New(scope VMScope) *Service {
 		Scope:            scope,
 		interfacesGetter: networkinterfaces.NewClient(scope),
 		publicIPsGetter:  publicips.NewClient(scope),
+		identitiesGetter: identities.NewClient(scope),
 		Reconciler:       async.New(scope, Client, Client),
 	}
 }
@@ -73,7 +78,7 @@ func (s *Service) Name() string {
 	return serviceName
 }
 
-// Reconcile gets/creates/updates a virtual machine.
+// Reconcile idempotently creates or updates a virtual machine.
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "virtualmachines.Service.Reconcile")
 	defer done()
@@ -86,7 +91,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		return nil
 	}
 
-	result, err := s.CreateResource(ctx, vmSpec, serviceName)
+	result, err := s.CreateOrUpdateResource(ctx, vmSpec, serviceName)
 	s.Scope.UpdatePutStatus(infrav1.VMRunningCondition, serviceName, err)
 	// Set the DiskReady condition here since the disk gets created with the VM.
 	s.Scope.UpdatePutStatus(infrav1.DisksReadyCondition, serviceName, err)
@@ -97,7 +102,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		}
 		infraVM := converters.SDKToVM(vm)
 		// Transform the VM resource representation to conform to the cloud-provider-azure representation
-		providerID, err := azureutil.ConvertResourceGroupNameToLower(azure.ProviderIDPrefix + infraVM.ID)
+		providerID, err := azprovider.ConvertResourceGroupNameToLower(azure.ProviderIDPrefix + infraVM.ID)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse VM ID %s", infraVM.ID)
 		}
@@ -111,6 +116,16 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		}
 		s.Scope.SetAddresses(addresses)
 		s.Scope.SetVMState(infraVM.State)
+
+		spec, ok := vmSpec.(*VMSpec)
+		if !ok {
+			return errors.Errorf("%T is not a valid VM spec", vmSpec)
+		}
+
+		err = s.checkUserAssignedIdentities(ctx, spec.UserAssignedIdentities, infraVM.UserAssignedIdentities)
+		if err != nil {
+			return errors.Wrap(err, "failed to check user assigned identities")
+		}
 	}
 	return err
 }
@@ -136,6 +151,36 @@ func (s *Service) Delete(ctx context.Context) error {
 	}
 	s.Scope.UpdateDeleteStatus(infrav1.VMRunningCondition, serviceName, err)
 	return err
+}
+
+func (s *Service) checkUserAssignedIdentities(ctx context.Context, specIdentities []infrav1.UserAssignedIdentity, vmIdentities []infrav1.UserAssignedIdentity) error {
+	expectedMap := make(map[string]struct{})
+	actualMap := make(map[string]struct{})
+
+	// Create a map of the expected identities. The ProviderID is converted to match the format of the VM identity.
+	for _, expectedIdentity := range specIdentities {
+		expectedClientID, err := s.identitiesGetter.GetClientID(ctx, expectedIdentity.ProviderID)
+		if err != nil {
+			return errors.Wrap(err, "failed to get client ID")
+		}
+		expectedMap[expectedClientID] = struct{}{}
+	}
+
+	// Create a map of the actual identities from the vm.
+	for _, actualIdentity := range vmIdentities {
+		actualMap[actualIdentity.ProviderID] = struct{}{}
+	}
+
+	// Check if the expected identities are present in the vm.
+	for expectedKey := range expectedMap {
+		_, exists := actualMap[expectedKey]
+		if !exists {
+			s.Scope.SetConditionFalse(infrav1.VMIdentitiesReadyCondition, infrav1.UserAssignedIdentityMissingReason, clusterv1.ConditionSeverityWarning, "VM is missing expected user assigned identity with client ID: "+expectedKey)
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (s *Service) getAddresses(ctx context.Context, vm compute.VirtualMachine, rgName string) ([]corev1.NodeAddress, error) {

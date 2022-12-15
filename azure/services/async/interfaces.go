@@ -19,6 +19,7 @@ package async
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-10-01/resources"
 	azureautorest "github.com/Azure/go-autorest/autorest/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
@@ -41,6 +42,11 @@ type Getter interface {
 	Get(ctx context.Context, spec azure.ResourceSpecGetter) (result interface{}, err error)
 }
 
+// TagsGetter is an interface that can get a tags resource.
+type TagsGetter interface {
+	GetAtScope(ctx context.Context, scope string) (result resources.TagsResource, err error)
+}
+
 // Creator is a client that can create or update a resource asynchronously.
 type Creator interface {
 	FutureHandler
@@ -56,6 +62,6 @@ type Deleter interface {
 
 // Reconciler is a generic interface used to perform asynchronous reconciliation of Azure resources.
 type Reconciler interface {
-	CreateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error)
+	CreateOrUpdateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error)
 	DeleteResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (err error)
 }

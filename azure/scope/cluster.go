@@ -244,7 +244,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			Type:                 s.APIServerLB().Type,
 			SKU:                  infrav1.SKUStandard,
 			Role:                 infrav1.APIServerRole,
-			BackendPoolName:      s.APIServerLBPoolName(s.APIServerLB().Name),
+			BackendPoolName:      s.APIServerLB().BackendPool.Name,
 			IdleTimeoutInMinutes: s.APIServerLB().IdleTimeoutInMinutes,
 			AdditionalTags:       s.AdditionalTags(),
 		},
@@ -263,7 +263,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			FrontendIPConfigs:    s.NodeOutboundLB().FrontendIPs,
 			Type:                 s.NodeOutboundLB().Type,
 			SKU:                  s.NodeOutboundLB().SKU,
-			BackendPoolName:      s.OutboundPoolName(s.NodeOutboundLB().Name),
+			BackendPoolName:      s.NodeOutboundLB().BackendPool.Name,
 			IdleTimeoutInMinutes: s.NodeOutboundLB().IdleTimeoutInMinutes,
 			Role:                 infrav1.NodeOutboundRole,
 			AdditionalTags:       s.AdditionalTags(),
@@ -283,7 +283,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			FrontendIPConfigs:    s.ControlPlaneOutboundLB().FrontendIPs,
 			Type:                 s.ControlPlaneOutboundLB().Type,
 			SKU:                  s.ControlPlaneOutboundLB().SKU,
-			BackendPoolName:      s.OutboundPoolName(azure.GenerateControlPlaneOutboundLBName(s.ClusterName())),
+			BackendPoolName:      s.ControlPlaneOutboundLB().BackendPool.Name,
 			IdleTimeoutInMinutes: s.NodeOutboundLB().IdleTimeoutInMinutes,
 			Role:                 infrav1.ControlPlaneOutboundRole,
 			AdditionalTags:       s.AdditionalTags(),
@@ -378,6 +378,7 @@ func (s *ClusterScope) SubnetSpecs() []azure.ResourceSpecGetter {
 			SecurityGroupName: subnet.SecurityGroup.Name,
 			Role:              subnet.Role,
 			NatGatewayName:    subnet.NatGateway.Name,
+			ServiceEndpoints:  subnet.ServiceEndpoints,
 		}
 		subnetSpecs = append(subnetSpecs, subnetSpec)
 	}
@@ -395,6 +396,7 @@ func (s *ClusterScope) SubnetSpecs() []azure.ResourceSpecGetter {
 			SecurityGroupName: azureBastionSubnet.SecurityGroup.Name,
 			RouteTableName:    azureBastionSubnet.RouteTable.Name,
 			Role:              azureBastionSubnet.Role,
+			ServiceEndpoints:  azureBastionSubnet.ServiceEndpoints,
 		})
 	}
 

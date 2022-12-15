@@ -133,6 +133,11 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithRoleAssignmentName()),
 			wantErr:         true,
 		},
+		{
+			name:            "azuremachinetemplate without RoleAssignmentName",
+			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithoutRoleAssignmentName()),
+			wantErr:         false,
+		},
 	}
 
 	for _, test := range tests {
@@ -332,7 +337,6 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 	for _, amt := range tests {
 		amt := amt
 		t.Run(amt.name, func(t *testing.T) {
-			t.Parallel()
 			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: pointer.Bool(true)}})
 			err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
 			if amt.wantErr {

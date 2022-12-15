@@ -30,7 +30,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2020-10-01/resources"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,36 +48,38 @@ import (
 
 // Test suite constants for e2e config variables
 const (
-	RedactLogScriptPath            = "REDACT_LOG_SCRIPT"
-	AzureLocation                  = "AZURE_LOCATION"
-	AzureResourceGroup             = "AZURE_RESOURCE_GROUP"
-	AzureVNetName                  = "AZURE_VNET_NAME"
-	AzureCustomVNetName            = "AZURE_CUSTOM_VNET_NAME"
-	AzureInternalLBIP              = "AZURE_INTERNAL_LB_IP"
-	AzureCPSubnetCidr              = "AZURE_CP_SUBNET_CIDR"
-	AzureVNetCidr                  = "AZURE_PRIVATE_VNET_CIDR"
-	AzureNodeSubnetCidr            = "AZURE_NODE_SUBNET_CIDR"
-	AzureBastionSubnetCidr         = "AZURE_BASTION_SUBNET_CIDR"
-	MultiTenancyIdentityName       = "MULTI_TENANCY_IDENTITY_NAME"
-	ClusterIdentityName            = "CLUSTER_IDENTITY_NAME"
-	ClusterIdentityNamespace       = "CLUSTER_IDENTITY_NAMESPACE"
-	ClusterIdentitySecretName      = "AZURE_CLUSTER_IDENTITY_SECRET_NAME"      //nolint:gosec // Not a secret itself, just its name
-	ClusterIdentitySecretNamespace = "AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE" //nolint:gosec // Not a secret itself, just its name
-	AzureClientSecret              = "AZURE_CLIENT_SECRET"                     //nolint:gosec // Not a secret itself, just its name
-	AzureClientID                  = "AZURE_CLIENT_ID"
-	AzureSubscriptionID            = "AZURE_SUBSCRIPTION_ID"
-	AzureUserIdentity              = "USER_IDENTITY"
-	AzureIdentityResourceGroup     = "CI_RG"
-	JobName                        = "JOB_NAME"
-	Timestamp                      = "TIMESTAMP"
-	AKSKubernetesVersion           = "AKS_KUBERNETES_VERSION"
-	SecurityScanFailThreshold      = "SECURITY_SCAN_FAIL_THRESHOLD"
-	SecurityScanContainer          = "SECURITY_SCAN_CONTAINER"
-	ManagedClustersResourceType    = "managedClusters"
-	capiImagePublisher             = "cncf-upstream"
-	capiOfferName                  = "capi"
-	capiWindowsOfferName           = "capi-windows"
-	aksClusterNameSuffix           = "aks"
+	AddonsPath                      = "ADDONS_PATH"
+	RedactLogScriptPath             = "REDACT_LOG_SCRIPT"
+	AzureLocation                   = "AZURE_LOCATION"
+	AzureResourceGroup              = "AZURE_RESOURCE_GROUP"
+	AzureVNetName                   = "AZURE_VNET_NAME"
+	AzureCustomVNetName             = "AZURE_CUSTOM_VNET_NAME"
+	AzureInternalLBIP               = "AZURE_INTERNAL_LB_IP"
+	AzureCPSubnetCidr               = "AZURE_CP_SUBNET_CIDR"
+	AzureVNetCidr                   = "AZURE_PRIVATE_VNET_CIDR"
+	AzureNodeSubnetCidr             = "AZURE_NODE_SUBNET_CIDR"
+	AzureBastionSubnetCidr          = "AZURE_BASTION_SUBNET_CIDR"
+	MultiTenancyIdentityName        = "MULTI_TENANCY_IDENTITY_NAME"
+	ClusterIdentityName             = "CLUSTER_IDENTITY_NAME"
+	ClusterIdentityNamespace        = "CLUSTER_IDENTITY_NAMESPACE"
+	ClusterIdentitySecretName       = "AZURE_CLUSTER_IDENTITY_SECRET_NAME"      //nolint:gosec // Not a secret itself, just its name
+	ClusterIdentitySecretNamespace  = "AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE" //nolint:gosec // Not a secret itself, just its name
+	AzureClientSecret               = "AZURE_CLIENT_SECRET"                     //nolint:gosec // Not a secret itself, just its name
+	AzureClientID                   = "AZURE_CLIENT_ID"
+	AzureSubscriptionID             = "AZURE_SUBSCRIPTION_ID"
+	AzureUserIdentity               = "USER_IDENTITY"
+	AzureIdentityResourceGroup      = "CI_RG"
+	JobName                         = "JOB_NAME"
+	Timestamp                       = "TIMESTAMP"
+	AKSKubernetesVersion            = "AKS_KUBERNETES_VERSION"
+	AKSKubernetesVersionUpgradeFrom = "AKS_KUBERNETES_VERSION_UPGRADE_FROM"
+	SecurityScanFailThreshold       = "SECURITY_SCAN_FAIL_THRESHOLD"
+	SecurityScanContainer           = "SECURITY_SCAN_CONTAINER"
+	ManagedClustersResourceType     = "managedClusters"
+	capiImagePublisher              = "cncf-upstream"
+	capiOfferName                   = "capi"
+	capiWindowsOfferName            = "capi-windows"
+	aksClusterNameSuffix            = "aks"
 )
 
 func Byf(format string, a ...interface{}) {
@@ -129,6 +131,7 @@ type cleanupInput struct {
 	Cluster                *clusterv1.Cluster
 	IntervalsGetter        func(spec, key string) []interface{}
 	SkipCleanup            bool
+	SkipLogCollection      bool
 	AdditionalCleanup      func()
 	SkipResourceGroupCheck bool
 }
@@ -141,7 +144,7 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
 
 	if input.Cluster == nil {
 		By("Unable to dump workload cluster logs as the cluster is nil")
-	} else {
+	} else if !input.SkipLogCollection {
 		Byf("Dumping logs from the %q workload cluster", input.Cluster.Name)
 		input.ClusterProxy.CollectWorkloadClusterLogs(ctx, input.Cluster.Namespace, input.Cluster.Name, filepath.Join(input.ArtifactFolder, "clusters", input.Cluster.Name))
 	}
@@ -249,8 +252,12 @@ func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCl
 	Eventually(func() error {
 		return getter.Get(ctx, key, kubeadmControlPlane)
 	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "Failed to get KubeadmControlPlane object %s/%s", cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+	_, hasWindows := cluster.Labels["cni-windows"]
 	if kubeadmControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager.ExtraArgs["cloud-provider"] == "external" {
-		InstallCloudProviderAzureHelmChart(ctx, input)
+		// There is a co-dependency between cloud-provider and CNI so we install both together if cloud-provider is external.
+		InstallCalicoAndCloudProviderAzureHelmChart(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
+	} else {
+		InstallCalicoHelmChart(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
 	}
 	controlPlane := discoveryAndWaitForControlPlaneInitialized(ctx, input, result)
 	InstallAzureDiskCSIDriverHelmChart(ctx, input)
