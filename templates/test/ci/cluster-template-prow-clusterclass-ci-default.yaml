@@ -309,19 +309,19 @@ spec:
     required: false
     schema:
       openAPIV3Schema:
-        default: Standard_D2s_v3
+        default: Standard_B2s
         type: string
   - name: workerMachineType
     required: false
     schema:
       openAPIV3Schema:
-        default: Standard_D2s_v3
+        default: Standard_B2s
         type: string
   - name: workerMachineTypeWin
     required: false
     schema:
       openAPIV3Schema:
-        default: Standard_D2s_v3
+        default: Standard_B2s
         type: string
   - name: sshPublicKey
     required: true
@@ -464,8 +464,10 @@ spec:
       location: replace_me
       networkSpec:
         subnets:
-        - role: control-plane
-        - natGateway:
+        - name: control-plane-subnet
+          role: control-plane
+        - name: node-subnet
+          natGateway:
             name: node-natgateway
           role: node
 ---

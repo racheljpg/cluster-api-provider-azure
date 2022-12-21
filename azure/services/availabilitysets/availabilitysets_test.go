@@ -61,9 +61,9 @@ var (
 		SKU:            nil,
 		AdditionalTags: map[string]string{},
 	}
-	internalError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal Server Error")
+	internalError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
 	parameterError = errors.Errorf("some error with parameters")
-	notFoundError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not Found")
+	notFoundError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not Found")
 	fakeSetWithVMs = compute.AvailabilitySet{
 		AvailabilitySetProperties: &compute.AvailabilitySetProperties{
 			VirtualMachines: &[]compute.SubResource{
@@ -84,7 +84,7 @@ func TestReconcileAvailabilitySets(t *testing.T) {
 			expectedError: "",
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpec)
-				r.CreateResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(nil, nil)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.AvailabilitySetReadyCondition, serviceName, nil)
 			},
 		},
@@ -100,7 +100,7 @@ func TestReconcileAvailabilitySets(t *testing.T) {
 			expectedError: "some error with parameters",
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpecMissing)
-				r.CreateResource(gomockinternal.AContext(), &fakeSetSpecMissing, serviceName).Return(nil, parameterError)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSetSpecMissing, serviceName).Return(nil, parameterError)
 				s.UpdatePutStatus(infrav1.AvailabilitySetReadyCondition, serviceName, parameterError)
 			},
 		},
@@ -109,7 +109,7 @@ func TestReconcileAvailabilitySets(t *testing.T) {
 			expectedError: "#: Internal Server Error: StatusCode=500",
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpec)
-				r.CreateResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(nil, internalError)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(nil, internalError)
 				s.UpdatePutStatus(infrav1.AvailabilitySetReadyCondition, serviceName, internalError)
 			},
 		},

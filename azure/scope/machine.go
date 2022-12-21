@@ -164,6 +164,7 @@ func (m *MachineScope) VMSpec() azure.ResourceSpecGetter {
 		UserAssignedIdentities: m.AzureMachine.Spec.UserAssignedIdentities,
 		SpotVMOptions:          m.AzureMachine.Spec.SpotVMOptions,
 		SecurityProfile:        m.AzureMachine.Spec.SecurityProfile,
+		DiagnosticsProfile:     m.AzureMachine.Spec.Diagnostics,
 		AdditionalTags:         m.AdditionalTags(),
 		AdditionalCapabilities: m.AzureMachine.Spec.AdditionalCapabilities,
 		ProviderID:             m.ProviderID(),
@@ -528,6 +529,11 @@ func (m *MachineScope) SetFailureMessage(v error) {
 // SetFailureReason sets the AzureMachine status failure reason.
 func (m *MachineScope) SetFailureReason(v capierrors.MachineStatusError) {
 	m.AzureMachine.Status.FailureReason = &v
+}
+
+// SetConditionFalse sets the specified AzureMachine condition to false.
+func (m *MachineScope) SetConditionFalse(conditionType clusterv1.ConditionType, reason string, severity clusterv1.ConditionSeverity, message string) {
+	conditions.MarkFalse(m.AzureMachine, conditionType, reason, severity, message)
 }
 
 // SetBootstrapConditions sets the AzureMachine BootstrapSucceeded condition based on the extension provisioning states.

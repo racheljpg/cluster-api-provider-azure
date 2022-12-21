@@ -107,6 +107,11 @@ type AzureMachineSpec struct {
 	// +optional
 	AcceleratedNetworking *bool `json:"acceleratedNetworking,omitempty"`
 
+	// Diagnostics specifies the diagnostics settings for a virtual machine.
+	// If not specified then Boot diagnostics (Managed) will be enabled.
+	// +optional
+	Diagnostics *Diagnostics `json:"diagnostics,omitempty"`
+
 	// SpotVMOptions allows the ability to specify the Machine should use a Spot VM
 	// +optional
 	SpotVMOptions *SpotVMOptions `json:"spotVMOptions,omitempty"`
@@ -133,6 +138,10 @@ type SpotVMOptions struct {
 	// MaxPrice defines the maximum price the user is willing to pay for Spot VM instances
 	// +optional
 	MaxPrice *resource.Quantity `json:"maxPrice,omitempty"`
+
+	// EvictionPolicy defines the behavior of the virtual machine when it is evicted. It can be either Delete or Deallocate.
+	// +optional
+	EvictionPolicy *SpotEvictionPolicy `json:"evictionPolicy,omitempty"`
 }
 
 // AzureMachineStatus defines the observed state of AzureMachine.

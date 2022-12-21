@@ -196,18 +196,8 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.ManagedControlPlaneSubnet)(nil), (*ManagedControlPlaneSubnet)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(a.(*v1beta1.ManagedControlPlaneSubnet), b.(*ManagedControlPlaneSubnet), scope)
-	}); err != nil {
-		return err
-	}
 	if err := s.AddGeneratedConversionFunc((*ManagedControlPlaneVirtualNetwork)(nil), (*v1beta1.ManagedControlPlaneVirtualNetwork)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_ManagedControlPlaneVirtualNetwork_To_v1beta1_ManagedControlPlaneVirtualNetwork(a.(*ManagedControlPlaneVirtualNetwork), b.(*v1beta1.ManagedControlPlaneVirtualNetwork), scope)
-	}); err != nil {
-		return err
-	}
-	if err := s.AddGeneratedConversionFunc((*v1beta1.ManagedControlPlaneVirtualNetwork)(nil), (*ManagedControlPlaneVirtualNetwork)(nil), func(a, b interface{}, scope conversion.Scope) error {
-		return Convert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedControlPlaneVirtualNetwork(a.(*v1beta1.ManagedControlPlaneVirtualNetwork), b.(*ManagedControlPlaneVirtualNetwork), scope)
 	}); err != nil {
 		return err
 	}
@@ -228,6 +218,11 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}
 	if err := s.AddConversionFunc((*clusterapiproviderazureapiv1alpha3.OSDisk)(nil), (*clusterapiproviderazureapiv1beta1.OSDisk)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1alpha3_OSDisk_To_v1beta1_OSDisk(a.(*clusterapiproviderazureapiv1alpha3.OSDisk), b.(*clusterapiproviderazureapiv1beta1.OSDisk), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*clusterapiproviderazureapiv1alpha3.SpotVMOptions)(nil), (*clusterapiproviderazureapiv1beta1.SpotVMOptions)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1alpha3_SpotVMOptions_To_v1beta1_SpotVMOptions(a.(*clusterapiproviderazureapiv1alpha3.SpotVMOptions), b.(*clusterapiproviderazureapiv1beta1.SpotVMOptions), scope)
 	}); err != nil {
 		return err
 	}
@@ -276,8 +271,23 @@ func RegisterConversions(s *runtime.Scheme) error {
 	}); err != nil {
 		return err
 	}
+	if err := s.AddConversionFunc((*v1beta1.ManagedControlPlaneSubnet)(nil), (*ManagedControlPlaneSubnet)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(a.(*v1beta1.ManagedControlPlaneSubnet), b.(*ManagedControlPlaneSubnet), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*v1beta1.ManagedControlPlaneVirtualNetwork)(nil), (*ManagedControlPlaneVirtualNetwork)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedControlPlaneVirtualNetwork(a.(*v1beta1.ManagedControlPlaneVirtualNetwork), b.(*ManagedControlPlaneVirtualNetwork), scope)
+	}); err != nil {
+		return err
+	}
 	if err := s.AddConversionFunc((*clusterapiproviderazureapiv1beta1.OSDisk)(nil), (*clusterapiproviderazureapiv1alpha3.OSDisk)(nil), func(a, b interface{}, scope conversion.Scope) error {
 		return Convert_v1beta1_OSDisk_To_v1alpha3_OSDisk(a.(*clusterapiproviderazureapiv1beta1.OSDisk), b.(*clusterapiproviderazureapiv1alpha3.OSDisk), scope)
+	}); err != nil {
+		return err
+	}
+	if err := s.AddConversionFunc((*clusterapiproviderazureapiv1beta1.SpotVMOptions)(nil), (*clusterapiproviderazureapiv1alpha3.SpotVMOptions)(nil), func(a, b interface{}, scope conversion.Scope) error {
+		return Convert_v1beta1_SpotVMOptions_To_v1alpha3_SpotVMOptions(a.(*clusterapiproviderazureapiv1beta1.SpotVMOptions), b.(*clusterapiproviderazureapiv1alpha3.SpotVMOptions), scope)
 	}); err != nil {
 		return err
 	}
@@ -429,7 +439,15 @@ func autoConvert_v1alpha3_AzureMachinePoolMachineTemplate_To_v1beta1_AzureMachin
 	out.AcceleratedNetworking = (*bool)(unsafe.Pointer(in.AcceleratedNetworking))
 	out.TerminateNotificationTimeout = (*int)(unsafe.Pointer(in.TerminateNotificationTimeout))
 	out.SecurityProfile = (*clusterapiproviderazureapiv1beta1.SecurityProfile)(unsafe.Pointer(in.SecurityProfile))
-	out.SpotVMOptions = (*clusterapiproviderazureapiv1beta1.SpotVMOptions)(unsafe.Pointer(in.SpotVMOptions))
+	if in.SpotVMOptions != nil {
+		in, out := &in.SpotVMOptions, &out.SpotVMOptions
+		*out = new(clusterapiproviderazureapiv1beta1.SpotVMOptions)
+		if err := Convert_v1alpha3_SpotVMOptions_To_v1beta1_SpotVMOptions(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.SpotVMOptions = nil
+	}
 	return nil
 }
 
@@ -455,9 +473,18 @@ func autoConvert_v1beta1_AzureMachinePoolMachineTemplate_To_v1alpha3_AzureMachin
 	out.DataDisks = *(*[]clusterapiproviderazureapiv1alpha3.DataDisk)(unsafe.Pointer(&in.DataDisks))
 	out.SSHPublicKey = in.SSHPublicKey
 	out.AcceleratedNetworking = (*bool)(unsafe.Pointer(in.AcceleratedNetworking))
+	// WARNING: in.Diagnostics requires manual conversion: does not exist in peer-type
 	out.TerminateNotificationTimeout = (*int)(unsafe.Pointer(in.TerminateNotificationTimeout))
 	out.SecurityProfile = (*clusterapiproviderazureapiv1alpha3.SecurityProfile)(unsafe.Pointer(in.SecurityProfile))
-	out.SpotVMOptions = (*clusterapiproviderazureapiv1alpha3.SpotVMOptions)(unsafe.Pointer(in.SpotVMOptions))
+	if in.SpotVMOptions != nil {
+		in, out := &in.SpotVMOptions, &out.SpotVMOptions
+		*out = new(clusterapiproviderazureapiv1alpha3.SpotVMOptions)
+		if err := Convert_v1beta1_SpotVMOptions_To_v1alpha3_SpotVMOptions(*in, *out, s); err != nil {
+			return err
+		}
+	} else {
+		out.SpotVMOptions = nil
+	}
 	// WARNING: in.SubnetName requires manual conversion: does not exist in peer-type
 	// WARNING: in.VMExtensions requires manual conversion: does not exist in peer-type
 	return nil
@@ -878,6 +905,7 @@ func Convert_v1alpha3_AzureManagedMachinePoolSpec_To_v1beta1_AzureManagedMachine
 }
 
 func autoConvert_v1beta1_AzureManagedMachinePoolSpec_To_v1alpha3_AzureManagedMachinePoolSpec(in *v1beta1.AzureManagedMachinePoolSpec, out *AzureManagedMachinePoolSpec, s conversion.Scope) error {
+	// WARNING: in.AdditionalTags requires manual conversion: does not exist in peer-type
 	// WARNING: in.Name requires manual conversion: does not exist in peer-type
 	out.Mode = in.Mode
 	out.SKU = in.SKU
@@ -892,6 +920,9 @@ func autoConvert_v1beta1_AzureManagedMachinePoolSpec_To_v1alpha3_AzureManagedMac
 	// WARNING: in.EnableUltraSSD requires manual conversion: does not exist in peer-type
 	// WARNING: in.OSType requires manual conversion: does not exist in peer-type
 	// WARNING: in.EnableNodePublicIP requires manual conversion: does not exist in peer-type
+	// WARNING: in.NodePublicIPPrefixID requires manual conversion: does not exist in peer-type
+	// WARNING: in.ScaleSetPriority requires manual conversion: does not exist in peer-type
+	// WARNING: in.KubeletConfig requires manual conversion: does not exist in peer-type
 	return nil
 }
 
@@ -932,12 +963,8 @@ func Convert_v1alpha3_ManagedControlPlaneSubnet_To_v1beta1_ManagedControlPlaneSu
 func autoConvert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(in *v1beta1.ManagedControlPlaneSubnet, out *ManagedControlPlaneSubnet, s conversion.Scope) error {
 	out.Name = in.Name
 	out.CIDRBlock = in.CIDRBlock
+	// WARNING: in.ServiceEndpoints requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet is an autogenerated conversion function.
-func Convert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(in *v1beta1.ManagedControlPlaneSubnet, out *ManagedControlPlaneSubnet, s conversion.Scope) error {
-	return autoConvert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(in, out, s)
 }
 
 func autoConvert_v1alpha3_ManagedControlPlaneVirtualNetwork_To_v1beta1_ManagedControlPlaneVirtualNetwork(in *ManagedControlPlaneVirtualNetwork, out *v1beta1.ManagedControlPlaneVirtualNetwork, s conversion.Scope) error {
@@ -960,10 +987,6 @@ func autoConvert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedCo
 	if err := Convert_v1beta1_ManagedControlPlaneSubnet_To_v1alpha3_ManagedControlPlaneSubnet(&in.Subnet, &out.Subnet, s); err != nil {
 		return err
 	}
+	// WARNING: in.ResourceGroup requires manual conversion: does not exist in peer-type
 	return nil
-}
-
-// Convert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedControlPlaneVirtualNetwork is an autogenerated conversion function.
-func Convert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedControlPlaneVirtualNetwork(in *v1beta1.ManagedControlPlaneVirtualNetwork, out *ManagedControlPlaneVirtualNetwork, s conversion.Scope) error {
-	return autoConvert_v1beta1_ManagedControlPlaneVirtualNetwork_To_v1alpha3_ManagedControlPlaneVirtualNetwork(in, out, s)
 }

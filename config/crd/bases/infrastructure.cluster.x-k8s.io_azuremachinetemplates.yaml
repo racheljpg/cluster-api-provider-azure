@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.8.0
+    controller-gen.kubebuilder.io/version: v0.9.2
   creationTimestamp: null
   name: azuremachinetemplates.infrastructure.cluster.x-k8s.io
 spec:
@@ -895,6 +895,54 @@ spec:
                           - nameSuffix
                           type: object
                         type: array
+                      diagnostics:
+                        description: Diagnostics specifies the diagnostics settings
+                          for a virtual machine. If not specified then Boot diagnostics
+                          (Managed) will be enabled.
+                        properties:
+                          boot:
+                            description: Boot configures the boot diagnostics settings
+                              for the virtual machine. This allows to configure capturing
+                              serial output from the virtual machine on boot. This
+                              is useful for debugging software based launch issues.
+                              If not specified then Boot diagnostics (Managed) will
+                              be enabled.
+                            properties:
+                              storageAccountType:
+                                description: StorageAccountType determines if the
+                                  storage account for storing the diagnostics data
+                                  should be disabled (Disabled), provisioned by Azure
+                                  (Managed) or by the user (UserManaged).
+                                enum:
+                                - Managed
+                                - UserManaged
+                                - Disabled
+                                type: string
+                              userManaged:
+                                description: UserManaged provides a reference to the
+                                  user-managed storage account.
+                                properties:
+                                  storageAccountURI:
+                                    description: 'StorageAccountURI is the URI of
+                                      the user-managed storage account. The URI typically
+                                      will be `https://<mystorageaccountname>.blob.core.windows.net/`
+                                      but may differ if you are using Azure DNS zone
+                                      endpoints. You can find the correct endpoint
+                                      by looking for the Blob Primary Endpoint in
+                                      the endpoints tab in the Azure console or with
+                                      the CLI by issuing `az storage account list
+                                      --query=''[].{name: name, "resource group":
+                                      resourceGroup, "blob endpoint": primaryEndpoints.blob}''`.'
+                                    maxLength: 1024
+                                    pattern: ^https://
+                                    type: string
+                                required:
+                                - storageAccountURI
+                                type: object
+                            required:
+                            - storageAccountType
+                            type: object
+                        type: object
                       dnsServers:
                         description: DNSServers adds a list of DNS Server IP addresses
                           to the VM NICs.
@@ -1185,6 +1233,14 @@ spec:
                         description: SpotVMOptions allows the ability to specify the
                           Machine should use a Spot VM
                         properties:
+                          evictionPolicy:
+                            description: EvictionPolicy defines the behavior of the
+                              virtual machine when it is evicted. It can be either
+                              Delete or Deallocate.
+                            enum:
+                            - Deallocate
+                            - Delete
+                            type: string
                           maxPrice:
                             anyOf:
                             - type: integer
@@ -1271,9 +1327,3 @@ spec:
         type: object
     served: true
     storage: true
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []

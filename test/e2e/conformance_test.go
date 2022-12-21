@@ -28,7 +28,7 @@ import (
 	"strings"
 
 	"github.com/blang/semver"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -100,7 +100,7 @@ var _ = Describe("Conformance Tests", func() {
 		var err error
 
 		kubernetesVersion := e2eConfig.GetVariable(capi_e2e.KubernetesVersion)
-		flavor := clusterctl.DefaultFlavor
+		flavor := e2eConfig.GetVariable("CONFORMANCE_FLAVOR")
 		if isWindows(kubetestConfigFilePath) {
 			flavor = getWindowsFlavor()
 		}
@@ -177,6 +177,9 @@ var _ = Describe("Conformance Tests", func() {
 				WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
 				WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
 				WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+				},
 			}, result)
 		})
 
@@ -243,14 +246,15 @@ var _ = Describe("Conformance Tests", func() {
 		CheckTestBeforeCleanup()
 
 		cleanInput := cleanupInput{
-			SpecName:        specName,
-			Cluster:         result.Cluster,
-			ClusterProxy:    bootstrapClusterProxy,
-			Namespace:       namespace,
-			CancelWatches:   cancelWatches,
-			IntervalsGetter: e2eConfig.GetIntervals,
-			SkipCleanup:     skipCleanup,
-			ArtifactFolder:  artifactFolder,
+			SpecName:          specName,
+			Cluster:           result.Cluster,
+			ClusterProxy:      bootstrapClusterProxy,
+			Namespace:         namespace,
+			CancelWatches:     cancelWatches,
+			IntervalsGetter:   e2eConfig.GetIntervals,
+			SkipCleanup:       skipCleanup,
+			SkipLogCollection: skipLogCollection,
+			ArtifactFolder:    artifactFolder,
 		}
 		// Dumps all the resources in the spec namespace, then cleanups the cluster object and the spec namespace itself.
 		dumpSpecResourcesAndCleanup(ctx, cleanInput)
@@ -277,5 +281,8 @@ func isWindows(kubetestConfigFilePath string) bool {
 }
 
 func getGinkgoV2ConfigFilePath(kubetestConfigFilePath string) string {
-	return strings.Replace(kubetestConfigFilePath, ".yaml", "-ginkgo-v2.yaml", 1)
+	if !strings.HasSuffix(kubetestConfigFilePath, "-ginkgo-v2.yaml") {
+		return strings.Replace(kubetestConfigFilePath, ".yaml", "-ginkgo-v2.yaml", 1)
+	}
+	return kubetestConfigFilePath
 }

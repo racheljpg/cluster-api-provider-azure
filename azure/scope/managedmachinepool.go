@@ -165,17 +165,20 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 		OSType:        managedMachinePool.Spec.OSType,
 		VnetSubnetID: azure.SubnetID(
 			managedControlPlane.Spec.SubscriptionID,
-			managedControlPlane.Spec.ResourceGroupName,
+			managedControlPlane.Spec.VirtualNetwork.ResourceGroup,
 			managedControlPlane.Spec.VirtualNetwork.Name,
 			managedControlPlane.Spec.VirtualNetwork.Subnet.Name,
 		),
-		Mode:               managedMachinePool.Spec.Mode,
-		MaxPods:            managedMachinePool.Spec.MaxPods,
-		AvailabilityZones:  managedMachinePool.Spec.AvailabilityZones,
-		OsDiskType:         managedMachinePool.Spec.OsDiskType,
-		EnableUltraSSD:     managedMachinePool.Spec.EnableUltraSSD,
-		Headers:            maps.FilterByKeyPrefix(agentPoolAnnotations, azure.CustomHeaderPrefix),
-		EnableNodePublicIP: managedMachinePool.Spec.EnableNodePublicIP,
+		Mode:                 managedMachinePool.Spec.Mode,
+		MaxPods:              managedMachinePool.Spec.MaxPods,
+		AvailabilityZones:    managedMachinePool.Spec.AvailabilityZones,
+		OsDiskType:           managedMachinePool.Spec.OsDiskType,
+		EnableUltraSSD:       managedMachinePool.Spec.EnableUltraSSD,
+		Headers:              maps.FilterByKeyPrefix(agentPoolAnnotations, azure.CustomHeaderPrefix),
+		EnableNodePublicIP:   managedMachinePool.Spec.EnableNodePublicIP,
+		NodePublicIPPrefixID: managedMachinePool.Spec.NodePublicIPPrefixID,
+		ScaleSetPriority:     managedMachinePool.Spec.ScaleSetPriority,
+		AdditionalTags:       managedMachinePool.Spec.AdditionalTags,
 	}
 
 	if managedMachinePool.Spec.OSDiskSizeGB != nil {
@@ -200,6 +203,24 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 		agentPoolSpec.NodeLabels = make(map[string]*string, len(managedMachinePool.Spec.NodeLabels))
 		for k, v := range managedMachinePool.Spec.NodeLabels {
 			agentPoolSpec.NodeLabels[k] = to.StringPtr(v)
+		}
+	}
+
+	if managedMachinePool.Spec.KubeletConfig != nil {
+		agentPoolSpec.KubeletConfig = &agentpools.KubeletConfig{
+			CPUManagerPolicy:      (*string)(managedMachinePool.Spec.KubeletConfig.CPUManagerPolicy),
+			CPUCfsQuota:           managedMachinePool.Spec.KubeletConfig.CPUCfsQuota,
+			CPUCfsQuotaPeriod:     managedMachinePool.Spec.KubeletConfig.CPUCfsQuotaPeriod,
+			ImageGcHighThreshold:  managedMachinePool.Spec.KubeletConfig.ImageGcHighThreshold,
+			ImageGcLowThreshold:   managedMachinePool.Spec.KubeletConfig.ImageGcLowThreshold,
+			TopologyManagerPolicy: (*string)(managedMachinePool.Spec.KubeletConfig.TopologyManagerPolicy),
+			FailSwapOn:            managedMachinePool.Spec.KubeletConfig.FailSwapOn,
+			ContainerLogMaxSizeMB: managedMachinePool.Spec.KubeletConfig.ContainerLogMaxSizeMB,
+			ContainerLogMaxFiles:  managedMachinePool.Spec.KubeletConfig.ContainerLogMaxFiles,
+			PodMaxPids:            managedMachinePool.Spec.KubeletConfig.PodMaxPids,
+		}
+		if len(managedMachinePool.Spec.KubeletConfig.AllowedUnsafeSysctls) > 0 {
+			agentPoolSpec.KubeletConfig.AllowedUnsafeSysctls = &managedMachinePool.Spec.KubeletConfig.AllowedUnsafeSysctls
 		}
 	}
 

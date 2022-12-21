@@ -36,6 +36,8 @@ import (
 
 var (
 	validSSHPublicKey = generateSSHPublicKey(true)
+	zero              = intstr.FromInt(0)
+	one               = intstr.FromInt(1)
 )
 
 func TestAzureMachinePool_ValidateCreate(t *testing.T) {
@@ -45,16 +47,16 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 
 	g := NewWithT(t)
 
-	var (
-		zero = intstr.FromInt(0)
-		one  = intstr.FromInt(1)
-	)
-
 	tests := []struct {
 		name    string
 		amp     *AzureMachinePool
 		wantErr bool
 	}{
+		{
+			name:    "valid",
+			amp:     getKnownValidAzureMachinePool(),
+			wantErr: false,
+		},
 		{
 			name:    "azuremachinepool with marketplace image - full",
 			amp:     createMachinePoolWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0", to.IntPtr(10)),
@@ -118,6 +120,31 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		{
 			name:    "azuremachinepool with user assigned identity, but without any provider ids",
 			amp:     createMachinePoolWithUserAssignedIdentity([]string{}),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachinepool with managed diagnostics profile",
+			amp:     createMachinePoolWithDiagnostics(infrav1.ManagedDiagnosticsStorage, nil),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachinepool with disabled diagnostics profile",
+			amp:     createMachinePoolWithDiagnostics(infrav1.ManagedDiagnosticsStorage, nil),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachinepool with user managed diagnostics profile and defined user managed storage account",
+			amp:     createMachinePoolWithDiagnostics(infrav1.UserManagedDiagnosticsStorage, &infrav1.UserManagedBootDiagnostics{StorageAccountURI: "https://fakeurl"}),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachinepool with empty diagnostics profile",
+			amp:     createMachinePoolWithDiagnostics("", nil),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachinepool with user managed diagnostics profile, but empty user managed storage account",
+			amp:     createMachinePoolWithDiagnostics(infrav1.UserManagedDiagnosticsStorage, nil),
 			wantErr: true,
 		},
 		{
@@ -345,6 +372,30 @@ func createMachinePoolWithSystemAssignedIdentity(role string) *AzureMachinePool 
 	}
 }
 
+func createMachinePoolWithDiagnostics(diagnosticsType infrav1.BootDiagnosticsStorageAccountType, userManaged *infrav1.UserManagedBootDiagnostics) *AzureMachinePool {
+	var diagnostics *infrav1.Diagnostics
+
+	if diagnosticsType != "" {
+		diagnostics = &infrav1.Diagnostics{
+			Boot: &infrav1.BootDiagnostics{
+				StorageAccountType: diagnosticsType,
+			},
+		}
+	}
+
+	if userManaged != nil {
+		diagnostics.Boot.UserManaged = userManaged
+	}
+
+	return &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Template: AzureMachinePoolMachineTemplate{
+				Diagnostics: diagnostics,
+			},
+		},
+	}
+}
+
 func createMachinePoolWithUserAssignedIdentity(providerIds []string) *AzureMachinePool {
 	userAssignedIdentities := make([]infrav1.UserAssignedIdentity, len(providerIds))
 
@@ -375,6 +426,65 @@ func createMachinePoolWithStrategy(strategy AzureMachinePoolDeploymentStrategy) 
 	return &AzureMachinePool{
 		Spec: AzureMachinePoolSpec{
 			Strategy: strategy,
+		},
+	}
+}
+
+func TestAzureMachinePool_ValidateCreateFailure(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name      string
+		amp       *AzureMachinePool
+		deferFunc func()
+	}{
+		{
+			name:      "feature gate explicitly disabled",
+			amp:       getKnownValidAzureMachinePool(),
+			deferFunc: utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
+		},
+		{
+			name:      "feature gate implicitly disabled",
+			amp:       getKnownValidAzureMachinePool(),
+			deferFunc: func() {},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			defer tc.deferFunc()
+			err := tc.amp.ValidateCreate()
+			g.Expect(err).To(HaveOccurred())
+		})
+	}
+}
+
+func getKnownValidAzureMachinePool() *AzureMachinePool {
+	image := infrav1.Image{
+		Marketplace: &infrav1.AzureMarketplaceImage{
+			ImagePlan: infrav1.ImagePlan{
+				Publisher: "PUB1234",
+				Offer:     "OFFER1234",
+				SKU:       "SKU1234",
+			},
+			Version: "1.0.0",
+		},
+	}
+	return &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Template: AzureMachinePoolMachineTemplate{
+				Image:                        &image,
+				SSHPublicKey:                 validSSHPublicKey,
+				TerminateNotificationTimeout: to.IntPtr(10),
+			},
+			Identity:           infrav1.VMIdentitySystemAssigned,
+			RoleAssignmentName: string(uuid.NewUUID()),
+			Strategy: AzureMachinePoolDeploymentStrategy{
+				Type: RollingUpdateAzureMachinePoolDeploymentStrategyType,
+				RollingUpdate: &MachineRollingUpdateDeployment{
+					MaxSurge:       &zero,
+					MaxUnavailable: &one,
+				},
+			},
 		},
 	}
 }

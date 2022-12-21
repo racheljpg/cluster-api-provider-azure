@@ -32,7 +32,7 @@ spec:
         storageAccountType: Premium_LRS
       osType: Linux
     sshPublicKey: ${YOUR_SSH_PUB_KEY}
-    vmSize: Standard_D2s_v3
+    vmSize: Standard_B2s
     spotVMOptions: {}
 ```
 
@@ -46,6 +46,18 @@ spec:
   template:
     spotVMOptions:
       maxPrice: 0.04 # Price in USD per hour (up to 5 decimal places)
+```
+
+In addition, you are able to explicitly set the eviction policy for the Spot VM.
+The default policy is `Deallocate` which will deallocate the VM when it is
+evicted. You can also set the policy to `Delete` which will delete the VM when
+it is evicted.
+
+```yaml
+spec:
+  template:
+    spotVMOptions:
+      evictionPolicy: Delete # or Deallocate
 ```
 
 The experimental `MachinePool` also supports using spot instances. To enable a `MachinePool` to be backed by spot instances, add `spotVMOptions` to your `AzureMachinePool` spec:
@@ -64,6 +76,6 @@ spec:
         storageAccountType: Premium_LRS
       osType: Linux
     sshPublicKey: ${YOUR_SSH_PUB_KEY}
-    vmSize: Standard_D2s_v3
+    vmSize: Standard_B2s
     spotVMOptions: {}
 ```

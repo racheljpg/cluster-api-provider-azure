@@ -41,6 +41,7 @@ const (
 	defaultSubscriptionID = "123"
 	defaultResourceGroup  = "my-rg"
 	defaultVMSSName       = "my-vmss"
+	vmSizeEPH             = "VM_SIZE_EPH"
 )
 
 func init() {
@@ -62,7 +63,7 @@ func TestGetExistingVMSS(t *testing.T) {
 			expectedError: "failed to get existing vmss: #: Not found: StatusCode=404",
 			expect: func(s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
 				s.ResourceGroup().AnyTimes().Return("my-rg")
-				m.Get(gomockinternal.AContext(), "my-rg", "my-vmss").Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+				m.Get(gomockinternal.AContext(), "my-rg", "my-vmss").Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 			},
 		},
 		{
@@ -132,7 +133,7 @@ func TestGetExistingVMSS(t *testing.T) {
 						ProvisioningState:    to.StringPtr("Succeeded"),
 					},
 				}, nil)
-				m.ListInstances(gomockinternal.AContext(), "my-rg", "my-vmss").Return([]compute.VirtualMachineScaleSetVM{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+				m.ListInstances(gomockinternal.AContext(), "my-rg", "my-vmss").Return([]compute.VirtualMachineScaleSetVM{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 			},
 		},
 	}
@@ -276,33 +277,49 @@ func TestReconcileVMSS(t *testing.T) {
 				vmss := newDefaultVMSS("VM_SIZE")
 				vmss.VirtualMachineScaleSetProperties.AdditionalCapabilities = &compute.AdditionalCapabilities{UltraSSDEnabled: pointer.Bool(true)}
 				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.Priority = compute.VirtualMachinePriorityTypesSpot
-				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.EvictionPolicy = compute.VirtualMachineEvictionPolicyTypesDeallocate
 				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
 					Return(putFuture, nil)
 				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE"), putFuture)
 			},
 		},
 		{
-			name:          "should start creating a vmss with spot vm and delete evictionPolicy",
+			name:          "should start creating a vmss with spot vm and ephemeral disk",
 			expectedError: "failed to get VMSS my-vmss after create or update: failed to get result from future: operation type PUT on Azure resource my-rg/my-vmss is not done",
 			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
 				spec := newDefaultVMSSSpec()
-				spec.Size = "VM_SIZE_EPH"
+				spec.Size = vmSizeEPH
 				spec.SpotVMOptions = &infrav1.SpotVMOptions{}
 				spec.OSDisk.DiffDiskSettings = &infrav1.DiffDiskSettings{
 					Option: string(compute.DiffDiskOptionsLocal),
 				}
 				s.ScaleSetSpec().Return(spec).AnyTimes()
 				setupDefaultVMSSStartCreatingExpectations(s, m)
-				vmss := newDefaultVMSS("VM_SIZE_EPH")
+				vmss := newDefaultVMSS(vmSizeEPH)
 				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.StorageProfile.OsDisk.DiffDiskSettings = &compute.DiffDiskSettings{
 					Option: compute.DiffDiskOptionsLocal,
 				}
 				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.Priority = compute.VirtualMachinePriorityTypesSpot
+				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
+					Return(putFuture, nil)
+				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS(vmSizeEPH), putFuture)
+			},
+		},
+		{
+			name:          "should start creating a vmss with spot vm and a defined delete evictionPolicy",
+			expectedError: "failed to get VMSS my-vmss after create or update: failed to get result from future: operation type PUT on Azure resource my-rg/my-vmss is not done",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				spec := newDefaultVMSSSpec()
+				spec.Size = vmSizeEPH
+				deletePolicy := infrav1.SpotEvictionPolicyDelete
+				spec.SpotVMOptions = &infrav1.SpotVMOptions{EvictionPolicy: &deletePolicy}
+				s.ScaleSetSpec().Return(spec).AnyTimes()
+				setupDefaultVMSSStartCreatingExpectations(s, m)
+				vmss := newDefaultVMSS(vmSizeEPH)
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.Priority = compute.VirtualMachinePriorityTypesSpot
 				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.EvictionPolicy = compute.VirtualMachineEvictionPolicyTypesDelete
 				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
 					Return(putFuture, nil)
-				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE_EPH"), putFuture)
+				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS(vmSizeEPH), putFuture)
 			},
 		},
 		{
@@ -330,7 +347,6 @@ func TestReconcileVMSS(t *testing.T) {
 					MaxPrice: to.Float64Ptr(0.001),
 				}
 				vmss.VirtualMachineScaleSetProperties.AdditionalCapabilities = &compute.AdditionalCapabilities{UltraSSDEnabled: pointer.Bool(true)}
-				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.EvictionPolicy = compute.VirtualMachineEvictionPolicyTypesDeallocate
 				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomockinternal.DiffEq(vmss)).
 					Return(putFuture, nil)
 				setupCreatingSucceededExpectations(s, m, newDefaultExistingVMSS("VM_SIZE"), putFuture)
@@ -543,9 +559,9 @@ func TestReconcileVMSS(t *testing.T) {
 				s.ScaleSetSpec().Return(spec).AnyTimes()
 				setupDefaultVMSSStartCreatingExpectations(s, m)
 				m.CreateOrUpdateAsync(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName, gomock.AssignableToTypeOf(compute.VirtualMachineScaleSet{})).
-					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal error"))
+					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal error"))
 				m.Get(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName).
-					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 			},
 		},
 		{
@@ -607,6 +623,108 @@ func TestReconcileVMSS(t *testing.T) {
 				s.Location().AnyTimes().Return("test-location")
 			},
 		},
+		{
+			name:          "fail to create a vm with diagnostics set to User Managed but empty StorageAccountURI",
+			expectedError: "reconcile error that cannot be recovered occurred: userManaged must be specified when storageAccountType is 'UserManaged'. Object will not be requeued",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				s.ScaleSetSpec().Return(azure.ScaleSetSpec{
+					Name:       defaultVMSSName,
+					Size:       "VM_SIZE",
+					Capacity:   2,
+					SSHKeyData: "ZmFrZXNzaGtleQo=",
+					DiagnosticsProfile: &infrav1.Diagnostics{
+						Boot: &infrav1.BootDiagnostics{
+							StorageAccountType: infrav1.UserManagedDiagnosticsStorage,
+							UserManaged:        nil,
+						},
+					},
+				})
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
+		{
+			name:          "successfully create a vm with diagnostics set to User Managed and StorageAccountURI set",
+			expectedError: "",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				storageURI := "https://fakeurl"
+
+				spec := newDefaultVMSSSpec()
+				spec.DiagnosticsProfile = &infrav1.Diagnostics{
+					Boot: &infrav1.BootDiagnostics{
+						StorageAccountType: infrav1.UserManagedDiagnosticsStorage,
+						UserManaged: &infrav1.UserManagedBootDiagnostics{
+							StorageAccountURI: storageURI,
+						},
+					},
+				}
+				s.ScaleSetSpec().Return(spec).AnyTimes()
+
+				vmss := newDefaultVMSS("VM_SIZE")
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.DiagnosticsProfile = &compute.DiagnosticsProfile{BootDiagnostics: &compute.BootDiagnostics{
+					Enabled:    to.BoolPtr(true),
+					StorageURI: &storageURI,
+				}}
+
+				instances := newDefaultInstances()
+
+				setupDefaultVMSSInProgressOperationDoneExpectations(s, m, vmss, instances)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PutFuture)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PatchFuture)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
+		{
+			name:          "successfully create a vm with diagnostics set to Managed",
+			expectedError: "",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				spec := newDefaultVMSSSpec()
+				spec.DiagnosticsProfile = &infrav1.Diagnostics{
+					Boot: &infrav1.BootDiagnostics{
+						StorageAccountType: infrav1.ManagedDiagnosticsStorage,
+					},
+				}
+
+				s.ScaleSetSpec().Return(spec).AnyTimes()
+				vmss := newDefaultVMSS("VM_SIZE")
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.DiagnosticsProfile = &compute.DiagnosticsProfile{BootDiagnostics: &compute.BootDiagnostics{
+					Enabled: to.BoolPtr(true),
+				}}
+
+				instances := newDefaultInstances()
+
+				setupDefaultVMSSInProgressOperationDoneExpectations(s, m, vmss, instances)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PutFuture)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PatchFuture)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
+		{
+			name:          "successfully create a vm with diagnostics set to Disabled",
+			expectedError: "",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				spec := newDefaultVMSSSpec()
+				spec.DiagnosticsProfile = &infrav1.Diagnostics{
+					Boot: &infrav1.BootDiagnostics{
+						StorageAccountType: infrav1.DisabledDiagnosticsStorage,
+					},
+				}
+				s.ScaleSetSpec().Return(spec).AnyTimes()
+
+				vmss := newDefaultVMSS("VM_SIZE")
+				vmss.VirtualMachineScaleSetProperties.VirtualMachineProfile.DiagnosticsProfile = &compute.DiagnosticsProfile{BootDiagnostics: &compute.BootDiagnostics{
+					Enabled: to.BoolPtr(false),
+				}}
+				instances := newDefaultInstances()
+
+				setupDefaultVMSSInProgressOperationDoneExpectations(s, m, vmss, instances)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PutFuture)
+				s.DeleteLongRunningOperationState(spec.Name, serviceName, infrav1.PatchFuture)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
+				s.Location().AnyTimes().Return("test-location")
+			},
+		},
 	}
 
 	for _, tc := range testcases {
@@ -664,7 +782,7 @@ func TestDeleteVMSS(t *testing.T) {
 				s.GetLongRunningOperationState("my-existing-vmss", serviceName, infrav1.DeleteFuture).Return(future)
 				m.GetResultIfDone(gomockinternal.AContext(), future).Return(compute.VirtualMachineScaleSet{}, nil)
 				m.Get(gomockinternal.AContext(), "my-existing-rg", "my-existing-vmss").
-					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 				s.DeleteLongRunningOperationState("my-existing-vmss", serviceName, infrav1.DeleteFuture)
 				s.UpdateDeleteStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 			},
@@ -681,9 +799,9 @@ func TestDeleteVMSS(t *testing.T) {
 				s.ResourceGroup().AnyTimes().Return(resourceGroup)
 				s.GetLongRunningOperationState(name, serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomockinternal.AContext(), resourceGroup, name).
-					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 				m.Get(gomockinternal.AContext(), resourceGroup, name).
-					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+					Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 			},
 		},
 		{
@@ -698,7 +816,7 @@ func TestDeleteVMSS(t *testing.T) {
 				s.ResourceGroup().AnyTimes().Return(resourceGroup)
 				s.GetLongRunningOperationState(name, serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomockinternal.AContext(), resourceGroup, name).
-					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal Server Error"))
+					Return(nil, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error"))
 				m.Get(gomockinternal.AContext(), resourceGroup, name).
 					Return(newDefaultVMSS("VM_SIZE"), nil)
 				m.ListInstances(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName).Return(newDefaultInstances(), nil).AnyTimes()
@@ -1021,6 +1139,11 @@ func newDefaultVMSSSpec() azure.ScaleSetSpec {
 				},
 			},
 		},
+		DiagnosticsProfile: &infrav1.Diagnostics{
+			Boot: &infrav1.BootDiagnostics{
+				StorageAccountType: infrav1.ManagedDiagnosticsStorage,
+			},
+		},
 		SubnetName:                   "my-subnet",
 		VNetName:                     "my-vnet",
 		VNetResourceGroup:            defaultResourceGroup,
@@ -1309,7 +1432,7 @@ func setupDefaultVMSSStartCreatingExpectations(s *mock_scalesets.MockScaleSetSco
 	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PutFuture).Return(nil)
 	s.GetLongRunningOperationState(defaultVMSSName, serviceName, infrav1.PatchFuture).Return(nil)
 	m.Get(gomockinternal.AContext(), defaultResourceGroup, defaultVMSSName).
-		Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not found"))
+		Return(compute.VirtualMachineScaleSet{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not found"))
 }
 
 func setupCreatingSucceededExpectations(s *mock_scalesets.MockScaleSetScopeMockRecorder, m *mock_scalesets.MockClientMockRecorder, vmss compute.VirtualMachineScaleSet, future *infrav1.Future) {

@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"regexp"
+	"strings"
 
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
@@ -28,10 +30,15 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/maps"
+	webhookutils "sigs.k8s.io/cluster-api-provider-azure/util/webhook"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var validNodePublicPrefixID = regexp.MustCompile(`(?i)^/?subscriptions/[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}/resourcegroups/[^/]+/providers/microsoft\.network/publicipprefixes/[^/]+$`)
 
 //+kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-azuremanagedmachinepool,mutating=true,failurePolicy=fail,matchPolicy=Equivalent,groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedmachinepools,verbs=create;update,versions=v1beta1,name=default.azuremanagedmachinepools.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
@@ -55,10 +62,22 @@ func (m *AzureManagedMachinePool) Default(client client.Client) {
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (m *AzureManagedMachinePool) ValidateCreate(client client.Client) error {
+	// NOTE: AzureManagedMachinePool is behind AKS feature gate flag; the web hook
+	// must prevent creating new objects in case the feature flag is disabled.
+	if !feature.Gates.Enabled(feature.AKS) {
+		return field.Forbidden(
+			field.NewPath("spec"),
+			"can be set only if the AKS feature flag is enabled",
+		)
+	}
 	validators := []func() error{
 		m.validateMaxPods,
 		m.validateOSType,
 		m.validateName,
+		m.validateNodeLabels,
+		m.validateNodePublicIPPrefixID,
+		m.validateEnableNodePublicIP,
+		m.validateKubeletConfig,
 	}
 
 	var errs []error
@@ -76,58 +95,33 @@ func (m *AzureManagedMachinePool) ValidateUpdate(oldRaw runtime.Object, client c
 	old := oldRaw.(*AzureManagedMachinePool)
 	var allErrs field.ErrorList
 
-	if old.Spec.OSType != nil {
-		// Prevent OSType modification if it was already set to some value
-		if m.Spec.OSType == nil {
-			// unsetting the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OSType"),
-					m.Spec.OSType,
-					"field is immutable, unsetting is not allowed"))
-		} else if *m.Spec.OSType != *old.Spec.OSType {
-			// changing the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OSType"),
-					*m.Spec.OSType,
-					"field is immutable"))
-		}
-	}
-
-	if m.Spec.SKU != old.Spec.SKU {
+	if err := m.validateNodeLabels(); err != nil {
 		allErrs = append(allErrs,
 			field.Invalid(
-				field.NewPath("Spec", "SKU"),
-				m.Spec.SKU,
-				"field is immutable"))
+				field.NewPath("Spec", "NodeLabels"),
+				m.Spec.NodeLabels,
+				err.Error()))
 	}
 
-	if old.Spec.OSDiskSizeGB != nil {
-		// Prevent OSDiskSizeGB modification if it was already set to some value
-		if m.Spec.OSDiskSizeGB == nil {
-			// unsetting the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OSDiskSizeGB"),
-					m.Spec.OSDiskSizeGB,
-					"field is immutable, unsetting is not allowed"))
-		} else if *m.Spec.OSDiskSizeGB != *old.Spec.OSDiskSizeGB {
-			// changing the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OSDiskSizeGB"),
-					*m.Spec.OSDiskSizeGB,
-					"field is immutable"))
-		}
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "OSType"),
+		old.Spec.OSType,
+		m.Spec.OSType); err != nil {
+		allErrs = append(allErrs, err)
 	}
 
-	if !reflect.DeepEqual(m.Spec.Taints, old.Spec.Taints) {
-		allErrs = append(allErrs,
-			field.Invalid(
-				field.NewPath("Spec", "Taints"),
-				m.Spec.Taints,
-				"field is immutable"))
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "SKU"),
+		old.Spec.SKU,
+		m.Spec.SKU); err != nil {
+		allErrs = append(allErrs, err)
+	}
+
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "OSDiskSizeGB"),
+		old.Spec.OSDiskSizeGB,
+		m.Spec.OSDiskSizeGB); err != nil {
+		allErrs = append(allErrs, err)
 	}
 
 	// custom headers are immutable
@@ -141,7 +135,7 @@ func (m *AzureManagedMachinePool) ValidateUpdate(oldRaw runtime.Object, client c
 				fmt.Sprintf("annotations with '%s' prefix are immutable", azure.CustomHeaderPrefix)))
 	}
 
-	if !ensureStringSlicesAreEqual(m.Spec.AvailabilityZones, old.Spec.AvailabilityZones) {
+	if !webhookutils.EnsureStringSlicesAreEquivalent(m.Spec.AvailabilityZones, old.Spec.AvailabilityZones) {
 		allErrs = append(allErrs,
 			field.Invalid(
 				field.NewPath("Spec", "AvailabilityZones"),
@@ -152,61 +146,56 @@ func (m *AzureManagedMachinePool) ValidateUpdate(oldRaw runtime.Object, client c
 	if m.Spec.Mode != string(NodePoolModeSystem) && old.Spec.Mode == string(NodePoolModeSystem) {
 		// validate for last system node pool
 		if err := m.validateLastSystemNodePool(client); err != nil {
-			allErrs = append(allErrs, field.Invalid(
+			allErrs = append(allErrs, field.Forbidden(
 				field.NewPath("Spec", "Mode"),
-				m.Spec.Mode,
-				"Last system node pool cannot be mutated to user node pool"))
+				"Cannot change node pool mode to User, you must have at least one System node pool in your cluster"))
 		}
 	}
 
-	if old.Spec.MaxPods != nil {
-		// Prevent MaxPods modification if it was already set to some value
-		if m.Spec.MaxPods == nil {
-			// unsetting the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "MaxPods"),
-					m.Spec.MaxPods,
-					"field is immutable, unsetting is not allowed"))
-		} else if *m.Spec.MaxPods != *old.Spec.MaxPods {
-			// changing the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "MaxPods"),
-					*m.Spec.MaxPods,
-					"field is immutable"))
-		}
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "MaxPods"),
+		old.Spec.MaxPods,
+		m.Spec.MaxPods); err != nil {
+		allErrs = append(allErrs, err)
 	}
 
-	if old.Spec.OsDiskType != nil {
-		// Prevent OSDiskType modification if it was already set to some value
-		if m.Spec.OsDiskType == nil || to.String(m.Spec.OsDiskType) == "" {
-			// unsetting the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OsDiskType"),
-					m.Spec.OsDiskType,
-					"field is immutable, unsetting is not allowed"))
-		} else if *m.Spec.OsDiskType != *old.Spec.OsDiskType {
-			// changing the field is not allowed
-			allErrs = append(allErrs,
-				field.Invalid(
-					field.NewPath("Spec", "OsDiskType"),
-					m.Spec.OsDiskType,
-					"field is immutable"))
-		}
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "OsDiskType"),
+		old.Spec.OsDiskType,
+		m.Spec.OsDiskType); err != nil {
+		allErrs = append(allErrs, err)
 	}
 
-	if err := validateBoolPtrImmutable(
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "ScaleSetPriority"),
+		old.Spec.ScaleSetPriority,
+		m.Spec.ScaleSetPriority); err != nil {
+		allErrs = append(allErrs, err)
+	}
+
+	if err := webhookutils.ValidateImmutable(
 		field.NewPath("Spec", "EnableUltraSSD"),
 		old.Spec.EnableUltraSSD,
 		m.Spec.EnableUltraSSD); err != nil {
 		allErrs = append(allErrs, err)
 	}
-	if err := validateBoolPtrImmutable(
+	if err := webhookutils.ValidateImmutable(
 		field.NewPath("Spec", "EnableNodePublicIP"),
 		old.Spec.EnableNodePublicIP,
 		m.Spec.EnableNodePublicIP); err != nil {
+		allErrs = append(allErrs, err)
+	}
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "NodePublicIPPrefixID"),
+		old.Spec.NodePublicIPPrefixID,
+		m.Spec.NodePublicIPPrefixID); err != nil {
+		allErrs = append(allErrs, err)
+	}
+
+	if err := webhookutils.ValidateImmutable(
+		field.NewPath("Spec", "KubeletConfig"),
+		old.Spec.KubeletConfig,
+		m.Spec.KubeletConfig); err != nil {
 		allErrs = append(allErrs, err)
 	}
 
@@ -306,38 +295,83 @@ func (m *AzureManagedMachinePool) validateName() error {
 	return nil
 }
 
-func ensureStringSlicesAreEqual(a []string, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	m := map[string]bool{}
-	for _, v := range a {
-		m[v] = true
-	}
-
-	for _, v := range b {
-		if _, ok := m[v]; !ok {
-			return false
+func (m *AzureManagedMachinePool) validateNodeLabels() error {
+	for key := range m.Spec.NodeLabels {
+		if azureutil.IsAzureSystemNodeLabelKey(key) {
+			return field.Invalid(
+				field.NewPath("Spec", "NodeLabels"),
+				key,
+				fmt.Sprintf("Node pool label key must not start with %s", azureutil.AzureSystemNodeLabelPrefix))
 		}
 	}
-	return true
+
+	return nil
 }
 
-func validateBoolPtrImmutable(path *field.Path, oldVal, newVal *bool) *field.Error {
-	if oldVal != nil {
-		// Prevent modification if it was already set to some value
-		if newVal == nil {
-			// unsetting the field is not allowed
-			return field.Invalid(path, newVal, "field is immutable, unsetting is not allowed")
-		}
-		if *newVal != *oldVal {
-			// changing the field is not allowed
-			return field.Invalid(path, newVal, "field is immutable")
-		}
-	} else if newVal != nil {
-		return field.Invalid(path, newVal, "field is immutable, setting is not allowed")
+func (m *AzureManagedMachinePool) validateNodePublicIPPrefixID() error {
+	if m.Spec.NodePublicIPPrefixID != nil && !validNodePublicPrefixID.MatchString(*m.Spec.NodePublicIPPrefixID) {
+		return field.Invalid(
+			field.NewPath("Spec", "NodePublicIPPrefixID"),
+			m.Spec.NodePublicIPPrefixID,
+			fmt.Sprintf("resource ID must match %q", validNodePublicPrefixID.String()))
 	}
+	return nil
+}
 
+func (m *AzureManagedMachinePool) validateEnableNodePublicIP() error {
+	if (m.Spec.EnableNodePublicIP == nil || !*m.Spec.EnableNodePublicIP) &&
+		m.Spec.NodePublicIPPrefixID != nil {
+		return field.Invalid(
+			field.NewPath("Spec", "EnableNodePublicIP"),
+			m.Spec.EnableNodePublicIP,
+			"must be set to true when NodePublicIPPrefixID is set")
+	}
+	return nil
+}
+
+// validateKubeletConfig enforces the AKS API configuration for KubeletConfig.
+// See:  https://learn.microsoft.com/en-us/azure/aks/custom-node-configuration.
+func (m *AzureManagedMachinePool) validateKubeletConfig() error {
+	var allowedUnsafeSysctlsPatterns = []string{
+		`^kernel\.shm.+$`,
+		`^kernel\.msg.+$`,
+		`^kernel\.sem$`,
+		`^fs\.mqueue\..+$`,
+		`^net\..+$`,
+	}
+	if m.Spec.KubeletConfig != nil {
+		if m.Spec.KubeletConfig.CPUCfsQuotaPeriod != nil {
+			if !strings.HasSuffix(to.String(m.Spec.KubeletConfig.CPUCfsQuotaPeriod), "ms") {
+				return field.Invalid(
+					field.NewPath("Spec", "KubeletConfig", "CPUCfsQuotaPeriod"),
+					m.Spec.KubeletConfig.CPUCfsQuotaPeriod,
+					"must be a string value in milliseconds with a 'ms' suffix, e.g., '100ms'")
+			}
+		}
+		if m.Spec.KubeletConfig.ImageGcHighThreshold != nil && m.Spec.KubeletConfig.ImageGcLowThreshold != nil {
+			if to.Int32(m.Spec.KubeletConfig.ImageGcLowThreshold) > to.Int32(m.Spec.KubeletConfig.ImageGcHighThreshold) {
+				return field.Invalid(
+					field.NewPath("Spec", "KubeletConfig", "ImageGcLowThreshold"),
+					m.Spec.KubeletConfig.ImageGcLowThreshold,
+					fmt.Sprintf("must not be greater than ImageGcHighThreshold, ImageGcLowThreshold=%d, ImageGcHighThreshold=%d",
+						to.Int32(m.Spec.KubeletConfig.ImageGcLowThreshold), to.Int32(m.Spec.KubeletConfig.ImageGcHighThreshold)))
+			}
+		}
+		for _, val := range m.Spec.KubeletConfig.AllowedUnsafeSysctls {
+			var hasMatch bool
+			for _, p := range allowedUnsafeSysctlsPatterns {
+				if m, _ := regexp.MatchString(p, val); m {
+					hasMatch = true
+					break
+				}
+			}
+			if !hasMatch {
+				return field.Invalid(
+					field.NewPath("Spec", "KubeletConfig", "AllowedUnsafeSysctls"),
+					m.Spec.KubeletConfig.AllowedUnsafeSysctls,
+					fmt.Sprintf("%s is not a supported AllowedUnsafeSysctls configuration", val))
+			}
+		}
+	}
 	return nil
 }

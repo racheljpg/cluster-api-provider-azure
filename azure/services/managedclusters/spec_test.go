@@ -72,6 +72,9 @@ func TestParameters(t *testing.T) {
 							Mode:          string(infrav1exp.NodePoolModeSystem),
 							ResourceGroup: "test-rg",
 							Replicas:      int32(2),
+							AdditionalTags: map[string]string{
+								"test-tag": "test-value",
+							},
 						},
 						&agentpools.AgentPoolSpec{
 							Name:              "test-agentpool-1",
@@ -84,6 +87,9 @@ func TestParameters(t *testing.T) {
 							VnetSubnetID:      "fake/subnet/id",
 							MaxPods:           to.Int32Ptr(int32(32)),
 							AvailabilityZones: []string{"1", "2"},
+							AdditionalTags: map[string]string{
+								"test-tag": "test-value",
+							},
 						},
 					}, nil
 				},
@@ -128,6 +134,19 @@ func TestParameters(t *testing.T) {
 				g.Expect(result.(containerservice.ManagedCluster).KubernetesVersion).To(Equal(to.StringPtr("v1.22.99")))
 			},
 		},
+		{
+			name:     "delete all tags",
+			existing: getExistingCluster(),
+			spec: &ManagedClusterSpec{
+				Tags: nil,
+			},
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(containerservice.ManagedCluster{}))
+				tags := result.(containerservice.ManagedCluster).Tags
+				g.Expect(tags).NotTo(BeNil())
+				g.Expect(tags).To(BeEmpty())
+			},
+		},
 	}
 	for _, tc := range testcases {
 		tc := tc
@@ -166,6 +185,9 @@ func getSampleManagedCluster() containerservice.ManagedCluster {
 					Count:        to.Int32Ptr(2),
 					Type:         containerservice.AgentPoolTypeVirtualMachineScaleSets,
 					OsDiskSizeGB: to.Int32Ptr(0),
+					Tags: map[string]*string{
+						"test-tag": to.StringPtr("test-value"),
+					},
 				},
 				{
 					Name:                to.StringPtr("test-agentpool-1"),
@@ -178,6 +200,9 @@ func getSampleManagedCluster() containerservice.ManagedCluster {
 					VnetSubnetID:        to.StringPtr("fake/subnet/id"),
 					MaxPods:             to.Int32Ptr(int32(32)),
 					AvailabilityZones:   &[]string{"1", "2"},
+					Tags: map[string]*string{
+						"test-tag": to.StringPtr("test-value"),
+					},
 				},
 			},
 			LinuxProfile: &containerservice.LinuxProfile{

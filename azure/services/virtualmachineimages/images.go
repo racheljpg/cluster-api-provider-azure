@@ -121,7 +121,7 @@ func (s *Service) getSKUAndVersion(ctx context.Context, location, publisher, off
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "virtualmachineimages.Service.getSKUAndVersion")
 	defer done()
 
-	log.Info("Getting VM image SKU and version", "location", location, "publisher", publisher, "offer", offer, "k8sVersion", k8sVersion, "osAndVersion", osAndVersion)
+	log.V(4).Info("Getting VM image SKU and version", "location", location, "publisher", publisher, "offer", offer, "k8sVersion", k8sVersion, "osAndVersion", osAndVersion)
 
 	v, err := semver.ParseTolerant(k8sVersion)
 	if err != nil {
@@ -173,21 +173,24 @@ func (s *Service) getSKUAndVersion(ctx context.Context, location, publisher, off
 		return "", "", errors.Errorf("no VM image found for publisher \"%s\" offer \"%s\" sku \"%s\" with Kubernetes version \"%s\"", publisher, offer, sku, k8sVersion)
 	}
 
-	log.Info("Found VM image SKU and version", "location", location, "publisher", publisher, "offer", offer, "sku", sku, "version", version)
+	log.V(4).Info("Found VM image SKU and version", "location", location, "publisher", publisher, "offer", offer, "sku", sku, "version", version)
 
 	return sku, version, nil
 }
 
 // getUbuntuOSVersion returns the default Ubuntu OS version for the given Kubernetes version.
 func getUbuntuOSVersion(major, minor, patch uint64) string {
-	// Default to Ubuntu 20.04 LTS, except for k8s versions which have only 18.04 reference images.
-	osVersion := "2004"
-	if (major == 1 && minor == 21 && patch < 2) ||
-		(major == 1 && minor == 20 && patch < 8) ||
-		(major == 1 && minor == 19 && patch < 12) ||
-		(major == 1 && minor == 18 && patch < 20) ||
-		(major == 1 && minor < 18) {
+	// Default to Ubuntu 22.04 LTS for Kubernetes v1.25.3 and later.
+	osVersion := "2204"
+	if major == 1 && minor == 21 && patch < 2 ||
+		major == 1 && minor == 20 && patch < 8 ||
+		major == 1 && minor == 19 && patch < 12 ||
+		major == 1 && minor == 18 && patch < 20 ||
+		major == 1 && minor < 18 {
 		osVersion = "1804"
+	} else if major == 1 && minor == 25 && patch < 3 ||
+		major == 1 && minor < 25 {
+		osVersion = "2004"
 	}
 	return osVersion
 }

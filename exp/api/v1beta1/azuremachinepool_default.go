@@ -46,3 +46,31 @@ func (amp *AzureMachinePool) SetIdentityDefaults() {
 		}
 	}
 }
+
+// SetSpotEvictionPolicyDefaults sets the defaults for the spot VM eviction policy.
+func (amp *AzureMachinePool) SetSpotEvictionPolicyDefaults() {
+	if amp.Spec.Template.SpotVMOptions != nil && amp.Spec.Template.SpotVMOptions.EvictionPolicy == nil {
+		defaultPolicy := infrav1.SpotEvictionPolicyDeallocate
+		if amp.Spec.Template.OSDisk.DiffDiskSettings != nil && amp.Spec.Template.OSDisk.DiffDiskSettings.Option == "Local" {
+			defaultPolicy = infrav1.SpotEvictionPolicyDelete
+		}
+		amp.Spec.Template.SpotVMOptions.EvictionPolicy = &defaultPolicy
+	}
+}
+
+// SetDiagnosticsDefaults sets the defaults for Diagnostic settings for an AzureMachinePool.
+func (amp *AzureMachinePool) SetDiagnosticsDefaults() {
+	bootDefault := &infrav1.BootDiagnostics{
+		StorageAccountType: infrav1.ManagedDiagnosticsStorage,
+	}
+
+	if amp.Spec.Template.Diagnostics == nil {
+		amp.Spec.Template.Diagnostics = &infrav1.Diagnostics{
+			Boot: bootDefault,
+		}
+	}
+
+	if amp.Spec.Template.Diagnostics.Boot == nil {
+		amp.Spec.Template.Diagnostics.Boot = bootDefault
+	}
+}

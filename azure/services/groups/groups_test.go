@@ -39,8 +39,8 @@ var (
 		ClusterName:    "test-cluster",
 		AdditionalTags: map[string]string{"foo": "bar"},
 	}
-	internalError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 500}, "Internal Server Error")
-	notFoundError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: 404}, "Not Found")
+	internalError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
+	notFoundError      = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not Found")
 	sampleManagedGroup = resources.Group{
 		Name:       to.StringPtr("test-group"),
 		Location:   to.StringPtr("test-location"),
@@ -73,7 +73,7 @@ func TestReconcileGroups(t *testing.T) {
 			expectedError: "",
 			expect: func(s *mock_groups.MockGroupScopeMockRecorder, m *mock_groups.MockclientMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.GroupSpec().Return(&fakeGroupSpec)
-				r.CreateResource(gomockinternal.AContext(), &fakeGroupSpec, ServiceName).Return(nil, nil)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeGroupSpec, ServiceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.ResourceGroupReadyCondition, ServiceName, nil)
 			},
 		},
@@ -82,7 +82,7 @@ func TestReconcileGroups(t *testing.T) {
 			expectedError: "#: Internal Server Error: StatusCode=500",
 			expect: func(s *mock_groups.MockGroupScopeMockRecorder, m *mock_groups.MockclientMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.GroupSpec().Return(&fakeGroupSpec)
-				r.CreateResource(gomockinternal.AContext(), &fakeGroupSpec, ServiceName).Return(nil, internalError)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeGroupSpec, ServiceName).Return(nil, internalError)
 				s.UpdatePutStatus(infrav1.ResourceGroupReadyCondition, ServiceName, internalError)
 			},
 		},

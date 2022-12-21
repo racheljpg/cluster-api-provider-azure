@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.8.0
+    controller-gen.kubebuilder.io/version: v0.9.2
   creationTimestamp: null
   name: azuremanagedmachinepools.infrastructure.cluster.x-k8s.io
 spec:
@@ -199,6 +199,13 @@ spec:
             description: AzureManagedMachinePoolSpec defines the desired state of
               AzureManagedMachinePool.
             properties:
+              additionalTags:
+                additionalProperties:
+                  type: string
+                description: AdditionalTags is an optional set of tags to add to Azure
+                  resources managed by the Azure provider, in addition to the ones
+                  added by default.
+                type: object
               availabilityZones:
                 description: AvailabilityZones - Availability zones for nodes. Must
                   use VirtualMachineScaleSets AgentPoolType.
@@ -213,6 +220,75 @@ spec:
                 description: EnableUltraSSD enables the storage type UltraSSD_LRS
                   for the agent pool.
                 type: boolean
+              kubeletConfig:
+                description: KubeletConfig specifies the kubelet configurations for
+                  nodes.
+                properties:
+                  allowedUnsafeSysctls:
+                    description: AllowedUnsafeSysctls - Allowlist of unsafe sysctls
+                      or unsafe sysctl patterns (ending in `*`).
+                    items:
+                      type: string
+                    type: array
+                  containerLogMaxFiles:
+                    description: ContainerLogMaxFiles - The maximum number of container
+                      log files that can be present for a container. The number must
+                      be ≥ 2.
+                    format: int32
+                    minimum: 2
+                    type: integer
+                  containerLogMaxSizeMB:
+                    description: ContainerLogMaxSizeMB - The maximum size (e.g. 10Mi)
+                      of container log file before it is rotated.
+                    format: int32
+                    type: integer
+                  cpuCfsQuota:
+                    description: CPUCfsQuota - Enable CPU CFS quota enforcement for
+                      containers that specify CPU limits.
+                    type: boolean
+                  cpuCfsQuotaPeriod:
+                    description: CPUCfsQuotaPeriod - Sets CPU CFS quota period value.
+                    type: string
+                  cpuManagerPolicy:
+                    description: CPUManagerPolicy - CPU Manager policy to use.
+                    enum:
+                    - none
+                    - static
+                    type: string
+                  failSwapOn:
+                    description: FailSwapOn - If set to true it will make the Kubelet
+                      fail to start if swap is enabled on the node.
+                    type: boolean
+                  imageGcHighThreshold:
+                    description: ImageGcHighThreshold - The percent of disk usage
+                      after which image garbage collection is always run.
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  imageGcLowThreshold:
+                    description: ImageGcLowThreshold - The percent of disk usage before
+                      which image garbage collection is never run.
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  podMaxPids:
+                    description: PodMaxPids - The maximum number of processes per
+                      pod.
+                    format: int32
+                    minimum: -1
+                    type: integer
+                  topologyManagerPolicy:
+                    description: TopologyManagerPolicy - Topology Manager policy to
+                      use.
+                    enum:
+                    - none
+                    - best-effort
+                    - restricted
+                    - single-numa-node
+                    type: string
+                type: object
               maxPods:
                 description: MaxPods specifies the kubelet --max-pods configuration
                   for the node pool.
@@ -235,6 +311,10 @@ spec:
                 description: Node labels - labels for all of the nodes present in
                   node pool
                 type: object
+              nodePublicIPPrefixID:
+                description: NodePublicIPPrefixID specifies the public IP prefix resource
+                  ID which VM nodes should use IPs from.
+                type: string
               osDiskSizeGB:
                 description: OSDiskSizeGB is the disk size for every machine in this
                   agent pool. If you specify 0, it will apply the default osDisk size
@@ -262,6 +342,13 @@ spec:
                 items:
                   type: string
                 type: array
+              scaleSetPriority:
+                description: 'ScaleSetPriority specifies the ScaleSetPriority value.
+                  Default to Regular. Possible values include: ''Regular'', ''Spot'''
+                enum:
+                - Regular
+                - Spot
+                type: string
               scaling:
                 description: Scaling specifies the autoscaling parameters for the
                   node pool.
@@ -414,9 +501,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []

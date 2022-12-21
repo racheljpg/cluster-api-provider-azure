@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.8.0
+    controller-gen.kubebuilder.io/version: v0.9.2
   creationTimestamp: null
   name: azureclusters.infrastructure.cluster.x-k8s.io
 spec:
@@ -121,6 +121,7 @@ spec:
                     description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
+                x-kubernetes-map-type: atomic
               location:
                 type: string
               networkSpec:
@@ -394,7 +395,7 @@ spec:
                   maps to Availability Zone with an Azure Region (if the region support
                   them). An Availability Zone is a separate data center within a region
                   and they can be used to ensure the cluster is more resilient to
-                  failure. See: https://docs.microsoft.com/en-us/azure/availability-zones/az-overview
+                  failure. See: https://learn.microsoft.com/azure/reliability/availability-zones-overview
                   This list will be used by Cluster API to try and spread the machines
                   across the failure domains.'
                 type: object
@@ -778,6 +779,7 @@ spec:
                     description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
+                x-kubernetes-map-type: atomic
               location:
                 type: string
               networkSpec:
@@ -1189,7 +1191,7 @@ spec:
                   maps to Availability Zone with an Azure Region (if the region support
                   them). An Availability Zone is a separate data center within a region
                   and they can be used to ensure the cluster is more resilient to
-                  failure. See: https://docs.microsoft.com/en-us/azure/availability-zones/az-overview
+                  failure. See: https://learn.microsoft.com/azure/reliability/availability-zones-overview
                   This list will be used by Cluster API to try and spread the machines
                   across the failure domains.'
                 type: object
@@ -1508,6 +1510,9 @@ spec:
                                   - protocol
                                   type: object
                                 type: array
+                                x-kubernetes-list-map-keys:
+                                - name
+                                x-kubernetes-list-type: map
                               tags:
                                 additionalProperties:
                                   type: string
@@ -1516,6 +1521,27 @@ spec:
                             required:
                             - name
                             type: object
+                          serviceEndpoints:
+                            description: ServiceEndpoints is a slice of Virtual Network
+                              service endpoints to enable for the subnets.
+                            items:
+                              description: ServiceEndpointSpec configures an Azure
+                                Service Endpoint.
+                              properties:
+                                locations:
+                                  items:
+                                    type: string
+                                  type: array
+                                service:
+                                  type: string
+                              required:
+                              - locations
+                              - service
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - service
+                            x-kubernetes-list-type: map
                         required:
                         - name
                         - role
@@ -1667,6 +1693,7 @@ spec:
                     description: 'UID of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids'
                     type: string
                 type: object
+                x-kubernetes-map-type: atomic
               location:
                 type: string
               networkSpec:
@@ -1677,6 +1704,16 @@ spec:
                     description: APIServerLB is the configuration for the control-plane
                       load balancer.
                     properties:
+                      backendPool:
+                        description: BackendPool describes the backend pool of the
+                          load balancer.
+                        properties:
+                          name:
+                            description: Name specifies the name of backend pool for
+                              the load balancer. If not specified, the default name
+                              will be set, depending on the load balancer role.
+                            type: string
+                        type: object
                       frontendIPs:
                         items:
                           description: FrontendIP defines a load balancer frontend
@@ -1750,6 +1787,16 @@ spec:
                       APIServerLB, and is used only in private clusters (optionally)
                       for enabling outbound traffic.
                     properties:
+                      backendPool:
+                        description: BackendPool describes the backend pool of the
+                          load balancer.
+                        properties:
+                          name:
+                            description: Name specifies the name of backend pool for
+                              the load balancer. If not specified, the default name
+                              will be set, depending on the load balancer role.
+                            type: string
+                        type: object
                       frontendIPs:
                         items:
                           description: FrontendIP defines a load balancer frontend
@@ -1821,6 +1868,16 @@ spec:
                     description: NodeOutboundLB is the configuration for the node
                       outbound load balancer.
                     properties:
+                      backendPool:
+                        description: BackendPool describes the backend pool of the
+                          load balancer.
+                        properties:
+                          name:
+                            description: Name specifies the name of backend pool for
+                              the load balancer. If not specified, the default name
+                              will be set, depending on the load balancer role.
+                            type: string
+                        type: object
                       frontendIPs:
                         items:
                           description: FrontendIP defines a load balancer frontend
@@ -2057,6 +2114,9 @@ spec:
                                 - protocol
                                 type: object
                               type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
                             tags:
                               additionalProperties:
                                 type: string
@@ -2065,11 +2125,35 @@ spec:
                           required:
                           - name
                           type: object
+                        serviceEndpoints:
+                          description: ServiceEndpoints is a slice of Virtual Network
+                            service endpoints to enable for the subnets.
+                          items:
+                            description: ServiceEndpointSpec configures an Azure Service
+                              Endpoint.
+                            properties:
+                              locations:
+                                items:
+                                  type: string
+                                type: array
+                              service:
+                                type: string
+                            required:
+                            - locations
+                            - service
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - service
+                          x-kubernetes-list-type: map
                       required:
                       - name
                       - role
                       type: object
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   vnet:
                     description: Vnet is the configuration for the Azure virtual network.
                     properties:
@@ -2198,7 +2282,7 @@ spec:
                   maps to Availability Zone with an Azure Region (if the region support
                   them). An Availability Zone is a separate data center within a region
                   and they can be used to ensure the cluster is more resilient to
-                  failure. See: https://docs.microsoft.com/en-us/azure/availability-zones/az-overview
+                  failure. See: https://learn.microsoft.com/azure/reliability/availability-zones-overview
                   This list will be used by Cluster API to try and spread the machines
                   across the failure domains.'
                 type: object
@@ -2248,9 +2332,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: []
-  storedVersions: []
