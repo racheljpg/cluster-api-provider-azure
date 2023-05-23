@@ -35,7 +35,6 @@ import (
 	aadpodv1 "github.com/Azure/aad-pod-identity/pkg/apis/aadpodidentity/v1"
 	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/monitor/mgmt/insights"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -44,6 +43,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/kubectl/pkg/describe"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
@@ -95,10 +95,15 @@ func (acp *AzureClusterProxy) CollectWorkloadClusterLogs(ctx context.Context, na
 
 	aboveMachinesPath := strings.Replace(outputPath, "/machines", "", 1)
 
-	Logf("Dumping workload cluster %s/%s kube-system pod logs", namespace, name)
+	Logf("Dumping workload cluster %s/%s nodes", namespace, name)
 	start := time.Now()
+	acp.collectNodes(ctx, namespace, name, aboveMachinesPath)
+	Logf("Fetching nodes took %s", time.Since(start).String())
+
+	Logf("Dumping workload cluster %s/%s pod logs", namespace, name)
+	start = time.Now()
 	acp.collectPodLogs(ctx, namespace, name, aboveMachinesPath)
-	Logf("Fetching kube-system pod logs took %s", time.Since(start).String())
+	Logf("Fetching pod logs took %s", time.Since(start).String())
 
 	Logf("Dumping workload cluster %s/%s Azure activity log", namespace, name)
 	start = time.Now()
@@ -173,33 +178,36 @@ func (acp *AzureClusterProxy) collectPodLogs(ctx context.Context, namespace stri
 			}(pod, container)
 		}
 
-		go func(pod corev1.Pod) {
-			defer GinkgoRecover()
+		Logf("Describing Pod %s/%s", podNamespace, pod.Name)
+		describeFile := path.Join(aboveMachinesPath, podNamespace, pod.Name, "pod-describe.txt")
+		writeLogFile(describeFile, podDescribe)
+	}
+}
 
-			Logf("Describing Pod %s/%s", podNamespace, pod.Name)
-			describeFile := path.Join(aboveMachinesPath, podNamespace, pod.Name, "pod-describe.txt")
-			if err := os.MkdirAll(filepath.Dir(describeFile), 0o755); err != nil {
-				// Failing to mkdir should not cause the test to fail
-				Logf("Error mkdir: %v", err)
-				return
-			}
+func (acp *AzureClusterProxy) collectNodes(ctx context.Context, namespace string, name string, aboveMachinesPath string) {
+	workload := acp.GetWorkloadCluster(ctx, namespace, name)
+	nodes := &corev1.NodeList{}
 
-			f, err := os.OpenFile(describeFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-			if err != nil {
-				// Failing to open the file should not cause the test to fail
-				Logf("Error opening file to write Pod describe: %v", err)
-				return
-			}
-			defer f.Close()
+	Expect(workload.GetClient().List(ctx, nodes)).To(Succeed())
 
-			out := bufio.NewWriter(f)
-			defer out.Flush()
-			_, err = out.WriteString(podDescribe)
-			if errors.Is(err, io.ErrUnexpectedEOF) {
-				// Failing to describe pod should not cause the test to fail
-				Logf("failed to describe pod %s/%s: %v", podNamespace, pod.Name, err)
-			}
-		}(pod)
+	var err error
+	var nodeDescribe string
+
+	nodeDescriber, ok := describe.DescriberFor(schema.GroupKind{Group: corev1.GroupName, Kind: "Node"}, workload.GetRESTConfig())
+	if !ok {
+		Logf("failed to get node describer")
+	}
+
+	for _, node := range nodes.Items {
+		// Describe the node.
+		Logf("Describing Node %s", node.GetName())
+		nodeDescribe, err = nodeDescriber.Describe(node.GetNamespace(), node.GetName(), describe.DescriberSettings{ShowEvents: true})
+		if err != nil {
+			Logf("failed to describe node %s: %v", node.GetName(), err)
+		}
+
+		describeFile := path.Join(aboveMachinesPath, nodesDir, node.GetName(), "node-describe.txt")
+		writeLogFile(describeFile, nodeDescribe)
 	}
 }
 
@@ -263,7 +271,7 @@ func (acp *AzureClusterProxy) collectActivityLogs(ctx context.Context, namespace
 			return
 		}
 		event := itr.Value()
-		if to.String(event.Category.Value) != "Policy" {
+		if pointer.StringDeref(event.Category.Value, "") != "Policy" {
 			b, err := json.MarshalIndent(myEventData(event), "", "    ")
 			if err != nil {
 				Logf("Got error converting activity logs data to json: %v", err)
@@ -273,4 +281,32 @@ func (acp *AzureClusterProxy) collectActivityLogs(ctx context.Context, namespace
 			}
 		}
 	}
+}
+
+func writeLogFile(logFilepath string, logData string) {
+	go func() {
+		defer GinkgoRecover()
+
+		if err := os.MkdirAll(filepath.Dir(logFilepath), 0o755); err != nil {
+			// Failing to mkdir should not cause the test to fail
+			Logf("Error mkdir: %v", err)
+			return
+		}
+
+		f, err := os.OpenFile(logFilepath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			// Failing to open the file should not cause the test to fail
+			Logf("Error opening file %s to write logs: %v", logFilepath, err)
+			return
+		}
+		defer f.Close()
+
+		out := bufio.NewWriter(f)
+		defer out.Flush()
+		_, err = out.WriteString(logData)
+		if err != nil {
+			// Failing to write a log file should not cause the test to fail
+			Logf("failed to write logFile %s: %v", logFilepath, err)
+		}
+	}()
 }

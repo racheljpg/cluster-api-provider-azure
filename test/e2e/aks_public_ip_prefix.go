@@ -24,14 +24,13 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
@@ -57,7 +56,7 @@ func AKSPublicIPPrefixSpec(ctx context.Context, inputGetter func() AKSPublicIPPr
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
 
-	infraControlPlane := &infrav1exp.AzureManagedControlPlane{}
+	infraControlPlane := &infrav1.AzureManagedControlPlane{}
 	err = mgmtClient.Get(ctx, client.ObjectKey{Namespace: input.Cluster.Spec.ControlPlaneRef.Namespace, Name: input.Cluster.Spec.ControlPlaneRef.Name}, infraControlPlane)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -68,32 +67,32 @@ func AKSPublicIPPrefixSpec(ctx context.Context, inputGetter func() AKSPublicIPPr
 
 	By("Creating public IP prefix with 2 addresses")
 	publicIPPrefixFuture, err := publicIPPrefixClient.CreateOrUpdate(ctx, resourceGroupName, input.Cluster.Name, network.PublicIPPrefix{
-		Location: to.StringPtr(infraControlPlane.Spec.Location),
+		Location: pointer.String(infraControlPlane.Spec.Location),
 		Sku: &network.PublicIPPrefixSku{
 			Name: network.PublicIPPrefixSkuNameStandard,
 		},
 		PublicIPPrefixPropertiesFormat: &network.PublicIPPrefixPropertiesFormat{
-			PrefixLength: to.Int32Ptr(31), // In bits. This provides 2 addresses.
+			PrefixLength: pointer.Int32(31), // In bits. This provides 2 addresses.
 		},
 	})
 	Expect(err).NotTo(HaveOccurred())
 	var publicIPPrefix network.PublicIPPrefix
-	Eventually(func() error {
+	Eventually(func(g Gomega) {
 		publicIPPrefix, err = publicIPPrefixFuture.Result(publicIPPrefixClient)
-		return err
+		g.Expect(err).NotTo(HaveOccurred())
 	}, input.WaitIntervals...).Should(Succeed(), "failed to create public IP prefix")
 
 	By("Creating node pool with 3 nodes")
-	infraMachinePool := &infrav1exp.AzureManagedMachinePool{
+	infraMachinePool := &infrav1.AzureManagedMachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pool3",
 			Namespace: input.Cluster.Namespace,
 		},
-		Spec: infrav1exp.AzureManagedMachinePoolSpec{
+		Spec: infrav1.AzureManagedMachinePoolSpec{
 			Mode:                 "User",
 			SKU:                  "Standard_D2s_v3",
-			EnableNodePublicIP:   to.BoolPtr(true),
-			NodePublicIPPrefixID: to.StringPtr("/subscriptions/" + subscriptionID + "/resourceGroups/" + resourceGroupName + "/providers/Microsoft.Network/publicipprefixes/" + *publicIPPrefix.Name),
+			EnableNodePublicIP:   pointer.Bool(true),
+			NodePublicIPPrefixID: pointer.String("/subscriptions/" + subscriptionID + "/resourceGroups/" + resourceGroupName + "/providers/Microsoft.Network/publicipprefixes/" + *publicIPPrefix.Name),
 		},
 	}
 	err = mgmtClient.Create(ctx, infraMachinePool)
@@ -106,19 +105,19 @@ func AKSPublicIPPrefixSpec(ctx context.Context, inputGetter func() AKSPublicIPPr
 		},
 		Spec: expv1.MachinePoolSpec{
 			ClusterName: input.Cluster.Name,
-			Replicas:    to.Int32Ptr(3),
+			Replicas:    pointer.Int32(3),
 			Template: clusterv1.MachineTemplateSpec{
 				Spec: clusterv1.MachineSpec{
 					Bootstrap: clusterv1.Bootstrap{
-						DataSecretName: to.StringPtr(""),
+						DataSecretName: pointer.String(""),
 					},
 					ClusterName: input.Cluster.Name,
 					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: infrav1exp.GroupVersion.String(),
+						APIVersion: infrav1.GroupVersion.String(),
 						Kind:       "AzureManagedMachinePool",
 						Name:       infraMachinePool.Name,
 					},
-					Version: to.StringPtr(input.KubernetesVersion),
+					Version: pointer.String(input.KubernetesVersion),
 				},
 			},
 		},
@@ -131,20 +130,20 @@ func AKSPublicIPPrefixSpec(ctx context.Context, inputGetter func() AKSPublicIPPr
 		err := mgmtClient.Delete(ctx, machinePool)
 		Expect(err).NotTo(HaveOccurred())
 
-		Eventually(func() bool {
+		Eventually(func(g Gomega) {
 			err := mgmtClient.Get(ctx, client.ObjectKeyFromObject(machinePool), &expv1.MachinePool{})
-			return apierrors.IsNotFound(err)
-		}, input.WaitIntervals...).Should(BeTrue(), "Deleted MachinePool %s/%s still exists", machinePool.Namespace, machinePool.Name)
+			g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		}, input.WaitIntervals...).Should(Succeed(), "Deleted MachinePool %s/%s still exists", machinePool.Namespace, machinePool.Name)
 
-		Eventually(func() bool {
-			err := mgmtClient.Get(ctx, client.ObjectKeyFromObject(infraMachinePool), &infrav1exp.AzureManagedMachinePool{})
-			return apierrors.IsNotFound(err)
-		}, input.WaitIntervals...).Should(BeTrue(), "Deleted AzureManagedMachinePool %s/%s still exists", infraMachinePool.Namespace, infraMachinePool.Name)
+		Eventually(func(g Gomega) {
+			err := mgmtClient.Get(ctx, client.ObjectKeyFromObject(infraMachinePool), &infrav1.AzureManagedMachinePool{})
+			g.Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		}, input.WaitIntervals...).Should(Succeed(), "Deleted AzureManagedMachinePool %s/%s still exists", infraMachinePool.Namespace, infraMachinePool.Name)
 	}()
 
 	By("Verifying the AzureManagedMachinePool converges to a failed ready status")
 	Eventually(func(g Gomega) {
-		infraMachinePool := &infrav1exp.AzureManagedMachinePool{}
+		infraMachinePool := &infrav1.AzureManagedMachinePool{}
 		err := mgmtClient.Get(ctx, client.ObjectKeyFromObject(machinePool), infraMachinePool)
 		g.Expect(err).NotTo(HaveOccurred())
 		cond := conditions.Get(infraMachinePool, infrav1.AgentPoolsReadyCondition)
@@ -158,14 +157,14 @@ func AKSPublicIPPrefixSpec(ctx context.Context, inputGetter func() AKSPublicIPPr
 	Eventually(func(g Gomega) {
 		err = mgmtClient.Get(ctx, client.ObjectKeyFromObject(machinePool), machinePool)
 		g.Expect(err).NotTo(HaveOccurred())
-		machinePool.Spec.Replicas = to.Int32Ptr(2)
+		machinePool.Spec.Replicas = pointer.Int32(2)
 		err = mgmtClient.Update(ctx, machinePool)
 		g.Expect(err).NotTo(HaveOccurred())
 	}, input.WaitIntervals...).Should(Succeed())
 
 	By("Verifying the AzureManagedMachinePool becomes ready")
 	Eventually(func(g Gomega) {
-		infraMachinePool := &infrav1exp.AzureManagedMachinePool{}
+		infraMachinePool := &infrav1.AzureManagedMachinePool{}
 		err := mgmtClient.Get(ctx, client.ObjectKeyFromObject(machinePool), infraMachinePool)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(conditions.IsTrue(infraMachinePool, infrav1.AgentPoolsReadyCondition)).To(BeTrue())

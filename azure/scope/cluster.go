@@ -26,9 +26,9 @@ import (
 	"strings"
 
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	"k8s.io/utils/net"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/bastionhosts"
@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/loadbalancers"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/natgateways"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privatedns"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privateendpoints"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/publicips"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/routetables"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/securitygroups"
@@ -144,29 +145,31 @@ func (s *ClusterScope) PublicIPSpecs() []azure.ResourceSpecGetter {
 		if s.ControlPlaneOutboundLB() != nil {
 			for _, ip := range s.ControlPlaneOutboundLB().FrontendIPs {
 				controlPlaneOutboundIPSpecs = append(controlPlaneOutboundIPSpecs, &publicips.PublicIPSpec{
-					Name:           ip.PublicIP.Name,
-					ResourceGroup:  s.ResourceGroup(),
-					ClusterName:    s.ClusterName(),
-					DNSName:        "",    // Set to default value
-					IsIPv6:         false, // Set to default value
-					Location:       s.Location(),
-					FailureDomains: s.FailureDomains(),
-					AdditionalTags: s.AdditionalTags(),
+					Name:             ip.PublicIP.Name,
+					ResourceGroup:    s.ResourceGroup(),
+					ClusterName:      s.ClusterName(),
+					DNSName:          "",    // Set to default value
+					IsIPv6:           false, // Set to default value
+					Location:         s.Location(),
+					ExtendedLocation: s.ExtendedLocation(),
+					FailureDomains:   s.FailureDomains(),
+					AdditionalTags:   s.AdditionalTags(),
 				})
 			}
 		}
 	} else {
 		controlPlaneOutboundIPSpecs = []azure.ResourceSpecGetter{
 			&publicips.PublicIPSpec{
-				Name:           s.APIServerPublicIP().Name,
-				ResourceGroup:  s.ResourceGroup(),
-				DNSName:        s.APIServerPublicIP().DNSName,
-				IsIPv6:         false, // Currently azure requires an IPv4 lb rule to enable IPv6
-				ClusterName:    s.ClusterName(),
-				Location:       s.Location(),
-				FailureDomains: s.FailureDomains(),
-				AdditionalTags: s.AdditionalTags(),
-				IPTags:         s.APIServerPublicIP().IPTags,
+				Name:             s.APIServerPublicIP().Name,
+				ResourceGroup:    s.ResourceGroup(),
+				DNSName:          s.APIServerPublicIP().DNSName,
+				IsIPv6:           false, // Currently azure requires an IPv4 lb rule to enable IPv6
+				ClusterName:      s.ClusterName(),
+				Location:         s.Location(),
+				ExtendedLocation: s.ExtendedLocation(),
+				FailureDomains:   s.FailureDomains(),
+				AdditionalTags:   s.AdditionalTags(),
+				IPTags:           s.APIServerPublicIP().IPTags,
 			},
 		}
 	}
@@ -176,14 +179,15 @@ func (s *ClusterScope) PublicIPSpecs() []azure.ResourceSpecGetter {
 	if s.NodeOutboundLB() != nil {
 		for _, ip := range s.NodeOutboundLB().FrontendIPs {
 			publicIPSpecs = append(publicIPSpecs, &publicips.PublicIPSpec{
-				Name:           ip.PublicIP.Name,
-				ResourceGroup:  s.ResourceGroup(),
-				ClusterName:    s.ClusterName(),
-				DNSName:        "",    // Set to default value
-				IsIPv6:         false, // Set to default value
-				Location:       s.Location(),
-				FailureDomains: s.FailureDomains(),
-				AdditionalTags: s.AdditionalTags(),
+				Name:             ip.PublicIP.Name,
+				ResourceGroup:    s.ResourceGroup(),
+				ClusterName:      s.ClusterName(),
+				DNSName:          "",    // Set to default value
+				IsIPv6:           false, // Set to default value
+				Location:         s.Location(),
+				ExtendedLocation: s.ExtendedLocation(),
+				FailureDomains:   s.FailureDomains(),
+				AdditionalTags:   s.AdditionalTags(),
 			})
 		}
 	}
@@ -236,6 +240,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			SubscriptionID:       s.SubscriptionID(),
 			ClusterName:          s.ClusterName(),
 			Location:             s.Location(),
+			ExtendedLocation:     s.ExtendedLocation(),
 			VNetName:             s.Vnet().Name,
 			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			SubnetName:           s.ControlPlaneSubnet().Name,
@@ -258,6 +263,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			SubscriptionID:       s.SubscriptionID(),
 			ClusterName:          s.ClusterName(),
 			Location:             s.Location(),
+			ExtendedLocation:     s.ExtendedLocation(),
 			VNetName:             s.Vnet().Name,
 			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			FrontendIPConfigs:    s.NodeOutboundLB().FrontendIPs,
@@ -278,6 +284,7 @@ func (s *ClusterScope) LBSpecs() []azure.ResourceSpecGetter {
 			SubscriptionID:       s.SubscriptionID(),
 			ClusterName:          s.ClusterName(),
 			Location:             s.Location(),
+			ExtendedLocation:     s.ExtendedLocation(),
 			VNetName:             s.Vnet().Name,
 			VNetResourceGroup:    s.Vnet().ResourceGroup,
 			FrontendIPConfigs:    s.ControlPlaneOutboundLB().FrontendIPs,
@@ -418,20 +425,28 @@ func (s *ClusterScope) VnetPeeringSpecs() []azure.ResourceSpecGetter {
 	peeringSpecs := make([]azure.ResourceSpecGetter, 2*len(s.Vnet().Peerings))
 	for i, peering := range s.Vnet().Peerings {
 		forwardPeering := &vnetpeerings.VnetPeeringSpec{
-			PeeringName:         azure.GenerateVnetPeeringName(s.Vnet().Name, peering.RemoteVnetName),
-			SourceVnetName:      s.Vnet().Name,
-			SourceResourceGroup: s.Vnet().ResourceGroup,
-			RemoteVnetName:      peering.RemoteVnetName,
-			RemoteResourceGroup: peering.ResourceGroup,
-			SubscriptionID:      s.SubscriptionID(),
+			PeeringName:               azure.GenerateVnetPeeringName(s.Vnet().Name, peering.RemoteVnetName),
+			SourceVnetName:            s.Vnet().Name,
+			SourceResourceGroup:       s.Vnet().ResourceGroup,
+			RemoteVnetName:            peering.RemoteVnetName,
+			RemoteResourceGroup:       peering.ResourceGroup,
+			SubscriptionID:            s.SubscriptionID(),
+			AllowForwardedTraffic:     peering.ForwardPeeringProperties.AllowForwardedTraffic,
+			AllowGatewayTransit:       peering.ForwardPeeringProperties.AllowGatewayTransit,
+			AllowVirtualNetworkAccess: peering.ForwardPeeringProperties.AllowVirtualNetworkAccess,
+			UseRemoteGateways:         peering.ForwardPeeringProperties.UseRemoteGateways,
 		}
 		reversePeering := &vnetpeerings.VnetPeeringSpec{
-			PeeringName:         azure.GenerateVnetPeeringName(peering.RemoteVnetName, s.Vnet().Name),
-			SourceVnetName:      peering.RemoteVnetName,
-			SourceResourceGroup: peering.ResourceGroup,
-			RemoteVnetName:      s.Vnet().Name,
-			RemoteResourceGroup: s.Vnet().ResourceGroup,
-			SubscriptionID:      s.SubscriptionID(),
+			PeeringName:               azure.GenerateVnetPeeringName(peering.RemoteVnetName, s.Vnet().Name),
+			SourceVnetName:            peering.RemoteVnetName,
+			SourceResourceGroup:       peering.ResourceGroup,
+			RemoteVnetName:            s.Vnet().Name,
+			RemoteResourceGroup:       s.Vnet().ResourceGroup,
+			SubscriptionID:            s.SubscriptionID(),
+			AllowForwardedTraffic:     peering.ReversePeeringProperties.AllowForwardedTraffic,
+			AllowGatewayTransit:       peering.ReversePeeringProperties.AllowGatewayTransit,
+			AllowVirtualNetworkAccess: peering.ReversePeeringProperties.AllowVirtualNetworkAccess,
+			UseRemoteGateways:         peering.ReversePeeringProperties.UseRemoteGateways,
 		}
 		peeringSpecs[i*2] = forwardPeering
 		peeringSpecs[i*2+1] = reversePeering
@@ -443,12 +458,13 @@ func (s *ClusterScope) VnetPeeringSpecs() []azure.ResourceSpecGetter {
 // VNetSpec returns the virtual network spec.
 func (s *ClusterScope) VNetSpec() azure.ResourceSpecGetter {
 	return &virtualnetworks.VNetSpec{
-		ResourceGroup:  s.Vnet().ResourceGroup,
-		Name:           s.Vnet().Name,
-		CIDRs:          s.Vnet().CIDRBlocks,
-		Location:       s.Location(),
-		ClusterName:    s.ClusterName(),
-		AdditionalTags: s.AdditionalTags(),
+		ResourceGroup:    s.Vnet().ResourceGroup,
+		Name:             s.Vnet().Name,
+		CIDRs:            s.Vnet().CIDRBlocks,
+		ExtendedLocation: s.ExtendedLocation(),
+		Location:         s.Location(),
+		ClusterName:      s.ClusterName(),
+		AdditionalTags:   s.AdditionalTags(),
 	}
 }
 
@@ -519,12 +535,14 @@ func (s *ClusterScope) AzureBastionSpec() azure.ResourceSpecGetter {
 		publicIPID := azure.PublicIPID(s.SubscriptionID(), s.ResourceGroup(), s.AzureBastion().PublicIP.Name)
 
 		return &bastionhosts.AzureBastionSpec{
-			Name:          s.AzureBastion().Name,
-			ResourceGroup: s.ResourceGroup(),
-			Location:      s.Location(),
-			ClusterName:   s.ClusterName(),
-			SubnetID:      subnetID,
-			PublicIPID:    publicIPID,
+			Name:            s.AzureBastion().Name,
+			ResourceGroup:   s.ResourceGroup(),
+			Location:        s.Location(),
+			ClusterName:     s.ClusterName(),
+			SubnetID:        subnetID,
+			PublicIPID:      publicIPID,
+			Sku:             s.AzureBastion().Sku,
+			EnableTunneling: s.AzureBastion().EnableTunneling,
 		}
 	}
 
@@ -539,10 +557,10 @@ func (s *ClusterScope) Vnet() *infrav1.VnetSpec {
 // IsVnetManaged returns true if the vnet is managed.
 func (s *ClusterScope) IsVnetManaged() bool {
 	if s.cache.isVnetManaged != nil {
-		return to.Bool(s.cache.isVnetManaged)
+		return pointer.BoolDeref(s.cache.isVnetManaged, false)
 	}
 	isVnetManaged := s.Vnet().ID == "" || s.Vnet().Tags.HasOwned(s.ClusterName())
-	s.cache.isVnetManaged = to.BoolPtr(isVnetManaged)
+	s.cache.isVnetManaged = pointer.Bool(isVnetManaged)
 	return isVnetManaged
 }
 
@@ -733,6 +751,27 @@ func (s *ClusterScope) CloudProviderConfigOverrides() *infrav1.CloudProviderConf
 	return s.AzureCluster.Spec.CloudProviderConfigOverrides
 }
 
+// ExtendedLocationName returns ExtendedLocation name for the cluster.
+func (s *ClusterScope) ExtendedLocationName() string {
+	if s.ExtendedLocation() == nil {
+		return ""
+	}
+	return s.ExtendedLocation().Name
+}
+
+// ExtendedLocationType returns ExtendedLocation type for the cluster.
+func (s *ClusterScope) ExtendedLocationType() string {
+	if s.ExtendedLocation() == nil {
+		return ""
+	}
+	return s.ExtendedLocation().Type
+}
+
+// ExtendedLocation returns the cluster extendedLocation.
+func (s *ClusterScope) ExtendedLocation() *infrav1.ExtendedLocationSpec {
+	return s.AzureCluster.Spec.ExtendedLocation
+}
+
 // GenerateFQDN generates a fully qualified domain name, based on a hash, cluster name and cluster location.
 func (s *ClusterScope) GenerateFQDN(ipName string) string {
 	h := fnv.New32a()
@@ -758,7 +797,7 @@ func (s *ClusterScope) GenerateLegacyFQDN() (ip string, domain string) {
 // ListOptionsLabelSelector returns a ListOptions with a label selector for clusterName.
 func (s *ClusterScope) ListOptionsLabelSelector() client.ListOption {
 	return client.MatchingLabels(map[string]string{
-		clusterv1.ClusterLabelName: s.Cluster.Name,
+		clusterv1.ClusterNameLabel: s.Cluster.Name,
 	})
 }
 
@@ -788,6 +827,7 @@ func (s *ClusterScope) PatchObject(ctx context.Context) error {
 			infrav1.PrivateDNSZoneReadyCondition,
 			infrav1.PrivateDNSLinkReadyCondition,
 			infrav1.PrivateDNSRecordReadyCondition,
+			infrav1.PrivateEndpointsReadyCondition,
 		}})
 }
 
@@ -855,10 +895,10 @@ func (s *ClusterScope) SetControlPlaneSecurityRules() {
 				Priority:         2200,
 				Protocol:         infrav1.SecurityGroupProtocolTCP,
 				Direction:        infrav1.SecurityRuleDirectionInbound,
-				Source:           to.StringPtr("*"),
-				SourcePorts:      to.StringPtr("*"),
-				Destination:      to.StringPtr("*"),
-				DestinationPorts: to.StringPtr("22"),
+				Source:           pointer.String("*"),
+				SourcePorts:      pointer.String("*"),
+				Destination:      pointer.String("*"),
+				DestinationPorts: pointer.String("22"),
 			},
 			infrav1.SecurityRule{
 				Name:             "allow_apiserver",
@@ -866,10 +906,10 @@ func (s *ClusterScope) SetControlPlaneSecurityRules() {
 				Priority:         2201,
 				Protocol:         infrav1.SecurityGroupProtocolTCP,
 				Direction:        infrav1.SecurityRuleDirectionInbound,
-				Source:           to.StringPtr("*"),
-				SourcePorts:      to.StringPtr("*"),
-				Destination:      to.StringPtr("*"),
-				DestinationPorts: to.StringPtr(strconv.Itoa(int(s.APIServerPort()))),
+				Source:           pointer.String("*"),
+				SourcePorts:      pointer.String("*"),
+				Destination:      pointer.String("*"),
+				DestinationPorts: pointer.String(strconv.Itoa(int(s.APIServerPort()))),
 			},
 		}
 		s.AzureCluster.Spec.NetworkSpec.UpdateControlPlaneSubnet(subnet)
@@ -1005,4 +1045,58 @@ func (s *ClusterScope) TagsSpecs() []azure.TagsSpec {
 			Annotation: azure.RGTagsLastAppliedAnnotation,
 		},
 	}
+}
+
+// PrivateEndpointSpecs returns the private endpoint specs.
+func (s *ClusterScope) PrivateEndpointSpecs() []azure.ResourceSpecGetter {
+	numberOfSubnets := len(s.AzureCluster.Spec.NetworkSpec.Subnets)
+	if s.IsAzureBastionEnabled() {
+		numberOfSubnets++
+	}
+
+	privateEndpointSpecs := make([]azure.ResourceSpecGetter, 0, numberOfSubnets)
+
+	subnets := s.AzureCluster.Spec.NetworkSpec.Subnets
+	if s.IsAzureBastionEnabled() {
+		subnets = append(subnets, s.AzureCluster.Spec.BastionSpec.AzureBastion.Subnet)
+	}
+
+	for _, subnet := range subnets {
+		privateEndpointSpecs = append(privateEndpointSpecs, s.getPrivateEndpoints(subnet)...)
+	}
+
+	return privateEndpointSpecs
+}
+
+func (s *ClusterScope) getPrivateEndpoints(subnet infrav1.SubnetSpec) []azure.ResourceSpecGetter {
+	privateEndpointSpecs := make([]azure.ResourceSpecGetter, 0)
+
+	for _, privateEndpoint := range subnet.PrivateEndpoints {
+		privateEndpointSpec := &privateendpoints.PrivateEndpointSpec{
+			Name:                       privateEndpoint.Name,
+			ResourceGroup:              s.ResourceGroup(),
+			Location:                   privateEndpoint.Location,
+			CustomNetworkInterfaceName: privateEndpoint.CustomNetworkInterfaceName,
+			PrivateIPAddresses:         privateEndpoint.PrivateIPAddresses,
+			SubnetID:                   subnet.ID,
+			ApplicationSecurityGroups:  privateEndpoint.ApplicationSecurityGroups,
+			ManualApproval:             privateEndpoint.ManualApproval,
+			ClusterName:                s.ClusterName(),
+			AdditionalTags:             s.AdditionalTags(),
+		}
+
+		for _, privateLinkServiceConnection := range privateEndpoint.PrivateLinkServiceConnections {
+			pl := privateendpoints.PrivateLinkServiceConnection{
+				PrivateLinkServiceID: privateLinkServiceConnection.PrivateLinkServiceID,
+				Name:                 privateLinkServiceConnection.Name,
+				RequestMessage:       privateLinkServiceConnection.RequestMessage,
+				GroupIDs:             privateLinkServiceConnection.GroupIDs,
+			}
+			privateEndpointSpec.PrivateLinkServiceConnections = append(privateEndpointSpec.PrivateLinkServiceConnections, pl)
+		}
+
+		privateEndpointSpecs = append(privateEndpointSpecs, privateEndpointSpec)
+	}
+
+	return privateEndpointSpecs
 }

@@ -24,21 +24,22 @@ import (
 
 	azureautorest "github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util/conditions"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -113,7 +114,7 @@ func TestMachinePoolScope_NetworkInterfaces(t *testing.T) {
 					},
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
-							AcceleratedNetworking: to.BoolPtr(true),
+							AcceleratedNetworking: pointer.Bool(true),
 							SubnetName:            "node-subnet",
 						},
 					},
@@ -181,70 +182,6 @@ func TestMachinePoolScope_NetworkInterfaces(t *testing.T) {
 	}
 }
 
-func TestMachinePoolScope_SetBootstrapConditions(t *testing.T) {
-	cases := []struct {
-		Name   string
-		Setup  func() (provisioningState string, extensionName string)
-		Verify func(g *WithT, amp *infrav1exp.AzureMachinePool, err error)
-	}{
-		{
-			Name: "should set bootstrap succeeded condition if provisioning state succeeded",
-			Setup: func() (provisioningState string, extensionName string) {
-				return string(infrav1.Succeeded), "foo"
-			},
-			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, err error) {
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(conditions.IsTrue(amp, infrav1.BootstrapSucceededCondition))
-			},
-		},
-		{
-			Name: "should set bootstrap succeeded false condition with reason if provisioning state creating",
-			Setup: func() (provisioningState string, extensionName string) {
-				return string(infrav1.Creating), "bazz"
-			},
-			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, err error) {
-				g.Expect(err).To(MatchError("extension is still in provisioning state. This likely means that bootstrapping has not yet completed on the VM. Object will be requeued after 30s"))
-				g.Expect(conditions.IsFalse(amp, infrav1.BootstrapSucceededCondition))
-				g.Expect(conditions.GetReason(amp, infrav1.BootstrapSucceededCondition)).To(Equal(infrav1.BootstrapInProgressReason))
-				severity := conditions.GetSeverity(amp, infrav1.BootstrapSucceededCondition)
-				g.Expect(severity).NotTo(BeNil())
-				g.Expect(*severity).To(Equal(clusterv1.ConditionSeverityInfo))
-			},
-		},
-		{
-			Name: "should set bootstrap succeeded false condition with reason if provisioning state failed",
-			Setup: func() (provisioningState string, extensionName string) {
-				return string(infrav1.Failed), "buzz"
-			},
-			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, err error) {
-				g.Expect(err).To(MatchError("reconcile error that cannot be recovered occurred: extension state failed. This likely means the Kubernetes node bootstrapping process failed or timed out. Check VM boot diagnostics logs to learn more. Object will not be requeued"))
-				g.Expect(conditions.IsFalse(amp, infrav1.BootstrapSucceededCondition))
-				g.Expect(conditions.GetReason(amp, infrav1.BootstrapSucceededCondition)).To(Equal(infrav1.BootstrapFailedReason))
-				severity := conditions.GetSeverity(amp, infrav1.BootstrapSucceededCondition)
-				g.Expect(severity).NotTo(BeNil())
-				g.Expect(*severity).To(Equal(clusterv1.ConditionSeverityError))
-			},
-		},
-	}
-
-	for _, c := range cases {
-		t.Run(c.Name, func(t *testing.T) {
-			var (
-				g        = NewWithT(t)
-				mockCtrl = gomock.NewController(t)
-			)
-			defer mockCtrl.Finish()
-
-			state, name := c.Setup()
-			s := &MachinePoolScope{
-				AzureMachinePool: &infrav1exp.AzureMachinePool{},
-			}
-			err := s.SetBootstrapConditions(context.TODO(), state, name)
-			c.Verify(g, s.AzureMachinePool, err)
-		})
-	}
-}
-
 func TestMachinePoolScope_MaxSurge(t *testing.T) {
 	cases := []struct {
 		Name   string
@@ -261,7 +198,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		{
 			Name: "default surge should be 1 regardless of replica count with no surger",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
-				mp.Spec.Replicas = to.Int32Ptr(3)
+				mp.Spec.Replicas = pointer.Int32(3)
 			},
 			Verify: func(g *WithT, surge int, err error) {
 				g.Expect(surge).To(Equal(1))
@@ -271,7 +208,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		{
 			Name: "default surge should be 2 as specified by the surger",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
-				mp.Spec.Replicas = to.Int32Ptr(3)
+				mp.Spec.Replicas = pointer.Int32(3)
 				two := intstr.FromInt(2)
 				amp.Spec.Strategy = infrav1exp.AzureMachinePoolDeploymentStrategy{
 					Type: infrav1exp.RollingUpdateAzureMachinePoolDeploymentStrategyType,
@@ -288,7 +225,7 @@ func TestMachinePoolScope_MaxSurge(t *testing.T) {
 		{
 			Name: "default surge should be 2 (50%) of the desired replicas",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
-				mp.Spec.Replicas = to.Int32Ptr(4)
+				mp.Spec.Replicas = pointer.Int32(4)
 				fiftyPercent := intstr.FromString("50%")
 				amp.Spec.Strategy = infrav1exp.AzureMachinePoolDeploymentStrategy{
 					Type: infrav1exp.RollingUpdateAzureMachinePoolDeploymentStrategyType,
@@ -400,7 +337,7 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 		{
 			Name: "should set and default the image if no image is specified for the AzureMachinePool",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
-				mp.Spec.Template.Spec.Version = to.StringPtr("v1.19.11")
+				mp.Spec.Template.Spec.Version = pointer.String("v1.19.11")
 			},
 			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, vmImage *infrav1.Image, err error) {
 				g.Expect(err).NotTo(HaveOccurred())
@@ -422,7 +359,7 @@ func TestMachinePoolScope_GetVMImage(t *testing.T) {
 		{
 			Name: "should not default or set the image on the AzureMachinePool if it already exists",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool) {
-				mp.Spec.Template.Spec.Version = to.StringPtr("v1.19.11")
+				mp.Spec.Template.Spec.Version = pointer.String("v1.19.11")
 				amp.Spec.Template.Image = &infrav1.Image{
 					Marketplace: &infrav1.AzureMarketplaceImage{
 						ImagePlan: infrav1.ImagePlan{
@@ -506,7 +443,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 			Name: "should requeue if the machine is not in succeeded state",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				creating := infrav1.Creating
-				mp.Spec.Replicas = to.Int32Ptr(0)
+				mp.Spec.Replicas = pointer.Int32(0)
 				amp.Status.ProvisioningState = &creating
 			},
 			Verify: func(g *WithT, requeue bool) {
@@ -517,7 +454,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 			Name: "should not requeue if the machine is in succeeded state",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
-				mp.Spec.Replicas = to.Int32Ptr(0)
+				mp.Spec.Replicas = pointer.Int32(0)
 				amp.Status.ProvisioningState = &succeeded
 			},
 			Verify: func(g *WithT, requeue bool) {
@@ -528,7 +465,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 			Name: "should requeue if the machine is in succeeded state but desired replica count does not match",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
-				mp.Spec.Replicas = to.Int32Ptr(1)
+				mp.Spec.Replicas = pointer.Int32(1)
 				amp.Status.ProvisioningState = &succeeded
 			},
 			Verify: func(g *WithT, requeue bool) {
@@ -539,7 +476,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 			Name: "should not requeue if the machine is in succeeded state but desired replica count does match",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
-				mp.Spec.Replicas = to.Int32Ptr(1)
+				mp.Spec.Replicas = pointer.Int32(1)
 				amp.Status.ProvisioningState = &succeeded
 				vmss.Instances = []azure.VMSSVM{
 					{
@@ -555,7 +492,7 @@ func TestMachinePoolScope_NeedsRequeue(t *testing.T) {
 			Name: "should requeue if an instance VM image does not match the VM image of the VMSS",
 			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmss *azure.VMSS) {
 				succeeded := infrav1.Succeeded
-				mp.Spec.Replicas = to.Int32Ptr(1)
+				mp.Spec.Replicas = pointer.Int32(1)
 				amp.Status.ProvisioningState = &succeeded
 				vmss.Instances = []azure.VMSSVM{
 					{
@@ -637,7 +574,7 @@ func TestMachinePoolScope_updateReplicasAndProviderIDs(t *testing.T) {
 			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, err error) {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(amp.Status.Replicas).To(BeEquivalentTo(3))
-				g.Expect(amp.Spec.ProviderIDList).To(ConsistOf("/foo/ampm0", "/foo/ampm1", "/foo/ampm2"))
+				g.Expect(amp.Spec.ProviderIDList).To(ConsistOf("azure://foo/ampm0", "azure://foo/ampm1", "azure://foo/ampm2"))
 			},
 		},
 		{
@@ -659,7 +596,7 @@ func TestMachinePoolScope_updateReplicasAndProviderIDs(t *testing.T) {
 			Name: "should only count machines with matching cluster name label",
 			Setup: func(cb *fake.ClientBuilder) {
 				machines := getReadyAzureMachinePoolMachines(3)
-				machines[0].Labels[clusterv1.ClusterLabelName] = "not_correct"
+				machines[0].Labels[clusterv1.ClusterNameLabel] = "not_correct"
 				for _, machine := range machines {
 					obj := machine
 					cb.WithObjects(&obj)
@@ -718,6 +655,123 @@ func TestMachinePoolScope_updateReplicasAndProviderIDs(t *testing.T) {
 			}
 			err := s.updateReplicasAndProviderIDs(context.TODO())
 			c.Verify(g, s.AzureMachinePool, err)
+		})
+	}
+}
+
+func TestMachinePoolScope_RoleAssignmentSpecs(t *testing.T) {
+	tests := []struct {
+		name             string
+		machinePoolScope MachinePoolScope
+		want             []azure.ResourceSpecGetter
+	}{
+		{
+			name: "returns empty if VM identity is not system assigned",
+			machinePoolScope: MachinePoolScope{
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine-name",
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{},
+		},
+		{
+			name: "returns role assignment spec if VM identity is system assigned",
+			machinePoolScope: MachinePoolScope{
+				MachinePool: &expv1.MachinePool{},
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Identity: infrav1.VMIdentitySystemAssigned,
+						SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+							Name: "role-assignment-name",
+						},
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						EnvironmentSettings: auth.EnvironmentSettings{
+							Values: map[string]string{
+								auth.SubscriptionID: "123",
+							},
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&roleassignments.RoleAssignmentSpec{
+					ResourceType:  azure.VirtualMachineScaleSet,
+					MachineName:   "machine-name",
+					Name:          "role-assignment-name",
+					ResourceGroup: "my-rg",
+					PrincipalID:   pointer.String("fakePrincipalID"),
+				},
+			},
+		},
+		{
+			name: "returns role assignment spec if scope and role definition ID are set",
+			machinePoolScope: MachinePoolScope{
+				MachinePool: &expv1.MachinePool{},
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Identity: infrav1.VMIdentitySystemAssigned,
+						SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+							Name:         "role-assignment-name",
+							Scope:        "scope",
+							DefinitionID: "role-definition-id",
+						},
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						EnvironmentSettings: auth.EnvironmentSettings{
+							Values: map[string]string{
+								auth.SubscriptionID: "123",
+							},
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&roleassignments.RoleAssignmentSpec{
+					ResourceType:     azure.VirtualMachineScaleSet,
+					MachineName:      "machine-name",
+					Name:             "role-assignment-name",
+					ResourceGroup:    "my-rg",
+					Scope:            "scope",
+					RoleDefinitionID: "role-definition-id",
+					PrincipalID:      pointer.String("fakePrincipalID"),
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.machinePoolScope.RoleAssignmentSpecs(pointer.String("fakePrincipalID")); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("RoleAssignmentSpecs() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
@@ -1043,6 +1097,7 @@ func TestMachinePoolScope_VMSSExtensionSpecs(t *testing.T) {
 
 func getReadyAzureMachinePoolMachines(count int32) []infrav1exp.AzureMachinePoolMachine {
 	machines := make([]infrav1exp.AzureMachinePoolMachine, count)
+	succeeded := infrav1.Succeeded
 	for i := 0; i < int(count); i++ {
 		machines[i] = infrav1exp.AzureMachinePoolMachine{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1056,18 +1111,153 @@ func getReadyAzureMachinePoolMachines(count int32) []infrav1exp.AzureMachinePool
 					},
 				},
 				Labels: map[string]string{
-					clusterv1.ClusterLabelName:      "cluster1",
+					clusterv1.ClusterNameLabel:      "cluster1",
 					infrav1exp.MachinePoolNameLabel: "amp1",
 				},
 			},
 			Spec: infrav1exp.AzureMachinePoolMachineSpec{
-				ProviderID: fmt.Sprintf("/foo/ampm%d", i),
+				ProviderID: fmt.Sprintf("azure://foo/ampm%d", i),
 			},
 			Status: infrav1exp.AzureMachinePoolMachineStatus{
-				Ready: true,
+				Ready:             true,
+				ProvisioningState: &succeeded,
 			},
 		}
 	}
 
 	return machines
+}
+
+func TestMachinePoolScope_applyAzureMachinePoolMachines(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scheme := runtime.NewScheme()
+	_ = clusterv1.AddToScheme(scheme)
+	_ = infrav1exp.AddToScheme(scheme)
+
+	tests := []struct {
+		Name   string
+		Setup  func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmssState *azure.VMSS, cb *fake.ClientBuilder)
+		Verify func(g *WithT, amp *infrav1exp.AzureMachinePool, c client.Client, err error)
+	}{
+		{
+			Name: "if MachinePool is externally managed and overProvisionCount > 0, do not try to reduce replicas",
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmssState *azure.VMSS, cb *fake.ClientBuilder) {
+				mp.Annotations = map[string]string{clusterv1.ReplicasManagedByAnnotation: "cluster-autoscaler"}
+				mp.Spec.Replicas = pointer.Int32(1)
+
+				for _, machine := range getReadyAzureMachinePoolMachines(2) {
+					obj := machine
+					cb.WithObjects(&obj)
+				}
+				vmssState.Instances = []azure.VMSSVM{
+					{
+						ID:   "foo/ampm0",
+						Name: "ampm0",
+					},
+					{
+						ID:   "foo/ampm1",
+						Name: "ampm1",
+					},
+				}
+			},
+			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, c client.Client, err error) {
+				g.Expect(err).NotTo(HaveOccurred())
+				list := infrav1exp.AzureMachinePoolMachineList{}
+				g.Expect(c.List(ctx, &list)).NotTo(HaveOccurred())
+				g.Expect(len(list.Items)).Should(Equal(2))
+			},
+		},
+		{
+			Name: "if MachinePool is not externally managed and overProvisionCount > 0, reduce replicas",
+			Setup: func(mp *expv1.MachinePool, amp *infrav1exp.AzureMachinePool, vmssState *azure.VMSS, cb *fake.ClientBuilder) {
+				mp.Spec.Replicas = pointer.Int32(1)
+
+				for _, machine := range getReadyAzureMachinePoolMachines(2) {
+					obj := machine
+					cb.WithObjects(&obj)
+				}
+				vmssState.Instances = []azure.VMSSVM{
+					{
+						ID:   "foo/ampm0",
+						Name: "ampm0",
+					},
+					{
+						ID:   "foo/ampm1",
+						Name: "ampm1",
+					},
+				}
+			},
+			Verify: func(g *WithT, amp *infrav1exp.AzureMachinePool, c client.Client, err error) {
+				g.Expect(err).NotTo(HaveOccurred())
+				list := infrav1exp.AzureMachinePoolMachineList{}
+				g.Expect(c.List(ctx, &list)).NotTo(HaveOccurred())
+				g.Expect(len(list.Items)).Should(Equal(1))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.Name, func(t *testing.T) {
+			var (
+				g        = NewWithT(t)
+				mockCtrl = gomock.NewController(t)
+				cb       = fake.NewClientBuilder().WithScheme(scheme)
+				cluster  = &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: clusterv1.ClusterSpec{
+						InfrastructureRef: &corev1.ObjectReference{
+							Name: "azCluster1",
+						},
+					},
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				}
+				mp = &expv1.MachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "mp1",
+						Namespace: "default",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								Name:       "cluster1",
+								Kind:       "Cluster",
+								APIVersion: clusterv1.GroupVersion.String(),
+							},
+						},
+					},
+				}
+				amp = &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "amp1",
+						Namespace: "default",
+						OwnerReferences: []metav1.OwnerReference{
+							{
+								Name:       "mp1",
+								Kind:       "MachinePool",
+								APIVersion: expv1.GroupVersion.String(),
+							},
+						},
+					},
+				}
+				vmssState = &azure.VMSS{}
+			)
+			defer mockCtrl.Finish()
+
+			tt.Setup(mp, amp, vmssState, cb.WithObjects(amp, cluster))
+			s := &MachinePoolScope{
+				client: cb.Build(),
+				ClusterScoper: &ClusterScope{
+					Cluster: cluster,
+				},
+				MachinePool:      mp,
+				AzureMachinePool: amp,
+				vmssState:        vmssState,
+			}
+			err := s.applyAzureMachinePoolMachines(ctx)
+			tt.Verify(g, s.AzureMachinePool, s.client, err)
+		})
+	}
 }

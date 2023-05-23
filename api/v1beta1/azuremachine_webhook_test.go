@@ -17,12 +17,18 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -146,7 +152,8 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.machine.ValidateCreate()
+			mw := &azureMachineWebhook{}
+			err := mw.ValidateCreate(context.Background(), tc.machine)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -289,6 +296,50 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					RoleAssignmentName: "role",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalidTest: azuremachine.spec.RoleAssignmentName is immutable",
+			oldMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+						Name:         "role",
+						Scope:        "scope",
+						DefinitionID: "definitionID",
+					},
+				},
+			},
+			newMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+						Name:         "not-role",
+						Scope:        "scope",
+						DefinitionID: "definitionID",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "validTest: azuremachine.spec.SystemAssignedIdentityRole is immutable",
+			oldMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+						Name:         "role",
+						Scope:        "scope",
+						DefinitionID: "definitionID",
+					},
+				},
+			},
+			newMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+						Name:         "role",
+						Scope:        "scope",
+						DefinitionID: "definitionID",
+					},
 				},
 			},
 			wantErr: false,
@@ -486,6 +537,34 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "validTest: azuremachine.spec.AcceleratedNetworking transition(from true) to nil is acceptable",
+			oldMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					AcceleratedNetworking: pointer.Bool(true),
+				},
+			},
+			newMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					AcceleratedNetworking: nil,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "validTest: azuremachine.spec.AcceleratedNetworking transition(from false) to nil is acceptable",
+			oldMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					AcceleratedNetworking: pointer.Bool(false),
+				},
+			},
+			newMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					AcceleratedNetworking: nil,
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "invalidTest: azuremachine.spec.SpotVMOptions is immutable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
@@ -650,7 +729,8 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.newMachine.ValidateUpdate(tc.oldMachine)
+			mw := &azureMachineWebhook{}
+			err := mw.ValidateUpdate(context.Background(), tc.oldMachine, tc.newMachine)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -660,6 +740,26 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 	}
 }
 
+type mockDefaultClient struct {
+	client.Client
+	SubscriptionID string
+}
+
+func (m mockDefaultClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	switch obj := obj.(type) {
+	case *AzureCluster:
+		obj.Spec.SubscriptionID = m.SubscriptionID
+	case *clusterv1.Cluster:
+		obj.Spec.InfrastructureRef = &corev1.ObjectReference{
+			Kind: "AzureCluster",
+			Name: "test-cluster",
+		}
+	default:
+		return errors.New("invalid object type")
+	}
+	return nil
+}
+
 func TestAzureMachine_Default(t *testing.T) {
 	g := NewWithT(t)
 
@@ -667,23 +767,38 @@ func TestAzureMachine_Default(t *testing.T) {
 		machine *AzureMachine
 	}
 
+	testSubscriptionID := "test-subscription-id"
+	mockClient := mockDefaultClient{SubscriptionID: testSubscriptionID}
 	existingPublicKey := validSSHPublicKey
 	publicKeyExistTest := test{machine: createMachineWithSSHPublicKey(existingPublicKey)}
 	publicKeyNotExistTest := test{machine: createMachineWithSSHPublicKey("")}
+	testObjectMeta := metav1.ObjectMeta{
+		Labels: map[string]string{
+			clusterv1.ClusterNameLabel: "test-cluster",
+		},
+	}
 
-	publicKeyExistTest.machine.Default()
+	mw := &azureMachineWebhook{
+		Client: mockClient,
+	}
+
+	err := mw.Default(context.Background(), publicKeyExistTest.machine)
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyExistTest.machine.Spec.SSHPublicKey).To(Equal(existingPublicKey))
 
-	publicKeyNotExistTest.machine.Default()
+	err = mw.Default(context.Background(), publicKeyNotExistTest.machine)
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyNotExistTest.machine.Spec.SSHPublicKey).To(Not(BeEmpty()))
 
-	cacheTypeNotSpecifiedTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{OSDisk: OSDisk{CachingType: ""}}}}
-	cacheTypeNotSpecifiedTest.machine.Default()
+	cacheTypeNotSpecifiedTest := test{machine: &AzureMachine{ObjectMeta: testObjectMeta, Spec: AzureMachineSpec{OSDisk: OSDisk{CachingType: ""}}}}
+	err = mw.Default(context.Background(), cacheTypeNotSpecifiedTest.machine)
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(cacheTypeNotSpecifiedTest.machine.Spec.OSDisk.CachingType).To(Equal("None"))
 
 	for _, possibleCachingType := range compute.PossibleCachingTypesValues() {
-		cacheTypeSpecifiedTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{OSDisk: OSDisk{CachingType: string(possibleCachingType)}}}}
-		cacheTypeSpecifiedTest.machine.Default()
+		cacheTypeSpecifiedTest := test{machine: &AzureMachine{ObjectMeta: testObjectMeta, Spec: AzureMachineSpec{OSDisk: OSDisk{CachingType: string(possibleCachingType)}}}}
+		err = mw.Default(context.Background(), cacheTypeSpecifiedTest.machine)
+		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(cacheTypeSpecifiedTest.machine.Spec.OSDisk.CachingType).To(Equal(string(possibleCachingType)))
 	}
 }
@@ -769,10 +884,14 @@ func createMachineWithOsDiskCacheType(cacheType string) *AzureMachine {
 func createMachineWithRoleAssignmentName() *AzureMachine {
 	machine := &AzureMachine{
 		Spec: AzureMachineSpec{
-			SSHPublicKey:       validSSHPublicKey,
-			OSDisk:             validOSDisk,
-			Identity:           VMIdentitySystemAssigned,
-			RoleAssignmentName: "c6e3443d-bc11-4335-8819-ab6637b10586",
+			SSHPublicKey: validSSHPublicKey,
+			OSDisk:       validOSDisk,
+			Identity:     VMIdentitySystemAssigned,
+			SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+				Name:         "c6e3443d-bc11-4335-8819-ab6637b10586",
+				Scope:        "test-scope",
+				DefinitionID: "test-definition-id",
+			},
 		},
 	}
 	return machine
@@ -784,6 +903,10 @@ func createMachineWithoutRoleAssignmentName() *AzureMachine {
 			SSHPublicKey: validSSHPublicKey,
 			OSDisk:       validOSDisk,
 			Identity:     VMIdentitySystemAssigned,
+			SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+				Scope:        "test-scope",
+				DefinitionID: "test-definition-id",
+			},
 		},
 	}
 	return machine

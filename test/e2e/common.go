@@ -32,20 +32,23 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/blang/semver"
 	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/ginkgo/v2/types"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	e2e_namespace "sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/namespace"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	kubeadmv1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
+	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util/kubeconfig"
-	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Test suite constants for e2e config variables
@@ -53,6 +56,8 @@ const (
 	AddonsPath                      = "ADDONS_PATH"
 	RedactLogScriptPath             = "REDACT_LOG_SCRIPT"
 	AzureLocation                   = "AZURE_LOCATION"
+	AzureExtendedLocationType       = "AZURE_EXTENDEDLOCATION_TYPE"
+	AzureExtendedLocationName       = "AZURE_EXTENDEDLOCATION_NAME"
 	AzureResourceGroup              = "AZURE_RESOURCE_GROUP"
 	AzureVNetName                   = "AZURE_VNET_NAME"
 	AzureCustomVNetName             = "AZURE_CUSTOM_VNET_NAME"
@@ -75,6 +80,8 @@ const (
 	Timestamp                       = "TIMESTAMP"
 	AKSKubernetesVersion            = "AKS_KUBERNETES_VERSION"
 	AKSKubernetesVersionUpgradeFrom = "AKS_KUBERNETES_VERSION_UPGRADE_FROM"
+	FlatcarKubernetesVersion        = "FLATCAR_KUBERNETES_VERSION"
+	FlatcarVersion                  = "FLATCAR_VERSION"
 	SecurityScanFailThreshold       = "SECURITY_SCAN_FAIL_THRESHOLD"
 	SecurityScanContainer           = "SECURITY_SCAN_CONTAINER"
 	ManagedClustersResourceType     = "managedClusters"
@@ -82,6 +89,8 @@ const (
 	capiOfferName                   = "capi"
 	capiWindowsOfferName            = "capi-windows"
 	aksClusterNameSuffix            = "aks"
+	flatcarCAPICommunityGallery     = "flatcar4capi-742ef0cb-dcaa-4ecb-9cb0-bfd2e43dccc0"
+	defaultNamespace                = "default"
 )
 
 func Byf(format string, a ...interface{}) {
@@ -144,13 +153,6 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
 		redactLogs()
 	}()
 
-	if input.Cluster == nil {
-		By("Unable to dump workload cluster logs as the cluster is nil")
-	} else if !input.SkipLogCollection {
-		Byf("Dumping logs from the %q workload cluster", input.Cluster.Name)
-		input.ClusterProxy.CollectWorkloadClusterLogs(ctx, input.Cluster.Namespace, input.Cluster.Name, filepath.Join(input.ArtifactFolder, "clusters", input.Cluster.Name))
-	}
-
 	Logf("Dumping all the Cluster API resources in the %q namespace", input.Namespace.Name)
 	// Dump all Cluster API related resources to artifacts before deleting them.
 	framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
@@ -158,6 +160,13 @@ func dumpSpecResourcesAndCleanup(ctx context.Context, input cleanupInput) {
 		Namespace: input.Namespace.Name,
 		LogPath:   filepath.Join(input.ArtifactFolder, "clusters", input.ClusterProxy.GetName(), "resources"),
 	})
+
+	if input.Cluster == nil {
+		By("Unable to dump workload cluster logs as the cluster is nil")
+	} else if !input.SkipLogCollection {
+		Byf("Dumping logs from the %q workload cluster", input.Cluster.Name)
+		input.ClusterProxy.CollectWorkloadClusterLogs(ctx, input.Cluster.Namespace, input.Cluster.Name, filepath.Join(input.ArtifactFolder, "clusters", input.Cluster.Name))
+	}
 
 	if input.SkipCleanup {
 		return
@@ -219,7 +228,7 @@ func redactLogs() {
 }
 
 func createRestConfig(ctx context.Context, tmpdir, namespace, clusterName string) *rest.Config {
-	cluster := crclient.ObjectKey{
+	cluster := client.ObjectKey{
 		Namespace: namespace,
 		Name:      clusterName,
 	}
@@ -247,15 +256,26 @@ func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCl
 		Namespace: input.ConfigCluster.Namespace,
 	})
 	kubeadmControlPlane := &kubeadmv1.KubeadmControlPlane{}
-	key := crclient.ObjectKey{
+	key := client.ObjectKey{
 		Namespace: cluster.Spec.ControlPlaneRef.Namespace,
 		Name:      cluster.Spec.ControlPlaneRef.Name,
 	}
-	Eventually(func() error {
-		return getter.Get(ctx, key, kubeadmControlPlane)
-	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "Failed to get KubeadmControlPlane object %s/%s", cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+
+	By("Ensuring KubeadmControlPlane is initialized")
+	Eventually(func(g Gomega) {
+		g.Expect(getter.Get(ctx, key, kubeadmControlPlane)).To(Succeed(), "Failed to get KubeadmControlPlane object %s/%s", cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+		g.Expect(kubeadmControlPlane.Status.Initialized).To(BeTrue(), "KubeadmControlPlane is not yet initialized")
+	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "KubeadmControlPlane object %s/%s was not initialized in time", cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+
+	By("Ensuring API Server is reachable before applying Helm charts")
+	Eventually(func(g Gomega) {
+		ns := &corev1.Namespace{}
+		clusterProxy := input.ClusterProxy.GetWorkloadCluster(ctx, input.ConfigCluster.Namespace, input.ConfigCluster.ClusterName)
+		g.Expect(clusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)).To(Succeed(), "Failed to get kube-system namespace")
+	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "API Server was not reachable in time")
+
 	_, hasWindows := cluster.Labels["cni-windows"]
-	if kubeadmControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager.ExtraArgs["cloud-provider"] == "external" {
+	if kubeadmControlPlane.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager.ExtraArgs["cloud-provider"] != "azure" {
 		// There is a co-dependency between cloud-provider and CNI so we install both together if cloud-provider is external.
 		InstallCalicoAndCloudProviderAzureHelmChart(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
 	} else {
@@ -275,10 +295,10 @@ func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCl
 // CheckTestBeforeCleanup checks to see if the current running Ginkgo test failed, and prints
 // a status message regarding cleanup.
 func CheckTestBeforeCleanup() {
-	if CurrentGinkgoTestDescription().Failed {
+	if CurrentSpecReport().State.Is(types.SpecStateFailureStates) {
 		Logf("FAILED!")
 	}
-	Logf("Cleaning up after \"%s\" spec", CurrentGinkgoTestDescription().FullTestText)
+	Logf("Cleaning up after \"%s\" spec", CurrentSpecReport().FullText())
 }
 
 func discoveryAndWaitForControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, result *clusterctl.ApplyClusterTemplateAndWaitResult) *kubeadmv1.KubeadmControlPlane {
@@ -286,4 +306,116 @@ func discoveryAndWaitForControlPlaneInitialized(ctx context.Context, input clust
 		Lister:  input.ClusterProxy.GetClient(),
 		Cluster: result.Cluster,
 	}, input.WaitForControlPlaneIntervals...)
+}
+
+func createApplyClusterTemplateInput(specName string, changes ...func(*clusterctl.ApplyClusterTemplateAndWaitInput)) clusterctl.ApplyClusterTemplateAndWaitInput {
+	input := clusterctl.ApplyClusterTemplateAndWaitInput{
+		ClusterProxy: bootstrapClusterProxy,
+		ConfigCluster: clusterctl.ConfigClusterInput{
+			LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
+			ClusterctlConfigPath:     clusterctlConfigPath,
+			KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
+			InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
+			Flavor:                   clusterctl.DefaultFlavor,
+			Namespace:                "default",
+			ClusterName:              "cluster",
+			KubernetesVersion:        e2eConfig.GetVariable(capi_e2e.KubernetesVersion),
+			ControlPlaneMachineCount: pointer.Int64(1),
+			WorkerMachineCount:       pointer.Int64(1),
+		},
+		WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
+		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
+		WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+	}
+	for _, change := range changes {
+		change(&input)
+	}
+
+	return input
+}
+
+func withClusterProxy(proxy framework.ClusterProxy) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ClusterProxy = proxy
+	}
+}
+
+func withFlavor(flavor string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.Flavor = flavor
+	}
+}
+
+func withNamespace(namespace string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.Namespace = namespace
+	}
+}
+
+func withClusterName(clusterName string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.ClusterName = clusterName
+	}
+}
+
+func withKubernetesVersion(version string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.KubernetesVersion = version
+	}
+}
+
+func withControlPlaneMachineCount(count int64) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.ControlPlaneMachineCount = pointer.Int64(count)
+	}
+}
+
+func withWorkerMachineCount(count int64) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ConfigCluster.WorkerMachineCount = pointer.Int64(count)
+	}
+}
+
+func withClusterInterval(specName string, intervalName string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		if intervalName != "" {
+			input.WaitForClusterIntervals = e2eConfig.GetIntervals(specName, intervalName)
+		}
+	}
+}
+
+func withControlPlaneInterval(specName string, intervalName string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		if intervalName != "" {
+			input.WaitForControlPlaneIntervals = e2eConfig.GetIntervals(specName, intervalName)
+		}
+	}
+}
+
+func withMachineDeploymentInterval(specName string, intervalName string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		if intervalName != "" {
+			input.WaitForMachineDeployments = e2eConfig.GetIntervals(specName, intervalName)
+		}
+	}
+}
+
+func withMachinePoolInterval(specName string, intervalName string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		if intervalName != "" {
+			input.WaitForMachinePools = e2eConfig.GetIntervals(specName, intervalName)
+		}
+	}
+}
+
+func withControlPlaneWaiters(waiters clusterctl.ControlPlaneWaiters) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.ControlPlaneWaiters = waiters
+	}
+}
+
+func withPostMachinesProvisioned(postMachinesProvisioned func()) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.PostMachinesProvisioned = postMachinesProvisioned
+	}
 }

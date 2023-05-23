@@ -1,0 +1,7 @@
+namespace: default
+resources:
+  - ../default
+
+patchesStrategicMerge:
+  - patches/azure-extendedlocation.yaml
+  - patches/azure-remove-natgateway.yaml

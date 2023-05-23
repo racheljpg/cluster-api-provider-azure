@@ -27,7 +27,6 @@ import (
 	goruntime "runtime"
 	"strings"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/go-logr/logr"
 	"github.com/onsi/ginkgo/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,8 +34,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	infrav1alpha3 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha3"
-	infrav1alpha4 "sigs.k8s.io/cluster-api-provider-azure/api/v1alpha4"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/internal/test/record"
@@ -48,7 +46,7 @@ import (
 )
 
 var (
-	logger                 = record.NewLogger(record.WithThreshold(to.IntPtr(1)), record.WithWriter(ginkgo.GinkgoWriter))
+	logger                 = record.NewLogger(record.WithThreshold(pointer.Int(1)), record.WithWriter(ginkgo.GinkgoWriter))
 	scheme                 = runtime.NewScheme()
 	env                    *envtest.Environment
 	clusterAPIVersionRegex = regexp.MustCompile(`^(\W)sigs.k8s.io/cluster-api v(.+)`)
@@ -61,8 +59,6 @@ func init() {
 	utilruntime.Must(expv1.AddToScheme(scheme))
 	utilruntime.Must(infrav1.AddToScheme(scheme))
 	utilruntime.Must(infrav1exp.AddToScheme(scheme))
-	utilruntime.Must(infrav1alpha3.AddToScheme(scheme))
-	utilruntime.Must(infrav1alpha4.AddToScheme(scheme))
 
 	// Get the root of the current file to use in CRD paths.
 	_, filename, _, _ := goruntime.Caller(0) //nolint:dogsled // Ignore "declaration has 3 blank identifiers" check.

@@ -26,8 +26,7 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
@@ -59,7 +58,7 @@ func AKSUpgradeSpec(ctx context.Context, inputGetter func() AKSUpgradeSpecInput)
 	Expect(mgmtClient).NotTo(BeNil())
 
 	By("Upgrading the control plane")
-	var infraControlPlane = &infrav1exp.AzureManagedControlPlane{}
+	var infraControlPlane = &infrav1.AzureManagedControlPlane{}
 	Eventually(func(g Gomega) {
 		err = mgmtClient.Get(ctx, client.ObjectKey{Namespace: input.Cluster.Spec.ControlPlaneRef.Namespace, Name: input.Cluster.Spec.ControlPlaneRef.Name}, infraControlPlane)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -67,16 +66,13 @@ func AKSUpgradeSpec(ctx context.Context, inputGetter func() AKSUpgradeSpecInput)
 		g.Expect(mgmtClient.Update(ctx, infraControlPlane)).To(Succeed())
 	}, inputGetter().WaitForControlPlane...).Should(Succeed())
 
-	Eventually(func() (string, error) {
+	Eventually(func(g Gomega) {
 		aksCluster, err := managedClustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
-		if err != nil {
-			return "", err
-		}
-		if aksCluster.ManagedClusterProperties == nil || aksCluster.ManagedClusterProperties.KubernetesVersion == nil {
-			return "", errors.New("Kubernetes version unknown")
-		}
-		return "v" + *aksCluster.KubernetesVersion, nil
-	}, input.WaitForControlPlane...).Should(Equal(input.KubernetesVersionUpgradeTo))
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(aksCluster.ManagedClusterProperties).NotTo(BeNil())
+		g.Expect(aksCluster.ManagedClusterProperties.KubernetesVersion).NotTo(BeNil())
+		g.Expect("v" + *aksCluster.KubernetesVersion).To(Equal(input.KubernetesVersionUpgradeTo))
+	}, input.WaitForControlPlane...).Should(Succeed())
 
 	By("Upgrading the machinepool instances")
 	framework.UpgradeMachinePoolAndWait(ctx, framework.UpgradeMachinePoolAndWaitInput{

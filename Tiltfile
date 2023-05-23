@@ -19,10 +19,11 @@ settings = {
     "deploy_cert_manager": True,
     "preload_images_for_kind": True,
     "kind_cluster_name": "capz",
-    "capi_version": "v1.3.1",
-    "cert_manager_version": "v1.11.0",
+    "capi_version": "v1.4.2",
+    "cert_manager_version": "v1.11.1",
     "kubernetes_version": "v1.24.6",
     "aks_kubernetes_version": "v1.24.6",
+    "flatcar_version": "3374.2.1",
 }
 
 keys = ["AZURE_SUBSCRIPTION_ID", "AZURE_TENANT_ID", "AZURE_CLIENT_SECRET", "AZURE_CLIENT_ID"]
@@ -33,6 +34,8 @@ settings.update(read_yaml(
     tilt_file,
     default = {},
 ))
+
+os_arch = str(local("go env GOARCH")).rstrip("\n")
 
 if settings.get("trigger_mode") == "manual":
     trigger_mode(TRIGGER_MODE_MANUAL)
@@ -47,7 +50,7 @@ if "default_registry" in settings:
 def deploy_capi():
     version = settings.get("capi_version")
     capi_uri = "https://github.com/kubernetes-sigs/cluster-api/releases/download/{}/cluster-api-components.yaml".format(version)
-    cmd = "curl -sSL {} | {} | {} apply -f -".format(capi_uri, envsubst_cmd, kubectl_cmd)
+    cmd = "curl --retry 3 -sSL {} | {} | {} apply -f -".format(capi_uri, envsubst_cmd, kubectl_cmd)
     local(cmd, quiet = True)
     if settings.get("extra_args"):
         extra_args = settings.get("extra_args")
@@ -105,16 +108,19 @@ def validate_auth():
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.19 as tilt-helper
+FROM golang:1.20 as tilt-helper
 # Support live reloading with Tilt
 RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
     wget --output-document /start.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/start.sh && \
-    chmod +x /start.sh && chmod +x /restart.sh
+    chmod +x /start.sh && chmod +x /restart.sh && \
+    touch /process.txt && chmod 0777 /process.txt `# pre-create PID file to allow even non-root users to run the image`
 """
 
 tilt_dockerfile_header = """
 FROM gcr.io/distroless/base:debug as tilt
-WORKDIR /
+WORKDIR /tilt
+RUN ["/busybox/chmod", "0777", "."]
+COPY --from=tilt-helper /process.txt .
 COPY --from=tilt-helper /start.sh .
 COPY --from=tilt-helper /restart.sh .
 COPY manager .
@@ -163,7 +169,7 @@ def observability():
     k8s_resource(
         workload = "prometheus-operator",
         new_name = "metrics: prometheus-operator",
-        port_forwards = [port_forward(9090, name = "View metrics")],
+        port_forwards = [port_forward(local_port = 9090, container_port = 9090, name = "View metrics")],
         extra_pod_selectors = [{"app": "prometheus"}],
         labels = ["observability"],
     )
@@ -193,12 +199,18 @@ def capz():
             yaml = str(encode_yaml_stream(yaml_dict))
             yaml = fixup_yaml_empty_arrays(yaml)
 
-    ldflags = str(local("hack/version.sh"))
+    # Forge the build command
+    ldflags = "-extldflags \"-static\" " + str(local("hack/version.sh")).rstrip("\n")
+    build_env = "CGO_ENABLED=0 GOOS=linux GOARCH={arch}".format(arch = os_arch)
+    build_cmd = "{build_env} go build -ldflags '{ldflags}' -o .tiltbuild/manager".format(
+        build_env = build_env,
+        ldflags = ldflags,
+    )
 
     # Set up a local_resource build of the provider's manager binary.
     local_resource(
         "manager",
-        cmd = 'mkdir -p .tiltbuild;CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags  \'-extldflags "-static" ' + ldflags + "' -o .tiltbuild/manager",
+        cmd = "mkdir -p .tiltbuild; " + build_cmd,
         deps = ["api", "azure", "config", "controllers", "exp", "feature", "pkg", "util", "go.mod", "go.sum", "main.go"],
         labels = ["cluster-api"],
     )
@@ -208,7 +220,7 @@ def capz():
         tilt_dockerfile_header,
     ])
 
-    entrypoint = ["sh", "/start.sh", "/manager"]
+    entrypoint = ["sh", "/tilt/start.sh", "/tilt/manager"]
     extra_args = settings.get("extra_args")
     if extra_args:
         entrypoint.extend(extra_args)
@@ -223,8 +235,8 @@ def capz():
         entrypoint = entrypoint,
         only = "manager",
         live_update = [
-            sync(".tiltbuild/manager", "/manager"),
-            run("sh /restart.sh"),
+            sync(".tiltbuild/manager", "/tilt/manager"),
+            run("sh /tilt/restart.sh"),
         ],
         ignore = ["templates"],
     )
@@ -329,6 +341,8 @@ def deploy_worker_templates(template, substitutions):
         "AZURE_CONTROL_PLANE_MACHINE_TYPE": "Standard_B2s",
         "WORKER_MACHINE_COUNT": "2",
         "AZURE_NODE_MACHINE_TYPE": "Standard_B2s",
+        "FLATCAR_VERSION": settings.get("flatcar_version"),
+        "CLUSTER_CLASS_NAME": "default",
     }
 
     if flavor == "aks":
@@ -339,12 +353,18 @@ def deploy_worker_templates(template, substitutions):
         value = substitutions[substitution]
         yaml = yaml.replace("${" + substitution + "}", value)
 
-    yaml = yaml.replace('"', '\\"')  # add escape character to double quotes in yaml
+    yaml = shlex.quote(yaml)
     flavor_name = os.path.basename(flavor)
-    flavor_cmd = "RANDOM=$(bash -c 'echo $RANDOM'); CLUSTER_NAME=" + flavor.replace("windows", "win") + "-$RANDOM; make generate-flavors; echo \"" + yaml + "\" > ./.tiltbuild/" + flavor + "; cat ./.tiltbuild/" + flavor + " | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f - && echo \"Cluster \'$CLUSTER_NAME\' created, don't forget to delete\""
+    flavor_cmd = "RANDOM=$(bash -c 'echo $RANDOM'); export CLUSTER_NAME=" + flavor.replace("windows", "win") + "-$RANDOM; make generate-flavors; echo " + yaml + "> ./.tiltbuild/" + flavor + "; cat ./.tiltbuild/" + flavor + " | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f - && echo \"Cluster \'$CLUSTER_NAME\' created, don't forget to delete\""
 
     # wait for kubeconfig to be available
     flavor_cmd += "; until " + kubectl_cmd + " get secret ${CLUSTER_NAME}-kubeconfig > /dev/null 2>&1; do sleep 5; done; " + kubectl_cmd + " get secret ${CLUSTER_NAME}-kubeconfig -o jsonpath={.data.value} | base64 --decode > ./${CLUSTER_NAME}.kubeconfig; chmod 600 ./${CLUSTER_NAME}.kubeconfig; until " + kubectl_cmd + " --kubeconfig=./${CLUSTER_NAME}.kubeconfig get nodes > /dev/null 2>&1; do sleep 5; done"
+
+    # copy the kubeadm configmap to the calico-system namespace.
+    # This is a workaround needed for the calico-node-windows daemonset to be able to run in the calico-system namespace.
+    if "windows" in flavor_name:
+        flavor_cmd += "; until " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig get configmap kubeadm-config --namespace=kube-system > /dev/null 2>&1; do sleep 5; done"
+        flavor_cmd += "; " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig create namespace calico-system --dry-run=client -o yaml | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f - && " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig get configmap kubeadm-config --namespace=kube-system -o yaml | sed 's/namespace: kube-system/namespace: calico-system/' | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f -"
 
     # install calico
     if "ipv6" in flavor_name:
@@ -353,8 +373,8 @@ def deploy_worker_templates(template, substitutions):
         calico_values = "./templates/addons/calico-dual-stack/values.yaml"
     else:
         calico_values = "./templates/addons/calico/values.yaml"
-    flavor_cmd += "; " + helm_cmd + " repo add projectcalico https://projectcalico.docs.tigera.io/charts; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install calico projectcalico/tigera-operator -f " + calico_values + " --namespace tigera-operator --create-namespace; kubectl --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f ./templates/addons/calico/felix-override.yaml"
-    if "external-cloud-provider" in flavor_name:
+    flavor_cmd += "; " + helm_cmd + " repo add projectcalico https://docs.tigera.io/calico/charts; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install calico projectcalico/tigera-operator -f " + calico_values + " --namespace tigera-operator --create-namespace"
+    if "intree-cloud-provider" not in flavor_name:
         flavor_cmd += "; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install --repo https://raw.githubusercontent.com/kubernetes-sigs/cloud-provider-azure/master/helm/repo cloud-provider-azure --generate-name --set infra.clusterName=${CLUSTER_NAME}"
     local_resource(
         name = flavor_name,
@@ -362,6 +382,7 @@ def deploy_worker_templates(template, substitutions):
         auto_init = False,
         trigger_mode = TRIGGER_MODE_MANUAL,
         labels = ["flavors"],
+        allow_parallel = True,
     )
 
 def base64_encode(to_encode):

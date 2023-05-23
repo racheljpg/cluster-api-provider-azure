@@ -25,7 +25,6 @@ import (
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +39,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/routetables"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/securitygroups"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vnetpeerings"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -327,7 +327,7 @@ func TestPublicIPSpecs(t *testing.T) {
 					},
 					NetworkSpec: infrav1.NetworkSpec{
 						ControlPlaneOutboundLB: &infrav1.LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(0),
+							FrontendIPsCount: pointer.Int32(0),
 						},
 						APIServerLB: infrav1.LoadBalancerSpec{
 							LoadBalancerClassSpec: infrav1.LoadBalancerClassSpec{
@@ -371,7 +371,7 @@ func TestPublicIPSpecs(t *testing.T) {
 					},
 					NetworkSpec: infrav1.NetworkSpec{
 						ControlPlaneOutboundLB: &infrav1.LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 							FrontendIPs: []infrav1.FrontendIP{
 								{
 									Name: "my-frontend-ip",
@@ -438,7 +438,7 @@ func TestPublicIPSpecs(t *testing.T) {
 					},
 					NetworkSpec: infrav1.NetworkSpec{
 						ControlPlaneOutboundLB: &infrav1.LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(3),
+							FrontendIPsCount: pointer.Int32(3),
 							FrontendIPs: []infrav1.FrontendIP{
 								{
 									Name: "my-frontend-ip-1",
@@ -1498,7 +1498,7 @@ func TestIsVnetManaged(t *testing.T) {
 					Spec: infrav1.AzureClusterSpec{},
 				},
 				cache: &ClusterCache{
-					isVnetManaged: to.BoolPtr(false),
+					isVnetManaged: pointer.Bool(false),
 				},
 			},
 			want: false,
@@ -1510,7 +1510,7 @@ func TestIsVnetManaged(t *testing.T) {
 					Spec: infrav1.AzureClusterSpec{},
 				},
 				cache: &ClusterCache{
-					isVnetManaged: to.BoolPtr(true),
+					isVnetManaged: pointer.Bool(true),
 				},
 			},
 			want: true,
@@ -1525,8 +1525,8 @@ func TestIsVnetManaged(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("IsVnetManaged() = \n%t, want \n%t", got, tt.want)
 			}
-			if to.Bool(tt.clusterScope.cache.isVnetManaged) != got {
-				t.Errorf("IsVnetManaged() = \n%t, cache = \n%t", got, to.Bool(tt.clusterScope.cache.isVnetManaged))
+			if pointer.BoolDeref(tt.clusterScope.cache.isVnetManaged, false) != got {
+				t.Errorf("IsVnetManaged() = \n%t, cache = \n%t", got, pointer.BoolDeref(tt.clusterScope.cache.isVnetManaged, false))
 			}
 		})
 	}
@@ -2006,7 +2006,7 @@ func TestOutboundLBName(t *testing.T) {
 			clusterName: "my-cluster",
 			name:        "public cluster node outbound lb",
 			role:        "node",
-			expected:    "my-cluster",
+			expected:    "",
 		},
 		{
 			clusterName: "my-cluster",
@@ -2535,7 +2535,7 @@ func TestAPIServerPort(t *testing.T) {
 			name:        "Non nil cluster network and non nil apiserverport",
 			clusterName: "my-cluster",
 			clusterNetowrk: &clusterv1.ClusterNetwork{
-				APIServerPort: to.Int32Ptr(7000),
+				APIServerPort: pointer.Int32(7000),
 			},
 			expectAPIServerPort: 7000,
 		},
@@ -2953,6 +2953,394 @@ func TestClusterScope_LBSpecs(t *testing.T) {
 			if got := clusterScope.LBSpecs(); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("LBSpecs() diff between expected result and actual result (%v): %s", got, cmp.Diff(tc.want, got))
 			}
+		})
+	}
+}
+
+func TestExtendedLocationName(t *testing.T) {
+	tests := []struct {
+		name             string
+		clusterName      string
+		extendedLocation infrav1.ExtendedLocationSpec
+	}{
+		{
+			name:        "Empty extendedLocatioName",
+			clusterName: "my-cluster",
+			extendedLocation: infrav1.ExtendedLocationSpec{
+				Name: "",
+				Type: "",
+			},
+		},
+		{
+			name:        "Non empty extendedLocationName",
+			clusterName: "my-cluster",
+			extendedLocation: infrav1.ExtendedLocationSpec{
+				Name: "ex-loc-name",
+				Type: "ex-loc-type",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			scheme := runtime.NewScheme()
+			_ = infrav1.AddToScheme(scheme)
+			_ = clusterv1.AddToScheme(scheme)
+
+			cluster := &clusterv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.clusterName,
+					Namespace: "default",
+				},
+			}
+
+			azureCluster := &infrav1.AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: tc.clusterName,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "cluster.x-k8s.io/v1beta1",
+							Kind:       "Cluster",
+							Name:       "my-cluster",
+						},
+					},
+				},
+				Spec: infrav1.AzureClusterSpec{
+					AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+						SubscriptionID: "123",
+						ExtendedLocation: &infrav1.ExtendedLocationSpec{
+							Name: tc.extendedLocation.Name,
+							Type: tc.extendedLocation.Type,
+						},
+					},
+				},
+			}
+
+			initObjects := []runtime.Object{cluster, azureCluster}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
+
+			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster:      cluster,
+				AzureCluster: azureCluster,
+				Client:       fakeClient,
+			})
+
+			g.Expect(err).NotTo(HaveOccurred())
+			got := clusterScope.ExtendedLocationName()
+			g.Expect(tc.extendedLocation.Name).Should(Equal(got))
+		})
+	}
+}
+
+func TestExtendedLocationType(t *testing.T) {
+	tests := []struct {
+		name             string
+		clusterName      string
+		extendedLocation infrav1.ExtendedLocationSpec
+	}{
+		{
+			name:        "Empty extendedLocatioType",
+			clusterName: "my-cluster",
+			extendedLocation: infrav1.ExtendedLocationSpec{
+				Name: "",
+				Type: "",
+			},
+		},
+		{
+			name:        "Non empty extendedLocationType",
+			clusterName: "my-cluster",
+			extendedLocation: infrav1.ExtendedLocationSpec{
+				Name: "ex-loc-name",
+				Type: "ex-loc-type",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			scheme := runtime.NewScheme()
+			_ = infrav1.AddToScheme(scheme)
+			_ = clusterv1.AddToScheme(scheme)
+
+			cluster := &clusterv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tc.clusterName,
+					Namespace: "default",
+				},
+			}
+
+			azureCluster := &infrav1.AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: tc.clusterName,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "cluster.x-k8s.io/v1beta1",
+							Kind:       "Cluster",
+							Name:       "my-cluster",
+						},
+					},
+				},
+				Spec: infrav1.AzureClusterSpec{
+					AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+						SubscriptionID: "123",
+						ExtendedLocation: &infrav1.ExtendedLocationSpec{
+							Name: tc.extendedLocation.Name,
+							Type: tc.extendedLocation.Type,
+						},
+					},
+				},
+			}
+
+			initObjects := []runtime.Object{cluster, azureCluster}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
+
+			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster:      cluster,
+				AzureCluster: azureCluster,
+				Client:       fakeClient,
+			})
+
+			g.Expect(err).NotTo(HaveOccurred())
+			got := clusterScope.ExtendedLocationType()
+			g.Expect(tc.extendedLocation.Type).Should(Equal(got))
+		})
+	}
+}
+
+func TestVNetPeerings(t *testing.T) {
+	fakeSubscriptionID := "123"
+
+	tests := []struct {
+		name                 string
+		subscriptionID       string
+		azureClusterVNetSpec infrav1.VnetSpec
+		want                 []azure.ResourceSpecGetter
+	}{
+		{
+			name:           "VNet peerings are not specified",
+			subscriptionID: fakeSubscriptionID,
+			azureClusterVNetSpec: infrav1.VnetSpec{
+				ResourceGroup: "rg1",
+				Name:          "vnet1",
+			},
+			want: []azure.ResourceSpecGetter{},
+		},
+		{
+			name:           "One VNet peering is specified",
+			subscriptionID: fakeSubscriptionID,
+			azureClusterVNetSpec: infrav1.VnetSpec{
+				ResourceGroup: "rg1",
+				Name:          "vnet1",
+				Peerings: infrav1.VnetPeerings{
+					{
+						VnetPeeringClassSpec: infrav1.VnetPeeringClassSpec{
+							ResourceGroup:  "rg2",
+							RemoteVnetName: "vnet2",
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:         "vnet1-To-vnet2",
+					SourceResourceGroup: "rg1",
+					SourceVnetName:      "vnet1",
+					RemoteResourceGroup: "rg2",
+					RemoteVnetName:      "vnet2",
+					SubscriptionID:      fakeSubscriptionID,
+				},
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:         "vnet2-To-vnet1",
+					SourceResourceGroup: "rg2",
+					SourceVnetName:      "vnet2",
+					RemoteResourceGroup: "rg1",
+					RemoteVnetName:      "vnet1",
+					SubscriptionID:      fakeSubscriptionID,
+				},
+			},
+		},
+		{
+			name:           "One VNet peering with optional properties is specified",
+			subscriptionID: fakeSubscriptionID,
+			azureClusterVNetSpec: infrav1.VnetSpec{
+				ResourceGroup: "rg1",
+				Name:          "vnet1",
+				Peerings: infrav1.VnetPeerings{
+					{
+						VnetPeeringClassSpec: infrav1.VnetPeeringClassSpec{
+							ResourceGroup:  "rg2",
+							RemoteVnetName: "vnet2",
+							ForwardPeeringProperties: infrav1.VnetPeeringProperties{
+								AllowForwardedTraffic: pointer.Bool(true),
+								AllowGatewayTransit:   pointer.Bool(false),
+								UseRemoteGateways:     pointer.Bool(true),
+							},
+							ReversePeeringProperties: infrav1.VnetPeeringProperties{
+								AllowForwardedTraffic: pointer.Bool(true),
+								AllowGatewayTransit:   pointer.Bool(true),
+								UseRemoteGateways:     pointer.Bool(false),
+							},
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:           "vnet1-To-vnet2",
+					SourceResourceGroup:   "rg1",
+					SourceVnetName:        "vnet1",
+					RemoteResourceGroup:   "rg2",
+					RemoteVnetName:        "vnet2",
+					SubscriptionID:        fakeSubscriptionID,
+					AllowForwardedTraffic: pointer.Bool(true),
+					AllowGatewayTransit:   pointer.Bool(false),
+					UseRemoteGateways:     pointer.Bool(true),
+				},
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:           "vnet2-To-vnet1",
+					SourceResourceGroup:   "rg2",
+					SourceVnetName:        "vnet2",
+					RemoteResourceGroup:   "rg1",
+					RemoteVnetName:        "vnet1",
+					SubscriptionID:        fakeSubscriptionID,
+					AllowForwardedTraffic: pointer.Bool(true),
+					AllowGatewayTransit:   pointer.Bool(true),
+					UseRemoteGateways:     pointer.Bool(false),
+				},
+			},
+		},
+		{
+			name:           "Two VNet peerings are specified",
+			subscriptionID: fakeSubscriptionID,
+			azureClusterVNetSpec: infrav1.VnetSpec{
+				ResourceGroup: "rg1",
+				Name:          "vnet1",
+				Peerings: infrav1.VnetPeerings{
+					{
+						VnetPeeringClassSpec: infrav1.VnetPeeringClassSpec{
+							ResourceGroup:  "rg2",
+							RemoteVnetName: "vnet2",
+							ForwardPeeringProperties: infrav1.VnetPeeringProperties{
+								AllowForwardedTraffic: pointer.Bool(true),
+								AllowGatewayTransit:   pointer.Bool(false),
+								UseRemoteGateways:     pointer.Bool(true),
+							},
+							ReversePeeringProperties: infrav1.VnetPeeringProperties{
+								AllowForwardedTraffic: pointer.Bool(true),
+								AllowGatewayTransit:   pointer.Bool(true),
+								UseRemoteGateways:     pointer.Bool(false),
+							},
+						},
+					},
+					{
+						VnetPeeringClassSpec: infrav1.VnetPeeringClassSpec{
+							ResourceGroup:  "rg3",
+							RemoteVnetName: "vnet3",
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:           "vnet1-To-vnet2",
+					SourceResourceGroup:   "rg1",
+					SourceVnetName:        "vnet1",
+					RemoteResourceGroup:   "rg2",
+					RemoteVnetName:        "vnet2",
+					SubscriptionID:        fakeSubscriptionID,
+					AllowForwardedTraffic: pointer.Bool(true),
+					AllowGatewayTransit:   pointer.Bool(false),
+					UseRemoteGateways:     pointer.Bool(true),
+				},
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:           "vnet2-To-vnet1",
+					SourceResourceGroup:   "rg2",
+					SourceVnetName:        "vnet2",
+					RemoteResourceGroup:   "rg1",
+					RemoteVnetName:        "vnet1",
+					SubscriptionID:        fakeSubscriptionID,
+					AllowForwardedTraffic: pointer.Bool(true),
+					AllowGatewayTransit:   pointer.Bool(true),
+					UseRemoteGateways:     pointer.Bool(false),
+				},
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:         "vnet1-To-vnet3",
+					SourceResourceGroup: "rg1",
+					SourceVnetName:      "vnet1",
+					RemoteResourceGroup: "rg3",
+					RemoteVnetName:      "vnet3",
+					SubscriptionID:      fakeSubscriptionID,
+				},
+				&vnetpeerings.VnetPeeringSpec{
+					PeeringName:         "vnet3-To-vnet1",
+					SourceResourceGroup: "rg3",
+					SourceVnetName:      "vnet3",
+					RemoteResourceGroup: "rg1",
+					RemoteVnetName:      "vnet1",
+					SubscriptionID:      fakeSubscriptionID,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			scheme := runtime.NewScheme()
+			_ = infrav1.AddToScheme(scheme)
+			_ = clusterv1.AddToScheme(scheme)
+			clusterName := "my-cluster"
+			clusterNamespace := "default"
+
+			cluster := &clusterv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      clusterName,
+					Namespace: clusterNamespace,
+				},
+			}
+			azureCluster := &infrav1.AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      clusterName,
+					Namespace: clusterNamespace,
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "cluster.x-k8s.io/v1beta1",
+							Kind:       "Cluster",
+							Name:       clusterName,
+						},
+					},
+				},
+				Spec: infrav1.AzureClusterSpec{
+					ResourceGroup: "rg1",
+					AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+						SubscriptionID: tc.subscriptionID,
+					},
+					NetworkSpec: infrav1.NetworkSpec{
+						Vnet: tc.azureClusterVNetSpec,
+					},
+				},
+			}
+
+			initObjects := []runtime.Object{cluster, azureCluster}
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
+
+			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
+				AzureClients: AzureClients{
+					Authorizer: autorest.NullAuthorizer{},
+				},
+				Cluster:      cluster,
+				AzureCluster: azureCluster,
+				Client:       fakeClient,
+			})
+			g.Expect(err).NotTo(HaveOccurred())
+			got := clusterScope.VnetPeeringSpecs()
+			g.Expect(tc.want).To(Equal(got))
 		})
 	}
 }

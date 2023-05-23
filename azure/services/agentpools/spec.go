@@ -22,13 +22,12 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
@@ -134,10 +133,13 @@ type AgentPoolSpec struct {
 	KubeletConfig *KubeletConfig `json:"kubeletConfig,omitempty"`
 
 	// KubeletDiskType specifies the kubelet disk type for each node in the pool. Allowed values are 'OS' and 'Temporary'
-	KubeletDiskType *infrav1exp.KubeletDiskType `json:"kubeletDiskType,omitempty"`
+	KubeletDiskType *infrav1.KubeletDiskType `json:"kubeletDiskType,omitempty"`
 
 	// AdditionalTags is an optional set of tags to add to Azure resources managed by the Azure provider, in addition to the ones added by default.
 	AdditionalTags infrav1.Tags
+
+	// LinuxOSConfig specifies the custom Linux OS settings and configurations
+	LinuxOSConfig *infrav1.LinuxOSConfig
 }
 
 // ResourceName returns the name of the agent pool.
@@ -231,7 +233,7 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 		// When autoscaling is set, the count of the nodes differ based on the autoscaler and should not depend on the
 		// count present in MachinePool or AzureManagedMachinePool, hence we should not make an update API call based
 		// on difference in count.
-		if to.Bool(s.EnableAutoScaling) {
+		if pointer.BoolDeref(s.EnableAutoScaling, false) {
 			normalizedProfile.Count = existingProfile.Count
 		}
 
@@ -263,6 +265,11 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 	if s.SKU != "" {
 		sku = &s.SKU
 	}
+	tags := converters.TagsToMap(s.AdditionalTags)
+	if tags == nil {
+		// Make sure we send a non-nil, empty map if AdditionalTags are nil as this tells AKS to delete any existing tags.
+		tags = make(map[string]*string, 0)
+	}
 	var vnetSubnetID *string
 	if s.VnetSubnetID != "" {
 		vnetSubnetID = &s.VnetSubnetID
@@ -285,6 +292,47 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 		}
 	}
 
+	var linuxOSConfig *containerservice.LinuxOSConfig
+	if s.LinuxOSConfig != nil {
+		linuxOSConfig = &containerservice.LinuxOSConfig{
+			SwapFileSizeMB:             s.LinuxOSConfig.SwapFileSizeMB,
+			TransparentHugePageEnabled: (*string)(s.LinuxOSConfig.TransparentHugePageEnabled),
+			TransparentHugePageDefrag:  (*string)(s.LinuxOSConfig.TransparentHugePageDefrag),
+		}
+		if s.LinuxOSConfig.Sysctls != nil {
+			linuxOSConfig.Sysctls = &containerservice.SysctlConfig{
+				FsAioMaxNr:                     s.LinuxOSConfig.Sysctls.FsAioMaxNr,
+				FsFileMax:                      s.LinuxOSConfig.Sysctls.FsFileMax,
+				FsInotifyMaxUserWatches:        s.LinuxOSConfig.Sysctls.FsInotifyMaxUserWatches,
+				FsNrOpen:                       s.LinuxOSConfig.Sysctls.FsNrOpen,
+				KernelThreadsMax:               s.LinuxOSConfig.Sysctls.KernelThreadsMax,
+				NetCoreNetdevMaxBacklog:        s.LinuxOSConfig.Sysctls.NetCoreNetdevMaxBacklog,
+				NetCoreOptmemMax:               s.LinuxOSConfig.Sysctls.NetCoreOptmemMax,
+				NetCoreRmemDefault:             s.LinuxOSConfig.Sysctls.NetCoreRmemDefault,
+				NetCoreRmemMax:                 s.LinuxOSConfig.Sysctls.NetCoreRmemMax,
+				NetCoreSomaxconn:               s.LinuxOSConfig.Sysctls.NetCoreSomaxconn,
+				NetCoreWmemDefault:             s.LinuxOSConfig.Sysctls.NetCoreWmemDefault,
+				NetCoreWmemMax:                 s.LinuxOSConfig.Sysctls.NetCoreWmemMax,
+				NetIpv4IPLocalPortRange:        s.LinuxOSConfig.Sysctls.NetIpv4IPLocalPortRange,
+				NetIpv4NeighDefaultGcThresh1:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh1,
+				NetIpv4NeighDefaultGcThresh2:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh2,
+				NetIpv4NeighDefaultGcThresh3:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh3,
+				NetIpv4TCPFinTimeout:           s.LinuxOSConfig.Sysctls.NetIpv4TCPFinTimeout,
+				NetIpv4TCPKeepaliveProbes:      s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveProbes,
+				NetIpv4TCPKeepaliveTime:        s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveTime,
+				NetIpv4TCPMaxSynBacklog:        s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxSynBacklog,
+				NetIpv4TCPMaxTwBuckets:         s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxTwBuckets,
+				NetIpv4TCPTwReuse:              s.LinuxOSConfig.Sysctls.NetIpv4TCPTwReuse,
+				NetIpv4TcpkeepaliveIntvl:       s.LinuxOSConfig.Sysctls.NetIpv4TCPkeepaliveIntvl,
+				NetNetfilterNfConntrackBuckets: s.LinuxOSConfig.Sysctls.NetNetfilterNfConntrackBuckets,
+				NetNetfilterNfConntrackMax:     s.LinuxOSConfig.Sysctls.NetNetfilterNfConntrackMax,
+				VMMaxMapCount:                  s.LinuxOSConfig.Sysctls.VMMaxMapCount,
+				VMSwappiness:                   s.LinuxOSConfig.Sysctls.VMSwappiness,
+				VMVfsCachePressure:             s.LinuxOSConfig.Sysctls.VMVfsCachePressure,
+			}
+		}
+	}
+
 	agentPool := containerservice.AgentPool{
 		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
 			AvailabilityZones:    availabilityZones,
@@ -292,7 +340,7 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 			EnableAutoScaling:    s.EnableAutoScaling,
 			EnableUltraSSD:       s.EnableUltraSSD,
 			KubeletConfig:        kubeletConfig,
-			KubeletDiskType:      containerservice.KubeletDiskType(to.String((*string)(s.KubeletDiskType))),
+			KubeletDiskType:      containerservice.KubeletDiskType(pointer.StringDeref((*string)(s.KubeletDiskType), "")),
 			MaxCount:             s.MaxCount,
 			MaxPods:              s.MaxPods,
 			MinCount:             s.MinCount,
@@ -301,15 +349,16 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 			NodeTaints:           nodeTaints,
 			OrchestratorVersion:  s.Version,
 			OsDiskSizeGB:         &s.OSDiskSizeGB,
-			OsDiskType:           containerservice.OSDiskType(to.String(s.OsDiskType)),
-			OsType:               containerservice.OSType(to.String(s.OSType)),
-			ScaleSetPriority:     containerservice.ScaleSetPriority(to.String(s.ScaleSetPriority)),
+			OsDiskType:           containerservice.OSDiskType(pointer.StringDeref(s.OsDiskType, "")),
+			OsType:               containerservice.OSType(pointer.StringDeref(s.OSType, "")),
+			ScaleSetPriority:     containerservice.ScaleSetPriority(pointer.StringDeref(s.ScaleSetPriority, "")),
 			Type:                 containerservice.AgentPoolTypeVirtualMachineScaleSets,
 			VMSize:               sku,
 			VnetSubnetID:         vnetSubnetID,
 			EnableNodePublicIP:   s.EnableNodePublicIP,
 			NodePublicIPPrefixID: s.NodePublicIPPrefixID,
-			Tags:                 *to.StringMapPtr(s.AdditionalTags),
+			Tags:                 tags,
+			LinuxOSConfig:        linuxOSConfig,
 		},
 	}
 

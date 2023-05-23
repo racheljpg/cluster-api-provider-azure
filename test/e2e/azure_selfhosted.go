@@ -29,7 +29,6 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
@@ -85,7 +84,7 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 				Name:      "cluster-identity-secret",
 				Namespace: namespace.Name,
 				Labels: map[string]string{
-					clusterctlv1.ClusterctlMoveHierarchyLabelName: "true",
+					clusterctlv1.ClusterctlMoveHierarchyLabel: "true",
 				},
 			},
 			Type: corev1.SecretTypeOpaque,
@@ -107,25 +106,15 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 	// Tracking support for cert manager: https://github.com/jetstack/cert-manager/issues/3606
 	It("Should pivot the bootstrap cluster to a self-hosted cluster", func() {
 		By("Creating a workload cluster")
-		clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
-			ClusterProxy: input.BootstrapClusterProxy,
-			ConfigCluster: clusterctl.ConfigClusterInput{
-				LogFolder:                filepath.Join(input.ArtifactFolder, "clusters", input.BootstrapClusterProxy.GetName()),
-				ClusterctlConfigPath:     input.ClusterctlConfigPath,
-				KubeconfigPath:           input.BootstrapClusterProxy.GetKubeconfigPath(),
-				InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
-				Flavor:                   "management",
-				Namespace:                namespace.Name,
-				ClusterName:              fmt.Sprintf("%s-%s", specName, util.RandomString(6)),
-				KubernetesVersion:        input.E2EConfig.GetVariable(capi_e2e.KubernetesVersion),
-				ControlPlaneMachineCount: pointer.Int64Ptr(1),
-				WorkerMachineCount:       pointer.Int64Ptr(1),
-			},
-			WaitForClusterIntervals:      input.E2EConfig.GetIntervals(specName, "wait-cluster"),
-			WaitForControlPlaneIntervals: input.E2EConfig.GetIntervals(specName, "wait-control-plane"),
-			WaitForMachineDeployments:    input.E2EConfig.GetIntervals(specName, "wait-worker-nodes"),
-			ControlPlaneWaiters:          input.ControlPlaneWaiters,
-		}, clusterResources)
+		clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+			specName,
+			withFlavor("management"),
+			withNamespace(namespace.Name),
+			withClusterName(fmt.Sprintf("%s-%s", specName, util.RandomString(6))),
+			withControlPlaneMachineCount(1),
+			withWorkerMachineCount(1),
+			withControlPlaneWaiters(input.ControlPlaneWaiters),
+		), clusterResources)
 
 		By("Turning the workload cluster into a management cluster")
 		cluster := clusterResources.Cluster
@@ -153,12 +142,12 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 		// More specifically, we were observing the test failing to get objects from the API server during move, so we
 		// are now testing the API servers are stable before starting move.
 		Consistently(func() error {
-			kubeSystem := &corev1.Namespace{}
-			return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: "kube-system"}, kubeSystem)
+			ns := &corev1.Namespace{}
+			return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
 		}, "5s", "100ms").Should(BeNil(), "Failed to assert bootstrap API server stability")
 		Consistently(func() error {
-			kubeSystem := &corev1.Namespace{}
-			return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: "kube-system"}, kubeSystem)
+			ns := &corev1.Namespace{}
+			return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
 		}, "5s", "100ms").Should(BeNil(), "Failed to assert self-hosted API server stability")
 
 		By("Moving the cluster to self hosted")
@@ -205,12 +194,12 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 			// More specifically, we were observing the test failing to get objects from the API server during move, so we
 			// are now testing the API servers are stable before starting move.
 			Consistently(func() error {
-				kubeSystem := &corev1.Namespace{}
-				return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: "kube-system"}, kubeSystem)
+				ns := &corev1.Namespace{}
+				return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
 			}, "5s", "100ms").Should(BeNil(), "Failed to assert bootstrap API server stability")
 			Consistently(func() error {
-				kubeSystem := &corev1.Namespace{}
-				return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: "kube-system"}, kubeSystem)
+				ns := &corev1.Namespace{}
+				return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
 			}, "5s", "100ms").Should(BeNil(), "Failed to assert self-hosted API server stability")
 
 			By("Moving the cluster back to bootstrap")

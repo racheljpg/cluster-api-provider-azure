@@ -20,19 +20,23 @@ import (
 	"context"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
 // VnetPeeringSpec defines the specification for a virtual network peering.
 type VnetPeeringSpec struct {
-	SourceResourceGroup string
-	SourceVnetName      string
-	RemoteResourceGroup string
-	RemoteVnetName      string
-	PeeringName         string
-	SubscriptionID      string
+	SourceResourceGroup       string
+	SourceVnetName            string
+	RemoteResourceGroup       string
+	RemoteVnetName            string
+	PeeringName               string
+	SubscriptionID            string
+	AllowForwardedTraffic     *bool
+	AllowGatewayTransit       *bool
+	AllowVirtualNetworkAccess *bool
+	UseRemoteGateways         *bool
 }
 
 // ResourceName returns the name of the virtual network peering.
@@ -62,11 +66,15 @@ func (s *VnetPeeringSpec) Parameters(ctx context.Context, existing interface{}) 
 	vnetID := azure.VNetID(s.SubscriptionID, s.RemoteResourceGroup, s.RemoteVnetName)
 	peeringProperties := network.VirtualNetworkPeeringPropertiesFormat{
 		RemoteVirtualNetwork: &network.SubResource{
-			ID: to.StringPtr(vnetID),
+			ID: pointer.String(vnetID),
 		},
+		AllowForwardedTraffic:     s.AllowForwardedTraffic,
+		AllowGatewayTransit:       s.AllowGatewayTransit,
+		AllowVirtualNetworkAccess: s.AllowVirtualNetworkAccess,
+		UseRemoteGateways:         s.UseRemoteGateways,
 	}
 	return network.VirtualNetworkPeering{
-		Name:                                  to.StringPtr(s.PeeringName),
+		Name:                                  pointer.String(s.PeeringName),
 		VirtualNetworkPeeringPropertiesFormat: &peeringProperties,
 	}, nil
 }

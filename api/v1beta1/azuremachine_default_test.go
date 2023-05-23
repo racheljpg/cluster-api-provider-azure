@@ -17,13 +17,20 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/uuid"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestAzureMachineSpec_SetDefaultSSHPublicKey(t *testing.T) {
@@ -53,29 +60,57 @@ func TestAzureMachineSpec_SetIdentityDefaults(t *testing.T) {
 		machine *AzureMachine
 	}
 
+	fakeSubscriptionID := uuid.New().String()
+	fakeClusterName := "testcluster"
+	fakeRoleDefinitionID := "testroledefinitionid"
+	fakeScope := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s", fakeSubscriptionID, fakeClusterName)
 	existingRoleAssignmentName := "42862306-e485-4319-9bf0-35dbc6f6fe9c"
 	roleAssignmentExistTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		Identity: VMIdentitySystemAssigned,
+		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+			Name: existingRoleAssignmentName,
+		},
+	}}}
+	notSystemAssignedTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		Identity:                   VMIdentityUserAssigned,
+		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{},
+	}}}
+	systemAssignedIdentityRoleExistTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		Identity: VMIdentitySystemAssigned,
+		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+			Scope:        fakeScope,
+			DefinitionID: fakeRoleDefinitionID,
+		},
+	}}}
+	deprecatedRoleAssignmentNameTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
 		Identity:           VMIdentitySystemAssigned,
 		RoleAssignmentName: existingRoleAssignmentName,
 	}}}
-	roleAssignmentEmptyTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
-		Identity:           VMIdentitySystemAssigned,
-		RoleAssignmentName: "",
-	}}}
-	notSystemAssignedTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
-		Identity: VMIdentityUserAssigned,
+	emptyTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		Identity:                   VMIdentitySystemAssigned,
+		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{},
 	}}}
 
-	roleAssignmentExistTest.machine.Spec.SetIdentityDefaults()
-	g.Expect(roleAssignmentExistTest.machine.Spec.RoleAssignmentName).To(Equal(existingRoleAssignmentName))
+	roleAssignmentExistTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(roleAssignmentExistTest.machine.Spec.SystemAssignedIdentityRole.Name).To(Equal(existingRoleAssignmentName))
 
-	roleAssignmentEmptyTest.machine.Spec.SetIdentityDefaults()
-	g.Expect(roleAssignmentEmptyTest.machine.Spec.RoleAssignmentName).To(Not(BeEmpty()))
-	_, err := uuid.Parse(roleAssignmentEmptyTest.machine.Spec.RoleAssignmentName)
+	notSystemAssignedTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(notSystemAssignedTest.machine.Spec.SystemAssignedIdentityRole.Name).To(BeEmpty())
+
+	systemAssignedIdentityRoleExistTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(systemAssignedIdentityRoleExistTest.machine.Spec.SystemAssignedIdentityRole.Scope).To(Equal(fakeScope))
+	g.Expect(systemAssignedIdentityRoleExistTest.machine.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fakeRoleDefinitionID))
+
+	deprecatedRoleAssignmentNameTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(deprecatedRoleAssignmentNameTest.machine.Spec.SystemAssignedIdentityRole.Name).To(Equal(existingRoleAssignmentName))
+	g.Expect(deprecatedRoleAssignmentNameTest.machine.Spec.RoleAssignmentName).To(BeEmpty())
+
+	emptyTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(emptyTest.machine.Spec.SystemAssignedIdentityRole.Name).To(Not(BeEmpty()))
+	_, err := uuid.Parse(emptyTest.machine.Spec.SystemAssignedIdentityRole.Name)
 	g.Expect(err).To(Not(HaveOccurred()))
-
-	notSystemAssignedTest.machine.Spec.SetIdentityDefaults()
-	g.Expect(notSystemAssignedTest.machine.Spec.RoleAssignmentName).To(BeEmpty())
+	g.Expect(emptyTest.machine.Spec.SystemAssignedIdentityRole.Scope).To(Equal(fmt.Sprintf("/subscriptions/%s/", fakeSubscriptionID)))
+	g.Expect(emptyTest.machine.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", fakeSubscriptionID, ContributorRoleID)))
 }
 
 func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
@@ -107,13 +142,13 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(0),
+					Lun:         pointer.Int32(0),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk2",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(1),
+					Lun:         pointer.Int32(1),
 					CachingType: "ReadWrite",
 				},
 			},
@@ -124,13 +159,13 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(5),
+					Lun:         pointer.Int32(5),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk2",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(3),
+					Lun:         pointer.Int32(3),
 					CachingType: "ReadWrite",
 				},
 			},
@@ -138,13 +173,13 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(5),
+					Lun:         pointer.Int32(5),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk2",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(3),
+					Lun:         pointer.Int32(3),
 					CachingType: "ReadWrite",
 				},
 			},
@@ -155,7 +190,7 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(0),
+					Lun:         pointer.Int32(0),
 					CachingType: "ReadWrite",
 				},
 				{
@@ -166,7 +201,7 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk3",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(1),
+					Lun:         pointer.Int32(1),
 					CachingType: "ReadWrite",
 				},
 				{
@@ -179,25 +214,25 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(0),
+					Lun:         pointer.Int32(0),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk2",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(2),
+					Lun:         pointer.Int32(2),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk3",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(1),
+					Lun:         pointer.Int32(1),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk4",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(3),
+					Lun:         pointer.Int32(3),
 					CachingType: "ReadWrite",
 				},
 			},
@@ -208,12 +243,12 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 				{
 					NameSuffix: "testdisk1",
 					DiskSizeGB: 30,
-					Lun:        to.Int32Ptr(0),
+					Lun:        pointer.Int32(0),
 				},
 				{
 					NameSuffix: "testdisk2",
 					DiskSizeGB: 30,
-					Lun:        to.Int32Ptr(2),
+					Lun:        pointer.Int32(2),
 				},
 				{
 					NameSuffix: "testdisk3",
@@ -221,26 +256,26 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 					ManagedDisk: &ManagedDiskParameters{
 						StorageAccountType: "UltraSSD_LRS",
 					},
-					Lun: to.Int32Ptr(3),
+					Lun: pointer.Int32(3),
 				},
 			},
 			output: []DataDisk{
 				{
 					NameSuffix:  "testdisk1",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(0),
+					Lun:         pointer.Int32(0),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix:  "testdisk2",
 					DiskSizeGB:  30,
-					Lun:         to.Int32Ptr(2),
+					Lun:         pointer.Int32(2),
 					CachingType: "ReadWrite",
 				},
 				{
 					NameSuffix: "testdisk3",
 					DiskSizeGB: 30,
-					Lun:        to.Int32Ptr(3),
+					Lun:        pointer.Int32(3),
 					ManagedDisk: &ManagedDiskParameters{
 						StorageAccountType: "UltraSSD_LRS",
 					},
@@ -318,7 +353,7 @@ func TestAzureMachineSpec_SetNetworkInterfacesDefaults(t *testing.T) {
 			machine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					SubnetName:            "test-subnet",
-					AcceleratedNetworking: to.BoolPtr(true),
+					AcceleratedNetworking: pointer.Bool(true),
 				},
 			},
 			want: &AzureMachine{
@@ -329,7 +364,7 @@ func TestAzureMachineSpec_SetNetworkInterfacesDefaults(t *testing.T) {
 						{
 							SubnetName:            "test-subnet",
 							PrivateIPConfigs:      1,
-							AcceleratedNetworking: to.BoolPtr(true),
+							AcceleratedNetworking: pointer.Bool(true),
 						},
 					},
 				},
@@ -367,6 +402,137 @@ func TestAzureMachineSpec_SetNetworkInterfacesDefaults(t *testing.T) {
 	}
 }
 
+func TestAzureMachineSpec_GetOwnerCluster(t *testing.T) {
+	tests := []struct {
+		name            string
+		maxAttempts     int
+		wantedName      string
+		wantedNamespace string
+		wantErr         bool
+	}{
+		{
+			name:            "ownerCluster is returned",
+			maxAttempts:     1,
+			wantedName:      "test-cluster",
+			wantedNamespace: "default",
+			wantErr:         false,
+		},
+		{
+			name:            "ownerCluster is returned after 2 attempts",
+			maxAttempts:     2,
+			wantedName:      "test-cluster",
+			wantedNamespace: "default",
+			wantErr:         false,
+		},
+		{
+			name:            "ownerCluster is not returned after 5 attempts",
+			maxAttempts:     5,
+			wantedName:      "test-cluster",
+			wantedNamespace: "default",
+			wantErr:         true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := mockClient{ReturnError: tc.wantErr}
+			name, namespace, err := GetOwnerAzureClusterNameAndNamespace(client, "test-cluster", "default", tc.maxAttempts)
+			if tc.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(name).To(Equal(tc.wantedName))
+				g.Expect(namespace).To(Equal(tc.wantedNamespace))
+			}
+		})
+	}
+}
+
+func TestAzureMachineSpec_GetSubscriptionID(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name                       string
+		maxAttempts                int
+		ownerAzureClusterName      string
+		ownerAzureClusterNamespace string
+		want                       string
+		wantErr                    bool
+	}{
+		{
+			name:                  "empty owner cluster name returns error",
+			maxAttempts:           1,
+			ownerAzureClusterName: "",
+			want:                  "test-subscription-id",
+			wantErr:               true,
+		},
+		{
+			name:                       "subscription ID is returned",
+			maxAttempts:                1,
+			ownerAzureClusterName:      "test-cluster",
+			ownerAzureClusterNamespace: "default",
+			want:                       "test-subscription-id",
+			wantErr:                    false,
+		},
+		{
+			name:                       "subscription ID is returned after 2 attempts",
+			maxAttempts:                2,
+			ownerAzureClusterName:      "test-cluster",
+			ownerAzureClusterNamespace: "default",
+			want:                       "test-subscription-id",
+			wantErr:                    false,
+		},
+		{
+			name:                       "subscription ID is not returned after 5 attempts",
+			maxAttempts:                5,
+			ownerAzureClusterName:      "test-cluster",
+			ownerAzureClusterNamespace: "default",
+			want:                       "",
+			wantErr:                    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := mockClient{ReturnError: tc.wantErr}
+			result, err := GetSubscriptionID(client, tc.ownerAzureClusterName, tc.ownerAzureClusterNamespace, tc.maxAttempts)
+			if tc.wantErr {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result).To(Equal(tc.want))
+			}
+		})
+	}
+}
+
+type mockClient struct {
+	client.Client
+	ReturnError bool
+}
+
+func (m mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if m.ReturnError {
+		return errors.New("AzureCluster not found: failed to find owner cluster for test-cluster")
+	}
+	// Check if we're calling Get on an AzureCluster or a Cluster
+	switch obj := obj.(type) {
+	case *AzureCluster:
+		obj.Spec.SubscriptionID = "test-subscription-id"
+	case *clusterv1.Cluster:
+		obj.Spec.InfrastructureRef = &corev1.ObjectReference{
+			Kind:      "AzureCluster",
+			Name:      "test-cluster",
+			Namespace: "default",
+		}
+	default:
+		return errors.New("unexpected object type")
+	}
+
+	return nil
+}
+
 func createMachineWithSSHPublicKey(sshPublicKey string) *AzureMachine {
 	machine := hardcodedAzureMachineWithSSHKey(sshPublicKey)
 	return machine
@@ -381,6 +547,11 @@ func createMachineWithUserAssignedIdentities(identitiesList []UserAssignedIdenti
 
 func hardcodedAzureMachineWithSSHKey(sshPublicKey string) *AzureMachine {
 	return &AzureMachine{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel: "test-cluster",
+			},
+		},
 		Spec: AzureMachineSpec{
 			SSHPublicKey: sshPublicKey,
 			OSDisk:       generateValidOSDisk(),

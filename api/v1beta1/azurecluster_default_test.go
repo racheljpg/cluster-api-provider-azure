@@ -21,8 +21,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 )
 
 func TestResourceGroupDefault(t *testing.T) {
@@ -139,7 +139,7 @@ func TestVnetDefaults(t *testing.T) {
 							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 						},
 					},
 				},
@@ -300,6 +300,9 @@ func TestSubnetDefaults(t *testing.T) {
 								},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{NatGatewayClassSpec: NatGatewayClassSpec{
+									Name: "cluster-test-node-natgw",
+								}},
 							},
 						},
 					},
@@ -367,7 +370,7 @@ func TestSubnetDefaults(t *testing.T) {
 										Name: "foo-natgw",
 									},
 									NatGatewayIP: PublicIPSpec{
-										Name: "pip-cluster-test-my-node-subnet-natgw",
+										Name: "pip-foo-natgw",
 									},
 								},
 							},
@@ -426,6 +429,14 @@ func TestSubnetDefaults(t *testing.T) {
 								},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "cluster-test-node-natgw-1",
+									},
+									NatGatewayIP: PublicIPSpec{
+										Name: "pip-cluster-test-node-natgw-1",
+									},
+								},
 							},
 						},
 					},
@@ -484,6 +495,14 @@ func TestSubnetDefaults(t *testing.T) {
 								},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "cluster-test-node-natgw-1",
+									},
+									NatGatewayIP: PublicIPSpec{
+										Name: "pip-cluster-test-node-natgw-1",
+									},
+								},
 							},
 						},
 					},
@@ -525,6 +544,14 @@ func TestSubnetDefaults(t *testing.T) {
 
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "cluster-test-node-natgw-1",
+									},
+									NatGatewayIP: PublicIPSpec{
+										Name: "pip-cluster-test-node-natgw-1",
+									},
+								},
 							},
 							{
 								SubnetClassSpec: SubnetClassSpec{
@@ -629,10 +656,10 @@ func TestSubnetDefaults(t *testing.T) {
 												Description:      "allow port 50000",
 												Protocol:         "*",
 												Priority:         2202,
-												SourcePorts:      to.StringPtr("*"),
-												DestinationPorts: to.StringPtr("*"),
-												Source:           to.StringPtr("*"),
-												Destination:      to.StringPtr("*"),
+												SourcePorts:      pointer.String("*"),
+												DestinationPorts: pointer.String("*"),
+												Source:           pointer.String("*"),
+												Destination:      pointer.String("*"),
 											},
 										},
 									},
@@ -664,10 +691,10 @@ func TestSubnetDefaults(t *testing.T) {
 												Description:      "allow port 50000",
 												Protocol:         "*",
 												Priority:         2202,
-												SourcePorts:      to.StringPtr("*"),
-												DestinationPorts: to.StringPtr("*"),
-												Source:           to.StringPtr("*"),
-												Destination:      to.StringPtr("*"),
+												SourcePorts:      pointer.String("*"),
+												DestinationPorts: pointer.String("*"),
+												Source:           pointer.String("*"),
+												Destination:      pointer.String("*"),
 												Direction:        SecurityRuleDirectionInbound,
 											},
 										},
@@ -683,6 +710,14 @@ func TestSubnetDefaults(t *testing.T) {
 								},
 								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
 								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{
+									NatGatewayIP: PublicIPSpec{
+										Name: "",
+									},
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "cluster-test-node-natgw",
+									},
+								},
 							},
 						},
 					},
@@ -868,7 +903,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -912,7 +947,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Internal,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 							Name: "cluster-test-internal-lb",
 						},
@@ -960,7 +995,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Internal,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 							Name: "cluster-test-internal-lb",
 						},
@@ -1074,7 +1109,7 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 		output  *AzureCluster
 	}{
 		{
-			name: "default lb for public clusters",
+			name: "default no lb for public clusters",
 			cluster: &AzureCluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cluster-test",
@@ -1122,6 +1157,71 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 								SubnetClassSpec: SubnetClassSpec{
 									Role: SubnetNode,
 									Name: "node-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+						},
+						APIServerLB: LoadBalancerSpec{
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "IPv6 enabled",
+			cluster: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+									Name: "control-plane-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "node",
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "cluster-test-node-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+						},
+					},
+				},
+			},
+			output: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+									Name: "control-plane-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "node",
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "cluster-test-node-subnet",
 								},
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -1143,11 +1243,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1155,7 +1255,7 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 			},
 		},
 		{
-			name: "NAT gateway enabled - no LB",
+			name: "IPv6 enabled on 1 of 2 node subnets",
 			cluster: &AzureCluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cluster-test",
@@ -1174,89 +1274,12 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							},
 							{
 								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "node-subnet-1",
 								},
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-										Name: "node-natgateway",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			output: &AzureCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-test",
-				},
-				Spec: AzureClusterSpec{
-					NetworkSpec: NetworkSpec{
-						Subnets: Subnets{
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetControlPlane,
-									Name: "control-plane-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-										Name: "node-natgateway",
-									},
-								},
-							},
-						},
-						APIServerLB: LoadBalancerSpec{
-							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								Type: Public,
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "NAT gateway enabled on 1 of 2 node subnets",
-			cluster: &AzureCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-test",
-				},
-				Spec: AzureClusterSpec{
-					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
-						Subnets: Subnets{
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetControlPlane,
-									Name: "control-plane-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-										Name: "node-natgateway",
-									},
-								},
 							},
 							{
 								SubnetClassSpec: SubnetClassSpec{
@@ -1287,17 +1310,12 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							},
 							{
 								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "node-subnet-1",
 								},
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway",
-									},
-								},
 							},
 							{
 								SubnetClassSpec: SubnetClassSpec{
@@ -1324,11 +1342,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1336,7 +1354,7 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple node subnets, NAT gateway not enabled in any of them",
+			name: "multiple node subnets, IPv6 not enabled in any of them",
 			cluster: &AzureCluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cluster-test",
@@ -1416,6 +1434,107 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 								SubnetClassSpec: SubnetClassSpec{
 									Role: SubnetNode,
 									Name: "node-subnet-3",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+						},
+						APIServerLB: LoadBalancerSpec{
+							LoadBalancerClassSpec: LoadBalancerClassSpec{
+								Type: Public,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "multiple node subnets, IPv6 enabled on all of them",
+			cluster: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+									Name: "control-plane-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "node-subnet-1",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2002:beee::1/64"},
+									Name:       "node-subnet-2",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2003:befa::1/64"},
+									Name:       "node-subnet-3",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+						},
+					},
+				},
+			},
+			output: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: SubnetControlPlane,
+									Name: "control-plane-subnet",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2001:beea::1/64"},
+									Name:       "node-subnet-1",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2002:beee::1/64"},
+									Name:       "node-subnet-2",
+								},
+								SecurityGroup: SecurityGroup{},
+								RouteTable:    RouteTable{},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{"2003:befa::1/64"},
+									Name:       "node-subnet-3",
 								},
 								SecurityGroup: SecurityGroup{},
 								RouteTable:    RouteTable{},
@@ -1427,152 +1546,21 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
+							Name: "cluster-test",
 							FrontendIPs: []FrontendIP{{
 								Name: "cluster-test-frontEnd",
 								PublicIP: &PublicIPSpec{
 									Name: "pip-cluster-test-node-outbound",
 								},
 							}},
-							FrontendIPsCount: to.Int32Ptr(1),
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
+							FrontendIPsCount: pointer.Int32(1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
-							},
-							Name: "cluster-test",
-						},
-					},
-				},
-			},
-		},
-		{
-			name: "multiple node subnets, NAT gateway enabled on all of them",
-			cluster: &AzureCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-test",
-				},
-				Spec: AzureClusterSpec{
-					NetworkSpec: NetworkSpec{
-						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
-						Subnets: Subnets{
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetControlPlane,
-									Name: "control-plane-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway",
-									},
-								},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet-2",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway-2",
-									},
-								},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet-3",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway-3",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			output: &AzureCluster{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster-test",
-				},
-				Spec: AzureClusterSpec{
-					NetworkSpec: NetworkSpec{
-						Subnets: Subnets{
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetControlPlane,
-									Name: "control-plane-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway",
-									},
-								},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet-2",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway-2",
-									},
-								},
-							},
-							{
-								SubnetClassSpec: SubnetClassSpec{
-									Role: SubnetNode,
-									Name: "node-subnet-3",
-								},
-								SecurityGroup: SecurityGroup{},
-								RouteTable:    RouteTable{},
-								NatGateway: NatGateway{
-									NatGatewayClassSpec: NatGatewayClassSpec{
-
-										Name: "node-natgateway-3",
-									},
-								},
-							},
-						},
-						APIServerLB: LoadBalancerSpec{
-							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								Type: Public,
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1616,12 +1604,12 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						NodeOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(2),
+							FrontendIPsCount: pointer.Int32(2),
 							BackendPool: BackendPool{
 								Name: "custom-backend-pool",
 							},
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: to.Int32Ptr(15),
+								IdleTimeoutInMinutes: pointer.Int32(15),
 							},
 						},
 					},
@@ -1656,11 +1644,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "custom-backend-pool",
 							},
-							FrontendIPsCount: to.Int32Ptr(2), // we expect the original value to be respected here
+							FrontendIPsCount: pointer.Int32(2), // we expect the original value to be respected here
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(15), // we expect the original value to be respected here
+								IdleTimeoutInMinutes: pointer.Int32(15), // we expect the original value to be respected here
 							},
 							Name: "cluster-test",
 						},
@@ -1750,11 +1738,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "user-defined-name-outboundBackendPool",
 							},
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
@@ -1850,9 +1838,9 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Internal}},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: to.Int32Ptr(2),
+							FrontendIPsCount: pointer.Int32(2),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: to.Int32Ptr(15),
+								IdleTimeoutInMinutes: pointer.Int32(15),
 							},
 						},
 					},
@@ -1888,11 +1876,11 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							FrontendIPsCount: to.Int32Ptr(2),
+							FrontendIPsCount: pointer.Int32(2),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(15),
+								IdleTimeoutInMinutes: pointer.Int32(15),
 							},
 						},
 					},
@@ -1913,7 +1901,7 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 								Name: "custom-outbound-lb",
 							},
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: to.Int32Ptr(15),
+								IdleTimeoutInMinutes: pointer.Int32(15),
 							},
 						},
 					},
@@ -1943,11 +1931,11 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							FrontendIPsCount: to.Int32Ptr(1),
+							FrontendIPsCount: pointer.Int32(1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: to.Int32Ptr(15),
+								IdleTimeoutInMinutes: pointer.Int32(15),
 							},
 						},
 					},

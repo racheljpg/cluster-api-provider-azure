@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
@@ -32,281 +31,98 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
-var (
-	fakeAgentPoolSpecWithAutoscaling = AgentPoolSpec{
+func fakeAgentPool(changes ...func(*AgentPoolSpec)) AgentPoolSpec {
+	pool := AgentPoolSpec{
 		Name:              "fake-agent-pool-name",
 		ResourceGroup:     "fake-rg",
 		Cluster:           "fake-cluster",
 		AvailabilityZones: []string{"fake-zone"},
-		EnableAutoScaling: to.BoolPtr(true),
-		EnableUltraSSD:    to.BoolPtr(true),
-		MaxCount:          to.Int32Ptr(5),
-		MaxPods:           to.Int32Ptr(10),
-		MinCount:          to.Int32Ptr(1),
+		EnableAutoScaling: pointer.Bool(true),
+		EnableUltraSSD:    pointer.Bool(true),
+		KubeletDiskType:   (*infrav1.KubeletDiskType)(pointer.String("fake-kubelet-disk-type")),
+		MaxCount:          pointer.Int32(5),
+		MaxPods:           pointer.Int32(10),
+		MinCount:          pointer.Int32(1),
 		Mode:              "fake-mode",
-		NodeLabels:        map[string]*string{"fake-label": to.StringPtr("fake-value")},
+		NodeLabels:        map[string]*string{"fake-label": pointer.String("fake-value")},
 		NodeTaints:        []string{"fake-taint"},
 		OSDiskSizeGB:      2,
-		OsDiskType:        to.StringPtr("fake-os-disk-type"),
-		OSType:            to.StringPtr("fake-os-type"),
+		OsDiskType:        pointer.String("fake-os-disk-type"),
+		OSType:            pointer.String("fake-os-type"),
 		Replicas:          1,
 		SKU:               "fake-sku",
-		Version:           to.StringPtr("fake-version"),
-		VnetSubnetID:      "fake-vnet-subnet-id",
-		Headers:           map[string]string{"fake-header": "fake-value"},
-		AdditionalTags:    infrav1.Tags{"fake": "tag"},
-	}
-	fakeAgentPoolSpecWithoutAutoscaling = AgentPoolSpec{
-		Name:              "fake-agent-pool-name",
-		ResourceGroup:     "fake-rg",
-		Cluster:           "fake-cluster",
-		AvailabilityZones: []string{"fake-zone"},
-		EnableAutoScaling: to.BoolPtr(true),
-		EnableUltraSSD:    to.BoolPtr(true),
-		MaxCount:          to.Int32Ptr(5),
-		MaxPods:           to.Int32Ptr(10),
-		MinCount:          to.Int32Ptr(1),
-		Mode:              "fake-mode",
-		NodeLabels:        map[string]*string{"fake-label": to.StringPtr("fake-value")},
-		NodeTaints:        []string{"fake-taint"},
-		OSDiskSizeGB:      2,
-		OsDiskType:        to.StringPtr("fake-os-disk-type"),
-		OSType:            to.StringPtr("fake-os-type"),
-		Replicas:          1,
-		SKU:               "fake-sku",
-		Version:           to.StringPtr("fake-version"),
-		VnetSubnetID:      "fake-vnet-subnet-id",
-		Headers:           map[string]string{"fake-header": "fake-value"},
-		AdditionalTags:    infrav1.Tags{"fake": "tag"},
-	}
-	fakeAgentPoolSpecWithZeroReplicas = AgentPoolSpec{
-		Name:              "fake-agent-pool-name",
-		ResourceGroup:     "fake-rg",
-		Cluster:           "fake-cluster",
-		AvailabilityZones: []string{"fake-zone"},
-		EnableAutoScaling: to.BoolPtr(false),
-		EnableUltraSSD:    to.BoolPtr(true),
-		MaxCount:          to.Int32Ptr(5),
-		MaxPods:           to.Int32Ptr(10),
-		MinCount:          to.Int32Ptr(1),
-		Mode:              "fake-mode",
-		NodeLabels:        map[string]*string{"fake-label": to.StringPtr("fake-value")},
-		NodeTaints:        []string{"fake-taint"},
-		OSDiskSizeGB:      2,
-		OsDiskType:        to.StringPtr("fake-os-disk-type"),
-		OSType:            to.StringPtr("fake-os-type"),
-		Replicas:          0,
-		SKU:               "fake-sku",
-		Version:           to.StringPtr("fake-version"),
+		Version:           pointer.String("fake-version"),
 		VnetSubnetID:      "fake-vnet-subnet-id",
 		Headers:           map[string]string{"fake-header": "fake-value"},
 		AdditionalTags:    infrav1.Tags{"fake": "tag"},
 	}
 
-	fakeAgentPoolAutoScalingOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(1),    // updates if changed
-			EnableAutoScaling:   to.BoolPtr(false), // updates if changed
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5), // updates if changed
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),                                               // updates if changed
-			Mode:                containerservice.AgentPoolMode("fake-mode"),                  // updates if changed
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-taint"},                                      // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"),                                 // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
+	for _, change := range changes {
+		change(&pool)
 	}
 
-	fakeAgentPoolMaxCountOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(1),   // updates if changed
-			EnableAutoScaling:   to.BoolPtr(true), // updates if changed
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(3), // updates if changed
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),                                               // updates if changed
-			Mode:                containerservice.AgentPoolMode("fake-mode"),                  // updates if changed
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-taint"},                                      // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"),                                 // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
-	}
-
-	fakeAgentPoolMinCountOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(1),   // updates if changed
-			EnableAutoScaling:   to.BoolPtr(true), // updates if changed
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5), // updates if changed
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(3),                                               // updates if changed
-			Mode:                containerservice.AgentPoolMode("fake-mode"),                  // updates if changed
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-taint"},                                      // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"),                                 // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
-	}
-
-	fakeAgentPoolModeOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(1),   // updates if changed
-			EnableAutoScaling:   to.BoolPtr(true), // updates if changed
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5), // updates if changed
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),                                               // updates if changed
-			Mode:                containerservice.AgentPoolMode("fake-old-mode"),              // updates if changed
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-taint"},                                      // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"),                                 // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
-	}
-
-	fakeAgentPoolNodeLabelsOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones: &[]string{"fake-zone"},
-			Count:             to.Int32Ptr(1),   // updates if changed
-			EnableAutoScaling: to.BoolPtr(true), // updates if changed
-			EnableUltraSSD:    to.BoolPtr(true),
-			MaxCount:          to.Int32Ptr(5), // updates if changed
-			MaxPods:           to.Int32Ptr(10),
-			MinCount:          to.Int32Ptr(1),                                  // updates if changed
-			Mode:              containerservice.AgentPoolMode("fake-old-mode"), // updates if changed
-			NodeLabels: map[string]*string{
-				"fake-label":     to.StringPtr("fake-value"),
-				"fake-old-label": to.StringPtr("fake-old-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-taint"},      // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"), // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
-	}
-
-	fakeAgentPoolNodeTaintsOutOfDate = containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(1),   // updates if changed
-			EnableAutoScaling:   to.BoolPtr(true), // updates if changed
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5), // updates if changed
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),                                               // updates if changed
-			Mode:                containerservice.AgentPoolMode("fake-mode"),                  // updates if changed
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")}, // updates if changed
-			NodeTaints:          &[]string{"fake-old-taint"},                                  // updates if changed
-			OrchestratorVersion: to.StringPtr("fake-version"),                                 // updates if changed
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": pointer.String("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
-	}
-)
-
-func fakeAgentPoolWithProvisioningState(provisioningState string) containerservice.AgentPool {
-	return fakeAgentPoolWithProvisioningStateAndCountAndAutoscaling(provisioningState, 1, true)
+	return pool
 }
 
-func fakeAgentPoolWithProvisioningStateAndCountAndAutoscaling(provisioningState string, count int32, autoscaling bool) containerservice.AgentPool {
-	var state *string
-	if provisioningState != "" {
-		state = to.StringPtr(provisioningState)
-	}
-	return containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(count),
-			EnableAutoScaling:   to.BoolPtr(autoscaling),
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5),
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),
-			Mode:                containerservice.AgentPoolMode("fake-mode"),
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")},
-			NodeTaints:          &[]string{"fake-taint"},
-			OrchestratorVersion: to.StringPtr("fake-version"),
-			OsDiskSizeGB:        to.Int32Ptr(2),
-			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
-			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   state,
-			Tags:                map[string]*string{"fake": to.StringPtr("tag")},
-			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
-		},
+func withReplicas(replicas int32) func(*AgentPoolSpec) {
+	return func(pool *AgentPoolSpec) {
+		pool.Replicas = replicas
 	}
 }
 
-func fakeAgentPoolWithAutoscalingAndCount(enableAutoScaling bool, count int32) containerservice.AgentPool {
-	return containerservice.AgentPool{
+func withAutoscaling(enabled bool) func(*AgentPoolSpec) {
+	return func(pool *AgentPoolSpec) {
+		pool.EnableAutoScaling = pointer.Bool(enabled)
+	}
+}
+
+func sdkFakeAgentPool(changes ...func(*containerservice.AgentPool)) containerservice.AgentPool {
+	pool := containerservice.AgentPool{
 		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
 			AvailabilityZones:   &[]string{"fake-zone"},
-			Count:               to.Int32Ptr(count),
-			EnableAutoScaling:   to.BoolPtr(enableAutoScaling),
-			EnableUltraSSD:      to.BoolPtr(true),
-			MaxCount:            to.Int32Ptr(5),
-			MaxPods:             to.Int32Ptr(10),
-			MinCount:            to.Int32Ptr(1),
-			Mode:                containerservice.AgentPoolMode("fake-mode"),
-			NodeLabels:          map[string]*string{"fake-label": to.StringPtr("fake-value")},
-			NodeTaints:          &[]string{"fake-taint"},
-			OrchestratorVersion: to.StringPtr("fake-version"),
-			OsDiskSizeGB:        to.Int32Ptr(2),
+			Count:               pointer.Int32(1),   // updates if changed
+			EnableAutoScaling:   pointer.Bool(true), // updates if changed
+			EnableUltraSSD:      pointer.Bool(true),
+			KubeletDiskType:     containerservice.KubeletDiskType("fake-kubelet-disk-type"),
+			MaxCount:            pointer.Int32(5), // updates if changed
+			MaxPods:             pointer.Int32(10),
+			MinCount:            pointer.Int32(1),                                               // updates if changed
+			Mode:                containerservice.AgentPoolMode("fake-mode"),                    // updates if changed
+			NodeLabels:          map[string]*string{"fake-label": pointer.String("fake-value")}, // updates if changed
+			NodeTaints:          &[]string{"fake-taint"},                                        // updates if changed
+			OrchestratorVersion: pointer.String("fake-version"),                                 // updates if changed
+			OsDiskSizeGB:        pointer.Int32(2),
 			OsDiskType:          containerservice.OSDiskType("fake-os-disk-type"),
 			OsType:              containerservice.OSType("fake-os-type"),
-			ProvisioningState:   to.StringPtr("Succeeded"),
-			Tags:                map[string]*string{"fake": to.StringPtr("tag")},
+			Tags:                map[string]*string{"fake": pointer.String("tag")},
 			Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-			VMSize:              to.StringPtr("fake-sku"),
-			VnetSubnetID:        to.StringPtr("fake-vnet-subnet-id"),
+			VMSize:              pointer.String("fake-sku"),
+			VnetSubnetID:        pointer.String("fake-vnet-subnet-id"),
 		},
+	}
+
+	for _, change := range changes {
+		change(&pool)
+	}
+
+	return pool
+}
+
+func sdkWithAutoscaling(enableAutoscaling bool) func(*containerservice.AgentPool) {
+	return func(pool *containerservice.AgentPool) {
+		pool.ManagedClusterAgentPoolProfileProperties.EnableAutoScaling = pointer.Bool(enableAutoscaling)
+	}
+}
+
+func sdkWithCount(count int32) func(*containerservice.AgentPool) {
+	return func(pool *containerservice.AgentPool) {
+		pool.ManagedClusterAgentPoolProfileProperties.Count = pointer.Int32(count)
+	}
+}
+
+func sdkWithProvisioningState(state string) func(*containerservice.AgentPool) {
+	return func(pool *containerservice.AgentPool) {
+		pool.ManagedClusterAgentPoolProfileProperties.ProvisioningState = pointer.String(state)
 	}
 }
 
@@ -320,114 +136,167 @@ func TestParameters(t *testing.T) {
 	}{
 		{
 			name:          "parameters without an existing agent pool",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
+			spec:          fakeAgentPool(),
 			existing:      nil,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
 			name:          "existing agent pool up to date with provisioning state `Succeeded` without error",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("Succeeded"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("Succeeded")),
 			expected:      nil,
 			expectedError: nil,
 		},
 		{
 			name:          "existing agent pool up to date with provisioning state `Canceled` without error",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("Canceled"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("Canceled")),
 			expected:      nil,
 			expectedError: nil,
 		},
 		{
 			name:          "existing agent pool up to date with provisioning state `Failed` without error",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("Failed"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("Failed")),
 			expected:      nil,
 			expectedError: nil,
 		},
 		{
 			name:          "existing agent pool up to date with non-terminal provisioning state `Deleting`",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("Deleting"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("Deleting")),
 			expected:      nil,
 			expectedError: azure.WithTransientError(errors.New("Unable to update existing agent pool in non terminal state. Agent pool must be in one of the following provisioning states: Canceled, Failed, or Succeeded. Actual state: Deleting"), 20*time.Second),
 		},
 		{
 			name:          "existing agent pool up to date with non-terminal provisioning state `InProgress`",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("InProgress"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("InProgress")),
 			expected:      nil,
 			expectedError: azure.WithTransientError(errors.New("Unable to update existing agent pool in non terminal state. Agent pool must be in one of the following provisioning states: Canceled, Failed, or Succeeded. Actual state: InProgress"), 20*time.Second),
 		},
 		{
 			name:          "existing agent pool up to date with non-terminal provisioning state `randomString`",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithProvisioningState("randomString"),
+			spec:          fakeAgentPool(),
+			existing:      sdkFakeAgentPool(sdkWithProvisioningState("randomString")),
 			expected:      nil,
 			expectedError: azure.WithTransientError(errors.New("Unable to update existing agent pool in non terminal state. Agent pool must be in one of the following provisioning states: Canceled, Failed, or Succeeded. Actual state: randomString"), 20*time.Second),
 		},
 		{
-			name:          "parameters with an existing agent pool, update when count is out of date when enableAutoScaling is false",
-			spec:          fakeAgentPoolSpecWithoutAutoscaling,
-			existing:      fakeAgentPoolWithAutoscalingAndCount(false, 5),
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool, update when count is out of date when enableAutoScaling is false",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				sdkWithAutoscaling(false),
+				sdkWithCount(5),
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool, do not update when count is out of date and enableAutoScaling is true",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolWithAutoscalingAndCount(true, 5),
+			name: "parameters with an existing agent pool, do not update when count is out of date and enableAutoScaling is true",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				sdkWithAutoscaling(true),
+				sdkWithCount(5),
+				sdkWithProvisioningState("Succeeded"),
+			),
 			expected:      nil,
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on autoscaling",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolAutoScalingOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on autoscaling",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				sdkWithAutoscaling(false),
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on max count",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolMaxCountOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on max count",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) { pool.MaxCount = pointer.Int32(3) },
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on min count",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolMinCountOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on min count",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) { pool.MinCount = pointer.Int32(3) },
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on mode",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolModeOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on mode",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) { pool.Mode = "fake-old-mode" },
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on node labels",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolNodeLabelsOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on node labels",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) {
+					pool.NodeLabels = map[string]*string{
+						"fake-label":     pointer.String("fake-value"),
+						"fake-old-label": pointer.String("fake-old-value"),
+					}
+				},
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "parameters with an existing agent pool and update needed on node taints",
-			spec:          fakeAgentPoolSpecWithAutoscaling,
-			existing:      fakeAgentPoolNodeTaintsOutOfDate,
-			expected:      fakeAgentPoolWithProvisioningState(""),
+			name: "parameters with an existing agent pool and update needed on node taints",
+			spec: fakeAgentPool(),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) { pool.NodeTaints = &[]string{"fake-old-taint"} },
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      sdkFakeAgentPool(),
 			expectedError: nil,
 		},
 		{
-			name:          "scale to zero",
-			spec:          fakeAgentPoolSpecWithZeroReplicas,
-			existing:      fakeAgentPoolWithAutoscalingAndCount(false, 1),
-			expected:      fakeAgentPoolWithProvisioningStateAndCountAndAutoscaling("", 0, false),
+			name: "scale to zero",
+			spec: fakeAgentPool(
+				withReplicas(0),
+				withAutoscaling(false),
+			),
+			existing: sdkFakeAgentPool(
+				sdkWithAutoscaling(false),
+				sdkWithCount(1),
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected: sdkFakeAgentPool(
+				sdkWithAutoscaling(false),
+				sdkWithCount(0),
+			),
+			expectedError: nil,
+		},
+		{
+			name: "empty node taints should not trigger an update",
+			spec: fakeAgentPool(
+				func(pool *AgentPoolSpec) { pool.NodeTaints = nil },
+			),
+			existing: sdkFakeAgentPool(
+				func(pool *containerservice.AgentPool) { pool.NodeTaints = nil },
+				sdkWithProvisioningState("Succeeded"),
+			),
+			expected:      nil,
 			expectedError: nil,
 		},
 	}
@@ -461,58 +330,58 @@ func TestMergeSystemNodeLabels(t *testing.T) {
 		{
 			name: "update an existing label",
 			capzLabels: map[string]*string{
-				"foo": to.StringPtr("bar"),
+				"foo": pointer.String("bar"),
 			},
 			aksLabels: map[string]*string{
-				"foo": to.StringPtr("baz"),
+				"foo": pointer.String("baz"),
 			},
 			expected: map[string]*string{
-				"foo": to.StringPtr("bar"),
+				"foo": pointer.String("bar"),
 			},
 		},
 		{
 			name:       "delete labels",
 			capzLabels: map[string]*string{},
 			aksLabels: map[string]*string{
-				"foo":   to.StringPtr("bar"),
-				"hello": to.StringPtr("world"),
+				"foo":   pointer.String("bar"),
+				"hello": pointer.String("world"),
 			},
 			expected: map[string]*string{},
 		},
 		{
 			name: "delete one label",
 			capzLabels: map[string]*string{
-				"foo": to.StringPtr("bar"),
+				"foo": pointer.String("bar"),
 			},
 			aksLabels: map[string]*string{
-				"foo":   to.StringPtr("bar"),
-				"hello": to.StringPtr("world"),
+				"foo":   pointer.String("bar"),
+				"hello": pointer.String("world"),
 			},
 			expected: map[string]*string{
-				"foo": to.StringPtr("bar"),
+				"foo": pointer.String("bar"),
 			},
 		},
 		{
 			name: "retain system label during update",
 			capzLabels: map[string]*string{
-				"foo": to.StringPtr("bar"),
+				"foo": pointer.String("bar"),
 			},
 			aksLabels: map[string]*string{
-				"kubernetes.azure.com/scalesetpriority": to.StringPtr("spot"),
+				"kubernetes.azure.com/scalesetpriority": pointer.String("spot"),
 			},
 			expected: map[string]*string{
-				"foo":                                   to.StringPtr("bar"),
-				"kubernetes.azure.com/scalesetpriority": to.StringPtr("spot"),
+				"foo":                                   pointer.String("bar"),
+				"kubernetes.azure.com/scalesetpriority": pointer.String("spot"),
 			},
 		},
 		{
 			name:       "retain system label during delete",
 			capzLabels: map[string]*string{},
 			aksLabels: map[string]*string{
-				"kubernetes.azure.com/scalesetpriority": to.StringPtr("spot"),
+				"kubernetes.azure.com/scalesetpriority": pointer.String("spot"),
 			},
 			expected: map[string]*string{
-				"kubernetes.azure.com/scalesetpriority": to.StringPtr("spot"),
+				"kubernetes.azure.com/scalesetpriority": pointer.String("spot"),
 			},
 		},
 	}

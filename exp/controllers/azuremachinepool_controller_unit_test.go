@@ -19,12 +19,12 @@ package controllers
 import (
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
@@ -88,13 +88,13 @@ func newMachinePool(clusterName, poolName string) *expv1.MachinePool {
 	return &expv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName: clusterName,
+				clusterv1.ClusterNameLabel: clusterName,
 			},
 			Name:      poolName,
 			Namespace: "default",
 		},
 		Spec: expv1.MachinePoolSpec{
-			Replicas: to.Int32Ptr(2),
+			Replicas: pointer.Int32(2),
 		},
 	}
 }
@@ -103,7 +103,7 @@ func newAzureMachinePool(clusterName, poolName string) *infrav1exp.AzureMachineP
 	return &infrav1exp.AzureMachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName: clusterName,
+				clusterv1.ClusterNameLabel: clusterName,
 			},
 			Name:      poolName,
 			Namespace: "default",
@@ -115,17 +115,6 @@ func newMachinePoolWithInfrastructureRef(clusterName, poolName string) *expv1.Ma
 	m := newMachinePool(clusterName, poolName)
 	m.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
 		Kind:       "AzureMachinePool",
-		Namespace:  m.Namespace,
-		Name:       "azure" + poolName,
-		APIVersion: infrav1exp.GroupVersion.String(),
-	}
-	return m
-}
-
-func newManagedMachinePoolWithInfrastructureRef(clusterName, poolName string) *expv1.MachinePool {
-	m := newMachinePool(clusterName, poolName)
-	m.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
-		Kind:       "AzureManagedMachinePool",
 		Namespace:  m.Namespace,
 		Name:       "azure" + poolName,
 		APIVersion: infrav1exp.GroupVersion.String(),

@@ -23,18 +23,18 @@ import (
 	"time"
 
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privateendpoints"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/maps"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -53,7 +53,7 @@ type ManagedControlPlaneScopeParams struct {
 	AzureClients
 	Client              client.Client
 	Cluster             *clusterv1.Cluster
-	ControlPlane        *infrav1exp.AzureManagedControlPlane
+	ControlPlane        *infrav1.AzureManagedControlPlane
 	ManagedMachinePools []ManagedMachinePool
 	Cache               *ManagedControlPlaneCache
 }
@@ -116,7 +116,7 @@ type ManagedControlPlaneScope struct {
 
 	AzureClients
 	Cluster             *clusterv1.Cluster
-	ControlPlane        *infrav1exp.AzureManagedControlPlane
+	ControlPlane        *infrav1.AzureManagedControlPlane
 	ManagedMachinePools []ManagedMachinePool
 }
 
@@ -152,6 +152,21 @@ func (s *ManagedControlPlaneScope) Location() string {
 		return ""
 	}
 	return s.ControlPlane.Spec.Location
+}
+
+// ExtendedLocation has not been implemented for AzureManagedControlPlane.
+func (s *ManagedControlPlaneScope) ExtendedLocation() *infrav1.ExtendedLocationSpec {
+	return nil
+}
+
+// ExtendedLocationName has not been implemented for AzureManagedControlPlane.
+func (s *ManagedControlPlaneScope) ExtendedLocationName() string {
+	return ""
+}
+
+// ExtendedLocationType has not been implemented for AzureManagedControlPlane.
+func (s *ManagedControlPlaneScope) ExtendedLocationType() string {
+	return ""
 }
 
 // AvailabilitySetEnabled is always false for a managed control plane.
@@ -289,6 +304,7 @@ func (s *ManagedControlPlaneScope) NodeSubnet() infrav1.SubnetSpec {
 			CIDRBlocks:       []string{s.ControlPlane.Spec.VirtualNetwork.Subnet.CIDRBlock},
 			Name:             s.ControlPlane.Spec.VirtualNetwork.Subnet.Name,
 			ServiceEndpoints: s.ControlPlane.Spec.VirtualNetwork.Subnet.ServiceEndpoints,
+			PrivateEndpoints: s.ControlPlane.Spec.VirtualNetwork.Subnet.PrivateEndpoints,
 		},
 	}
 }
@@ -324,6 +340,7 @@ func (s *ManagedControlPlaneScope) NodeSubnets() []infrav1.SubnetSpec {
 				CIDRBlocks:       []string{s.ControlPlane.Spec.VirtualNetwork.Subnet.CIDRBlock},
 				Name:             s.ControlPlane.Spec.VirtualNetwork.Subnet.Name,
 				ServiceEndpoints: s.ControlPlane.Spec.VirtualNetwork.Subnet.ServiceEndpoints,
+				PrivateEndpoints: s.ControlPlane.Spec.VirtualNetwork.Subnet.PrivateEndpoints,
 			},
 		},
 	}
@@ -336,6 +353,7 @@ func (s *ManagedControlPlaneScope) Subnet(name string) infrav1.SubnetSpec {
 		subnet.Name = s.ControlPlane.Spec.VirtualNetwork.Subnet.Name
 		subnet.CIDRBlocks = []string{s.ControlPlane.Spec.VirtualNetwork.Subnet.CIDRBlock}
 		subnet.ServiceEndpoints = s.ControlPlane.Spec.VirtualNetwork.Subnet.ServiceEndpoints
+		subnet.PrivateEndpoints = s.ControlPlane.Spec.VirtualNetwork.Subnet.PrivateEndpoints
 	}
 
 	return subnet
@@ -350,7 +368,7 @@ func (s *ManagedControlPlaneScope) IsIPv6Enabled() bool {
 // IsVnetManaged returns true if the vnet is managed.
 func (s *ManagedControlPlaneScope) IsVnetManaged() bool {
 	if s.cache.isVnetManaged != nil {
-		return to.Bool(s.cache.isVnetManaged)
+		return pointer.BoolDeref(s.cache.isVnetManaged, false)
 	}
 	// TODO refactor `IsVnetManaged` so that it is able to use an upstream context
 	// see https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/2581
@@ -361,7 +379,7 @@ func (s *ManagedControlPlaneScope) IsVnetManaged() bool {
 	if err != nil {
 		log.Error(err, "Unable to determine if ManagedControlPlaneScope VNET is managed by capz", "AzureManagedCluster", s.ClusterName())
 	}
-	s.cache.isVnetManaged = to.BoolPtr(isManaged)
+	s.cache.isVnetManaged = pointer.Bool(isManaged)
 	return isManaged
 }
 
@@ -419,14 +437,15 @@ func (s *ManagedControlPlaneScope) ManagedClusterAnnotations() map[string]string
 }
 
 // ManagedClusterSpec returns the managed cluster spec.
-func (s *ManagedControlPlaneScope) ManagedClusterSpec(ctx context.Context) azure.ResourceSpecGetter {
+func (s *ManagedControlPlaneScope) ManagedClusterSpec() azure.ResourceSpecGetter {
 	managedClusterSpec := managedclusters.ManagedClusterSpec{
 		Name:              s.ControlPlane.Name,
 		ResourceGroup:     s.ControlPlane.Spec.ResourceGroupName,
 		NodeResourceGroup: s.ControlPlane.Spec.NodeResourceGroupName,
+		ClusterName:       s.ClusterName(),
 		Location:          s.ControlPlane.Spec.Location,
 		Tags:              s.ControlPlane.Spec.AdditionalTags,
-		Headers:           maps.FilterByKeyPrefix(s.ManagedClusterAnnotations(), azure.CustomHeaderPrefix),
+		Headers:           maps.FilterByKeyPrefix(s.ManagedClusterAnnotations(), infrav1.CustomHeaderPrefix),
 		Version:           strings.TrimPrefix(s.ControlPlane.Spec.Version, "v"),
 		SSHPublicKey:      s.ControlPlane.Spec.SSHPublicKey,
 		DNSServiceIP:      s.ControlPlane.Spec.DNSServiceIP,
@@ -437,6 +456,7 @@ func (s *ManagedControlPlaneScope) ManagedClusterSpec(ctx context.Context) azure
 			s.ControlPlane.Spec.VirtualNetwork.Subnet.Name,
 		),
 		GetAllAgentPools: s.GetAllAgentPoolSpecs,
+		OutboundType:     s.ControlPlane.Spec.OutboundType,
 	}
 
 	if s.ControlPlane.Spec.NetworkPlugin != nil {
@@ -541,7 +561,7 @@ func (s *ManagedControlPlaneScope) GetAllAgentPoolSpecs() ([]azure.ResourceSpecG
 			}
 		}
 
-		if pool.InfraMachinePool != nil && pool.InfraMachinePool.Spec.Mode == string(infrav1exp.NodePoolModeSystem) {
+		if pool.InfraMachinePool != nil && pool.InfraMachinePool.Spec.Mode == string(infrav1.NodePoolModeSystem) {
 			foundSystemPool = true
 		}
 
@@ -558,12 +578,8 @@ func (s *ManagedControlPlaneScope) GetAllAgentPoolSpecs() ([]azure.ResourceSpecG
 
 // SetControlPlaneEndpoint sets a control plane endpoint.
 func (s *ManagedControlPlaneScope) SetControlPlaneEndpoint(endpoint clusterv1.APIEndpoint) {
-	if s.ControlPlane.Spec.ControlPlaneEndpoint.Host == "" {
-		s.ControlPlane.Spec.ControlPlaneEndpoint.Host = endpoint.Host
-	}
-	if s.ControlPlane.Spec.ControlPlaneEndpoint.Port == 0 {
-		s.ControlPlane.Spec.ControlPlaneEndpoint.Port = endpoint.Port
-	}
+	s.ControlPlane.Spec.ControlPlaneEndpoint.Host = endpoint.Host
+	s.ControlPlane.Spec.ControlPlaneEndpoint.Port = endpoint.Port
 }
 
 // MakeEmptyKubeConfigSecret creates an empty secret object that is used for storing kubeconfig secret data.
@@ -573,7 +589,7 @@ func (s *ManagedControlPlaneScope) MakeEmptyKubeConfigSecret() corev1.Secret {
 			Name:      secret.Name(s.Cluster.Name, secret.Kubeconfig),
 			Namespace: s.Cluster.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
-				*metav1.NewControllerRef(s.ControlPlane, infrav1exp.GroupVersion.WithKind("AzureManagedControlPlane")),
+				*metav1.NewControllerRef(s.ControlPlane, infrav1.GroupVersion.WithKind("AzureManagedControlPlane")),
 			},
 		},
 	}
@@ -684,6 +700,11 @@ func (s *ManagedControlPlaneScope) TagsSpecs() []azure.TagsSpec {
 			Tags:       s.AdditionalTags(),
 			Annotation: azure.RGTagsLastAppliedAnnotation,
 		},
+		{
+			Scope:      azure.ManagedClusterID(s.SubscriptionID(), s.ResourceGroup(), s.ManagedClusterSpec().ResourceName()),
+			Tags:       s.AdditionalTags(),
+			Annotation: azure.ManagedClusterTagsLastAppliedAnnotation,
+		},
 	}
 }
 
@@ -705,4 +726,43 @@ func (s *ManagedControlPlaneScope) AvailabilityStatusFilter(cond *clusterv1.Cond
 		return conditions.TrueCondition(infrav1.AzureResourceAvailableCondition)
 	}
 	return cond
+}
+
+// PrivateEndpointSpecs returns the private endpoint specs.
+func (s *ManagedControlPlaneScope) PrivateEndpointSpecs() []azure.ResourceSpecGetter {
+	privateEndpointSpecs := make([]azure.ResourceSpecGetter, len(s.ControlPlane.Spec.VirtualNetwork.Subnet.PrivateEndpoints))
+
+	for _, privateEndpoint := range s.ControlPlane.Spec.VirtualNetwork.Subnet.PrivateEndpoints {
+		privateEndpointSpec := &privateendpoints.PrivateEndpointSpec{
+			Name:                       privateEndpoint.Name,
+			ResourceGroup:              s.VNetSpec().ResourceGroupName(),
+			Location:                   privateEndpoint.Location,
+			CustomNetworkInterfaceName: privateEndpoint.CustomNetworkInterfaceName,
+			PrivateIPAddresses:         privateEndpoint.PrivateIPAddresses,
+			SubnetID: azure.SubnetID(
+				s.ControlPlane.Spec.SubscriptionID,
+				s.VNetSpec().ResourceGroupName(),
+				s.ControlPlane.Spec.VirtualNetwork.Name,
+				s.ControlPlane.Spec.VirtualNetwork.Subnet.Name,
+			),
+			ApplicationSecurityGroups: privateEndpoint.ApplicationSecurityGroups,
+			ManualApproval:            privateEndpoint.ManualApproval,
+			ClusterName:               s.ClusterName(),
+			AdditionalTags:            s.AdditionalTags(),
+		}
+
+		for _, privateLinkServiceConnection := range privateEndpoint.PrivateLinkServiceConnections {
+			pl := privateendpoints.PrivateLinkServiceConnection{
+				PrivateLinkServiceID: privateLinkServiceConnection.PrivateLinkServiceID,
+				Name:                 privateLinkServiceConnection.Name,
+				RequestMessage:       privateLinkServiceConnection.RequestMessage,
+				GroupIDs:             privateLinkServiceConnection.GroupIDs,
+			}
+			privateEndpointSpec.PrivateLinkServiceConnections = append(privateEndpointSpec.PrivateLinkServiceConnections, pl)
+		}
+
+		privateEndpointSpecs = append(privateEndpointSpecs, privateEndpointSpec)
+	}
+
+	return privateEndpointSpecs
 }

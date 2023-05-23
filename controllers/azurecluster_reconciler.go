@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/loadbalancers"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/natgateways"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privatedns"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privateendpoints"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/publicips"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/routetables"
@@ -68,6 +69,7 @@ func newAzureClusterService(scope *scope.ClusterScope) (*azureClusterService, er
 			loadbalancers.New(scope),
 			privatedns.New(scope),
 			bastionhosts.New(scope),
+			privateendpoints.New(scope),
 			tags.New(scope),
 		},
 		skuCache: skuCache,
@@ -83,6 +85,7 @@ func (s *azureClusterService) Reconcile(ctx context.Context) error {
 		return errors.Wrap(err, "failed to get availability zones")
 	}
 
+	s.scope.AzureCluster.SetBackendPoolNameDefault()
 	s.scope.SetDNSName()
 	s.scope.SetControlPlaneSecurityRules()
 
@@ -152,6 +155,10 @@ func (s *azureClusterService) getService(name string) (azure.ServiceReconciler, 
 // setFailureDomainsForLocation sets the AzureCluster Status failure domains based on which Azure Availability Zones are available in the cluster location.
 // Note that this is not done in a webhook as it requires API calls to fetch the availability zones.
 func (s *azureClusterService) setFailureDomainsForLocation(ctx context.Context) error {
+	if s.scope.ExtendedLocation() != nil {
+		return nil
+	}
+
 	zones, err := s.skuCache.GetZones(ctx, s.scope.Location())
 	if err != nil {
 		return errors.Wrapf(err, "failed to get zones for location %s", s.scope.Location())

@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,7 +59,7 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
 
-	infraControlPlane := &infrav1exp.AzureManagedControlPlane{}
+	infraControlPlane := &infrav1.AzureManagedControlPlane{}
 	err = mgmtClient.Get(ctx, client.ObjectKey{
 		Namespace: input.Cluster.Spec.ControlPlaneRef.Namespace,
 		Name:      input.Cluster.Spec.ControlPlaneRef.Name,
@@ -74,11 +73,27 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 		defer GinkgoRecover()
 		defer wg.Done()
 
+		nonAdditionalTagKeys := map[string]struct{}{}
+		managedcluster, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
+		Expect(err).NotTo(HaveOccurred())
+		for k := range managedcluster.Tags {
+			if _, exists := infraControlPlane.Spec.AdditionalTags[k]; !exists {
+				nonAdditionalTagKeys[k] = struct{}{}
+			}
+		}
+
 		var expectedTags infrav1.Tags
 		checkTags := func(g Gomega) {
 			managedcluster, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
 			g.Expect(err).NotTo(HaveOccurred())
 			actualTags := converters.MapToTags(managedcluster.Tags)
+			// Ignore tags not originally specified in spec.additionalTags
+			for k := range nonAdditionalTagKeys {
+				delete(actualTags, k)
+			}
+			if len(actualTags) == 0 {
+				actualTags = nil
+			}
 			if expectedTags == nil {
 				g.Expect(actualTags).To(BeNil())
 			} else {
@@ -136,17 +151,33 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 			defer GinkgoRecover()
 			defer wg.Done()
 
-			ammp := &infrav1exp.AzureManagedMachinePool{}
+			ammp := &infrav1.AzureManagedMachinePool{}
 			Expect(mgmtClient.Get(ctx, types.NamespacedName{
 				Namespace: mp.Spec.Template.Spec.InfrastructureRef.Namespace,
 				Name:      mp.Spec.Template.Spec.InfrastructureRef.Name,
 			}, ammp)).To(Succeed())
+
+			nonAdditionalTagKeys := map[string]struct{}{}
+			agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
+			Expect(err).NotTo(HaveOccurred())
+			for k := range agentpool.Tags {
+				if _, exists := infraControlPlane.Spec.AdditionalTags[k]; !exists {
+					nonAdditionalTagKeys[k] = struct{}{}
+				}
+			}
 
 			var expectedTags infrav1.Tags
 			checkTags := func(g Gomega) {
 				agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
 				g.Expect(err).NotTo(HaveOccurred())
 				actualTags := converters.MapToTags(agentpool.Tags)
+				// Ignore tags not originally specified in spec.additionalTags
+				for k := range nonAdditionalTagKeys {
+					delete(actualTags, k)
+				}
+				if len(actualTags) == 0 {
+					actualTags = nil
+				}
 				if expectedTags == nil {
 					g.Expect(actualTags).To(BeNil())
 				} else {

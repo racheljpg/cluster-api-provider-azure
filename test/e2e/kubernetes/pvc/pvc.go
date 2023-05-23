@@ -24,12 +24,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/pointer"
 )
 
 const (
@@ -105,18 +105,17 @@ func (b *Builder) WithAnnotations(annotations map[string]string) *Builder {
 }
 
 func (b *Builder) WithStorageClass(scName string) *Builder {
-	b.pvc.Spec.StorageClassName = to.StringPtr(scName)
+	b.pvc.Spec.StorageClassName = pointer.String(scName)
 	return b
 }
 
 func (b *Builder) DeployPVC(clientset *kubernetes.Clientset) error {
-	Eventually(func() error {
+	Eventually(func(g Gomega) {
 		_, err := clientset.CoreV1().PersistentVolumeClaims("default").Create(context.TODO(), b.pvc, metav1.CreateOptions{})
 		if err != nil {
 			log.Printf("Error trying to deploy storage class %s in namespace %s:%s\n", b.pvc.Name, b.pvc.ObjectMeta.Namespace, err.Error())
-			return err
 		}
-		return nil
+		g.Expect(err).To(HaveOccurred())
 	}, pvcOperationTimeout, pvcOperationSleepBetweenRetries).Should(Succeed())
 
 	return nil

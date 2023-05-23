@@ -22,44 +22,17 @@ import (
 	"testing"
 
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools/mock_agentpools"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
-var (
-	fakeAgentPoolSpec = AgentPoolSpec{
-		Name:              "fake-agent-pool-name",
-		ResourceGroup:     "fake-rg",
-		Cluster:           "fake-cluster",
-		Version:           to.StringPtr("fake-version"),
-		SKU:               "fake-sku",
-		Replicas:          1,
-		OSDiskSizeGB:      2,
-		VnetSubnetID:      "fake-vnet-subnet-id",
-		Mode:              "fake-mode",
-		MaxCount:          to.Int32Ptr(5),
-		MinCount:          to.Int32Ptr(1),
-		NodeLabels:        map[string]*string{"fake-label": to.StringPtr("fake-value")},
-		NodeTaints:        []string{"fake-taint"},
-		EnableAutoScaling: to.BoolPtr(true),
-		AvailabilityZones: []string{"fake-zone"},
-		MaxPods:           to.Int32Ptr(10),
-		OsDiskType:        to.StringPtr("fake-os-disk-type"),
-		EnableUltraSSD:    to.BoolPtr(true),
-		OSType:            to.StringPtr("fake-os-type"),
-		Headers:           map[string]string{"fake-header": "fake-value"},
-		KubeletDiskType:   (*infrav1exp.KubeletDiskType)(to.StringPtr("fake-kubelet-disk-type")),
-	}
-
-	internalError = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
-)
+var internalError = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
 
 func TestReconcileAgentPools(t *testing.T) {
 	testcases := []struct {
@@ -71,10 +44,11 @@ func TestReconcileAgentPools(t *testing.T) {
 			name:          "agent pool successfully created with autoscaling enabled",
 			expectedError: "",
 			expect: func(s *mock_agentpools.MockAgentPoolScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				fakeAgentPoolSpec := fakeAgentPool()
 				s.AgentPoolSpec().Return(&fakeAgentPoolSpec)
-				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(fakeAgentPoolWithAutoscalingAndCount(true, 1), nil)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(sdkFakeAgentPool(sdkWithAutoscaling(true), sdkWithCount(1)), nil)
 				s.SetCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation, "true")
-				s.SetCAPIMachinePoolReplicas(fakeAgentPoolWithAutoscalingAndCount(true, 1).Count)
+				s.SetCAPIMachinePoolReplicas(pointer.Int32(1))
 				s.UpdatePutStatus(infrav1.AgentPoolsReadyCondition, serviceName, nil)
 			},
 		},
@@ -82,8 +56,9 @@ func TestReconcileAgentPools(t *testing.T) {
 			name:          "agent pool successfully created with autoscaling disabled",
 			expectedError: "",
 			expect: func(s *mock_agentpools.MockAgentPoolScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				fakeAgentPoolSpec := fakeAgentPool()
 				s.AgentPoolSpec().Return(&fakeAgentPoolSpec)
-				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(fakeAgentPoolWithAutoscalingAndCount(false, 1), nil)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(sdkFakeAgentPool(sdkWithAutoscaling(false), sdkWithCount(1)), nil)
 				s.RemoveCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation)
 
 				s.UpdatePutStatus(infrav1.AgentPoolsReadyCondition, serviceName, nil)
@@ -100,6 +75,7 @@ func TestReconcileAgentPools(t *testing.T) {
 			name:          "fail to create a agent pool",
 			expectedError: internalError.Error(),
 			expect: func(s *mock_agentpools.MockAgentPoolScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				fakeAgentPoolSpec := fakeAgentPool()
 				s.AgentPoolSpec().Return(&fakeAgentPoolSpec)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(nil, internalError)
 				s.UpdatePutStatus(infrav1.AgentPoolsReadyCondition, serviceName, internalError)
@@ -145,6 +121,7 @@ func TestDeleteAgentPools(t *testing.T) {
 			name:          "existing agent pool successfully deleted",
 			expectedError: "",
 			expect: func(s *mock_agentpools.MockAgentPoolScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				fakeAgentPoolSpec := fakeAgentPool()
 				s.AgentPoolSpec().Return(&fakeAgentPoolSpec)
 				r.DeleteResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(nil)
 				s.UpdateDeleteStatus(infrav1.AgentPoolsReadyCondition, serviceName, nil)
@@ -161,6 +138,7 @@ func TestDeleteAgentPools(t *testing.T) {
 			name:          "fail to delete a agent pool",
 			expectedError: internalError.Error(),
 			expect: func(s *mock_agentpools.MockAgentPoolScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
+				fakeAgentPoolSpec := fakeAgentPool()
 				s.AgentPoolSpec().Return(&fakeAgentPoolSpec)
 				r.DeleteResource(gomockinternal.AContext(), &fakeAgentPoolSpec, serviceName).Return(internalError)
 				s.UpdateDeleteStatus(infrav1.AgentPoolsReadyCondition, serviceName, internalError)
