@@ -21,7 +21,6 @@ import (
 	"net/http"
 
 	"github.com/Azure/go-autorest/autorest"
-	azureautorest "github.com/Azure/go-autorest/autorest/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	"sigs.k8s.io/cluster-api-provider-azure/version"
 )
@@ -31,6 +30,8 @@ const (
 	DefaultUserName = "capi"
 	// DefaultAKSUserName is the default username for a created AKS VM.
 	DefaultAKSUserName = "azureuser"
+	// PublicCloudName is the name of the Azure public cloud.
+	PublicCloudName = "AzurePublicCloud"
 )
 
 const (
@@ -94,9 +95,6 @@ const (
 	// ProviderIDPrefix will be appended to the beginning of Azure resource IDs to form the Kubernetes Provider ID.
 	// NOTE: this format matches the 2 slashes format used in cloud-provider and cluster-autoscaler.
 	ProviderIDPrefix = "azure://"
-	// azureBuiltInContributorID the ID of the Contributor role in Azure
-	// Ref: https://docs.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
-	azureBuiltInContributorID = "b24988ac-6180-42a0-ab88-20f7382dd24c"
 )
 
 const (
@@ -120,16 +118,6 @@ func GenerateBackendAddressPoolName(lbName string) string {
 	return fmt.Sprintf("%s-%s", lbName, "backendPool")
 }
 
-// GenerateSubscriptionScope generates a role assignment scope that applies to all resources in the subscription.
-func GenerateSubscriptionScope(subscriptionID string) string {
-	return fmt.Sprintf("/subscriptions/%s/", subscriptionID)
-}
-
-// GenerateContributorRoleDefinitionID generates the contributor role definition ID.
-func GenerateContributorRoleDefinitionID(subscriptionID string) string {
-	return fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, azureBuiltInContributorID)
-}
-
 // GenerateOutboundBackendAddressPoolName generates a load balancer outbound backend address pool name.
 func GenerateOutboundBackendAddressPoolName(lbName string) string {
 	return fmt.Sprintf("%s-%s", lbName, "outboundBackendPool")
@@ -138,11 +126,6 @@ func GenerateOutboundBackendAddressPoolName(lbName string) string {
 // GenerateFrontendIPConfigName generates a load balancer frontend IP config name.
 func GenerateFrontendIPConfigName(lbName string) string {
 	return fmt.Sprintf("%s-%s", lbName, "frontEnd")
-}
-
-// GenerateNatGatewayIPName generates a NAT gateway IP name.
-func GenerateNatGatewayIPName(clusterName, subnetName string) string {
-	return fmt.Sprintf("pip-%s-%s-natgw", clusterName, subnetName)
 }
 
 // GenerateNodeOutboundIPName generates a public IP name, based on the cluster name.
@@ -313,7 +296,7 @@ func ManagedClusterID(subscriptionID, resourceGroup, managedClusterName string) 
 // Its role is to detect and report Kubernetes bootstrap failure or success.
 func GetBootstrappingVMExtension(osType string, cloud string, vmName string) *ExtensionSpec {
 	// currently, the bootstrap extension is only available in AzurePublicCloud.
-	if osType == LinuxOS && cloud == azureautorest.PublicCloud.Name {
+	if osType == LinuxOS && cloud == PublicCloudName {
 		// The command checks for the existence of the bootstrapSentinelFile on the machine, with retries and sleep between retries.
 		return &ExtensionSpec{
 			Name:      BootstrappingExtensionLinux,
@@ -324,7 +307,7 @@ func GetBootstrappingVMExtension(osType string, cloud string, vmName string) *Ex
 				"commandToExecute": LinuxBootstrapExtensionCommand,
 			},
 		}
-	} else if osType == WindowsOS && cloud == azureautorest.PublicCloud.Name {
+	} else if osType == WindowsOS && cloud == PublicCloudName {
 		// This command for the existence of the bootstrapSentinelFile on the machine, with retries and sleep between reties.
 		// If the file is not present after the retries are exhausted the extension fails with return code '-2' - ERROR_FILE_NOT_FOUND.
 		return &ExtensionSpec{

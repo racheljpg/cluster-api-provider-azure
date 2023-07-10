@@ -192,6 +192,48 @@ func (mr *MockScaleSetScopeMockRecorder) DeleteLongRunningOperationState(arg0, a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLongRunningOperationState", reflect.TypeOf((*MockScaleSetScope)(nil).DeleteLongRunningOperationState), arg0, arg1, arg2)
 }
 
+// ExtendedLocation mocks base method.
+func (m *MockScaleSetScope) ExtendedLocation() *v1beta1.ExtendedLocationSpec {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocation")
+	ret0, _ := ret[0].(*v1beta1.ExtendedLocationSpec)
+	return ret0
+}
+
+// ExtendedLocation indicates an expected call of ExtendedLocation.
+func (mr *MockScaleSetScopeMockRecorder) ExtendedLocation() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocation", reflect.TypeOf((*MockScaleSetScope)(nil).ExtendedLocation))
+}
+
+// ExtendedLocationName mocks base method.
+func (m *MockScaleSetScope) ExtendedLocationName() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocationName")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// ExtendedLocationName indicates an expected call of ExtendedLocationName.
+func (mr *MockScaleSetScopeMockRecorder) ExtendedLocationName() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationName", reflect.TypeOf((*MockScaleSetScope)(nil).ExtendedLocationName))
+}
+
+// ExtendedLocationType mocks base method.
+func (m *MockScaleSetScope) ExtendedLocationType() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocationType")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// ExtendedLocationType indicates an expected call of ExtendedLocationType.
+func (mr *MockScaleSetScopeMockRecorder) ExtendedLocationType() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationType", reflect.TypeOf((*MockScaleSetScope)(nil).ExtendedLocationType))
+}
+
 // FailureDomains mocks base method.
 func (m *MockScaleSetScope) FailureDomains() []string {
 	m.ctrl.T.Helper()
@@ -248,6 +290,35 @@ func (m *MockScaleSetScope) GetVMImage(arg0 context.Context) (*v1beta1.Image, er
 func (mr *MockScaleSetScopeMockRecorder) GetVMImage(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVMImage", reflect.TypeOf((*MockScaleSetScope)(nil).GetVMImage), arg0)
+}
+
+// HasBootstrapDataChanges mocks base method.
+func (m *MockScaleSetScope) HasBootstrapDataChanges(arg0 context.Context) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasBootstrapDataChanges", arg0)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// HasBootstrapDataChanges indicates an expected call of HasBootstrapDataChanges.
+func (mr *MockScaleSetScopeMockRecorder) HasBootstrapDataChanges(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasBootstrapDataChanges", reflect.TypeOf((*MockScaleSetScope)(nil).HasBootstrapDataChanges), arg0)
+}
+
+// HasReplicasExternallyManaged mocks base method.
+func (m *MockScaleSetScope) HasReplicasExternallyManaged(arg0 context.Context) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasReplicasExternallyManaged", arg0)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// HasReplicasExternallyManaged indicates an expected call of HasReplicasExternallyManaged.
+func (mr *MockScaleSetScopeMockRecorder) HasReplicasExternallyManaged(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasReplicasExternallyManaged", reflect.TypeOf((*MockScaleSetScope)(nil).HasReplicasExternallyManaged), arg0)
 }
 
 // HashKey mocks base method.

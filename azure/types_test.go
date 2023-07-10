@@ -19,8 +19,8 @@ package azure
 import (
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -107,7 +107,7 @@ func TestVMSS_HasModelChanges(t *testing.T) {
 			Factory: func() (VMSS, VMSS) {
 				l := getDefaultVMSSForModelTesting()
 				l.Image = infrav1.Image{
-					ID: to.StringPtr("foo"),
+					ID: pointer.String("foo"),
 				}
 				r := getDefaultVMSSForModelTesting()
 				return r, l
@@ -161,37 +161,5 @@ func getDefaultVMSSForModelTesting() VMSS {
 		Tags: infrav1.Tags{
 			"foo": "baz",
 		},
-	}
-}
-
-func TestIsFlex(t *testing.T) {
-	cases := []struct {
-		Name   string
-		VM     VMSSVM
-		IsFlex bool
-	}{
-		{
-			Name:   "default empty VMSSVM",
-			VM:     VMSSVM{},
-			IsFlex: true,
-		},
-		{
-			Name:   "VMSSVM with an instance ID",
-			VM:     VMSSVM{InstanceID: "instance-id"},
-			IsFlex: false,
-		},
-		{
-			Name:   "VMSSVM with empty instance ID",
-			VM:     VMSSVM{InstanceID: ""},
-			IsFlex: true,
-		},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			g.Expect(c.VM.IsFlex()).To(Equal(c.IsFlex))
-		})
 	}
 }

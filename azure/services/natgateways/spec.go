@@ -19,10 +19,10 @@ package natgateways
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	azureautorest "github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -69,20 +69,20 @@ func (s *NatGatewaySpec) Parameters(ctx context.Context, existing interface{}) (
 	}
 
 	natGatewayToCreate := network.NatGateway{
-		Name:     to.StringPtr(s.Name),
-		Location: to.StringPtr(s.Location),
+		Name:     pointer.String(s.Name),
+		Location: pointer.String(s.Location),
 		Sku:      &network.NatGatewaySku{Name: network.NatGatewaySkuNameStandard},
 		NatGatewayPropertiesFormat: &network.NatGatewayPropertiesFormat{
 			PublicIPAddresses: &[]network.SubResource{
 				{
-					ID: to.StringPtr(azure.PublicIPID(s.SubscriptionID, s.ResourceGroupName(), s.NatGatewayIP.Name)),
+					ID: pointer.String(azure.PublicIPID(s.SubscriptionID, s.ResourceGroupName(), s.NatGatewayIP.Name)),
 				},
 			},
 		},
 		Tags: converters.TagsToMap(infrav1.Build(infrav1.BuildParams{
 			ClusterName: s.ClusterName,
 			Lifecycle:   infrav1.ResourceLifecycleOwned,
-			Name:        to.StringPtr(s.Name),
+			Name:        pointer.String(s.Name),
 			Additional:  s.AdditionalTags,
 		})),
 	}
@@ -97,11 +97,11 @@ func hasPublicIP(natGateway network.NatGateway, publicIPName string) bool {
 	}
 
 	for _, publicIP := range *natGateway.PublicIPAddresses {
-		resource, err := azureautorest.ParseResourceID(*publicIP.ID)
+		resource, err := arm.ParseResourceID(*publicIP.ID)
 		if err != nil {
 			continue
 		}
-		if resource.ResourceName == publicIPName {
+		if resource.Name == publicIPName {
 			return true
 		}
 	}

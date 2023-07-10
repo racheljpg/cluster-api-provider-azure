@@ -107,6 +107,8 @@ spec:
         securityGroup: {} // No security group is assigned by default. You can choose to have one created and assigned by defining it. 
       publicIP:
         "name": "..." // The name of the Public IP, defaults to '<cluster name>-azure-bastion-pip'.
+      sku: "..." // The SKU/tier of the Azure Bastion resource. The options are `Standard` and `Basic`. The default value is `Basic`.
+      enableTunneling: "..." // Whether or not to enable tunneling/native client support. The default value is `false`.
 ```
 
 If you specify a security group to be associated with the Azure Bastion subnet, it needs to have some networking rules defined or
@@ -122,7 +124,7 @@ In order to add an SSH authorized key for user `username` and provide `sudo` acc
 as in the following example:
 
 ```yaml
-apiVersion: controlplane.cluster.x-k8s.io/v1alpha3
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
 kind: KubeadmControlPlane
 ...
 spec:
@@ -144,7 +146,7 @@ spec:
 Similarly, you can achieve the same result for `Machine Deployments` by customizing the `KubeadmConfigTemplate` CR: 
 
 ```yaml
-apiVersion: bootstrap.cluster.x-k8s.io/v1alpha3
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
 kind: KubeadmConfigTemplate
 metadata:
   name: test1-md-0

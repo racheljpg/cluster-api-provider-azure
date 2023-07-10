@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -43,6 +43,9 @@ type ManagedClusterSpec struct {
 
 	// NodeResourceGroup is the name of the Azure resource group containing IaaS VMs.
 	NodeResourceGroup string
+
+	// ClusterName is the name of the owning Cluster API Cluster resource.
+	ClusterName string
 
 	// VnetSubnetID is the Azure Resource ID for the subnet which should contain nodes.
 	VnetSubnetID string
@@ -64,6 +67,9 @@ type ManagedClusterSpec struct {
 
 	// NetworkPolicy used for building Kubernetes network. Possible values include: 'calico', 'azure'.
 	NetworkPolicy string
+
+	// OutboundType used for building Kubernetes network. Possible values include: 'loadBalancer', 'managedNATGateway', 'userAssignedNATGateway', 'userDefinedRouting'.
+	OutboundType *infrav1.ManagedControlPlaneOutboundType
 
 	// SSHPublicKey is a string literal containing an ssh public key. Will autogenerate and discard if not provided.
 	SSHPublicKey string
@@ -267,24 +273,30 @@ func (s *ManagedClusterSpec) Parameters(ctx context.Context, existing interface{
 			Type: containerservice.ResourceIdentityTypeSystemAssigned,
 		},
 		Location: &s.Location,
-		Tags:     *to.StringMapPtr(s.Tags),
+		Tags: converters.TagsToMap(infrav1.Build(infrav1.BuildParams{
+			Lifecycle:   infrav1.ResourceLifecycleOwned,
+			ClusterName: s.ClusterName,
+			Name:        pointer.String(s.Name),
+			Role:        pointer.String(infrav1.CommonRole),
+			Additional:  s.Tags,
+		})),
 		ManagedClusterProperties: &containerservice.ManagedClusterProperties{
 			NodeResourceGroup: &s.NodeResourceGroup,
-			EnableRBAC:        to.BoolPtr(true),
+			EnableRBAC:        pointer.Bool(true),
 			DNSPrefix:         &s.Name,
 			KubernetesVersion: &s.Version,
 			LinuxProfile: &containerservice.LinuxProfile{
-				AdminUsername: to.StringPtr(azure.DefaultAKSUserName),
+				AdminUsername: pointer.String(azure.DefaultAKSUserName),
 				SSH: &containerservice.SSHConfiguration{
 					PublicKeys: &[]containerservice.SSHPublicKey{
 						{
-							KeyData: to.StringPtr(string(decodedSSHPublicKey)),
+							KeyData: pointer.String(string(decodedSSHPublicKey)),
 						},
 					},
 				},
 			},
 			ServicePrincipalProfile: &containerservice.ManagedClusterServicePrincipalProfile{
-				ClientID: to.StringPtr("msi"),
+				ClientID: pointer.String("msi"),
 			},
 			AgentPoolProfiles: &[]containerservice.ManagedClusterAgentPoolProfile{},
 			NetworkProfile: &containerservice.NetworkProfile{
@@ -335,7 +347,7 @@ func (s *ManagedClusterSpec) Parameters(ctx context.Context, existing interface{
 			Enabled: &item.Enabled,
 		}
 		if item.Config != nil {
-			addonProfile.Config = *to.StringMapPtr(item.Config)
+			addonProfile.Config = azure.StringMapPtr(item.Config)
 		}
 		managedCluster.AddonProfiles[item.Name] = addonProfile
 	}
@@ -377,6 +389,10 @@ func (s *ManagedClusterSpec) Parameters(ctx context.Context, existing interface{
 		}
 	}
 
+	if s.OutboundType != nil {
+		managedCluster.NetworkProfile.OutboundType = containerservice.OutboundType(*s.OutboundType)
+	}
+
 	managedCluster.AutoScalerProfile = buildAutoScalerProfile(s.AutoScalerProfile)
 
 	if existing != nil {
@@ -403,12 +419,6 @@ func (s *ManagedClusterSpec) Parameters(ctx context.Context, existing interface{
 		// AgentPool changes are managed through AMMP.
 		managedCluster.AgentPoolProfiles = existingMC.AgentPoolProfiles
 
-		// Do not trigger an update because of nil/empty discrepancies between the two sets of tags.
-		if len(existingMC.Tags) == 0 && len(managedCluster.Tags) == 0 {
-			existingMC.Tags = nil
-			managedCluster.Tags = nil
-		}
-
 		diff := computeDiffOfNormalizedClusters(managedCluster, existingMC)
 		if diff == "" {
 			log.V(4).Info("no changes found between user-updated spec and existing spec")
@@ -431,7 +441,7 @@ func (s *ManagedClusterSpec) Parameters(ctx context.Context, existing interface{
 			if !ok {
 				return nil, fmt.Errorf("%T is not a containerservice.AgentPool", agentPool)
 			}
-			agentPool.Name = to.StringPtr(spec.ResourceName())
+			agentPool.Name = pointer.String(spec.ResourceName())
 			profile := converters.AgentPoolToManagedClusterAgentPoolProfile(agentPool)
 			*managedCluster.AgentPoolProfiles = append(*managedCluster.AgentPoolProfiles, profile)
 		}
@@ -556,11 +566,9 @@ func computeDiffOfNormalizedClusters(managedCluster containerservice.ManagedClus
 
 	clusterNormalized := &containerservice.ManagedCluster{
 		ManagedClusterProperties: propertiesNormalized,
-		Tags:                     managedCluster.Tags,
 	}
 	existingMCClusterNormalized := &containerservice.ManagedCluster{
 		ManagedClusterProperties: existingMCPropertiesNormalized,
-		Tags:                     existingMC.Tags,
 	}
 
 	if managedCluster.Sku != nil {

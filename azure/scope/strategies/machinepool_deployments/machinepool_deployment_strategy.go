@@ -158,13 +158,7 @@ func (rollingUpdateStrategy rollingUpdateStrategy) SelectMachinesToDelete(ctx co
 		return append(failedMachines, deletingMachines...), nil
 	}
 
-	// if we have failed machines, remove them
-	if len(failedMachines) > 0 {
-		log.Info("failed machines", "desiredReplicaCount", desiredReplicaCount, "maxUnavailable", maxUnavailable, "failedMachines", getProviderIDs(failedMachines))
-		return failedMachines, nil
-	}
-
-	// if we have not yet reached our desired count, don't try to delete anything but failed machines
+	// if we have not yet reached our desired count, don't try to delete anything
 	if len(readyMachines) < int(desiredReplicaCount) {
 		log.Info("not enough ready machines", "desiredReplicaCount", desiredReplicaCount, "readyMachinesCount", len(readyMachines), "machinesByProviderID", len(machinesByProviderID))
 		return []infrav1exp.AzureMachinePoolMachine{}, nil
@@ -296,8 +290,9 @@ func orderByOldest(machines []infrav1exp.AzureMachinePoolMachine) []infrav1exp.A
 }
 
 func orderRandom(machines []infrav1exp.AzureMachinePoolMachine) []infrav1exp.AzureMachinePoolMachine {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(machines), func(i, j int) { machines[i], machines[j] = machines[j], machines[i] })
+	//nolint:gosec // We don't need a cryptographically appropriate random number here
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r.Shuffle(len(machines), func(i, j int) { machines[i], machines[j] = machines[j], machines[i] })
 	return machines
 }
 

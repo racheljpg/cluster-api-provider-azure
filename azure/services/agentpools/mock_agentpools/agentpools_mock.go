@@ -219,6 +219,48 @@ func (mr *MockAgentPoolScopeMockRecorder) DeleteLongRunningOperationState(arg0, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLongRunningOperationState", reflect.TypeOf((*MockAgentPoolScope)(nil).DeleteLongRunningOperationState), arg0, arg1, arg2)
 }
 
+// ExtendedLocation mocks base method.
+func (m *MockAgentPoolScope) ExtendedLocation() *v1beta1.ExtendedLocationSpec {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocation")
+	ret0, _ := ret[0].(*v1beta1.ExtendedLocationSpec)
+	return ret0
+}
+
+// ExtendedLocation indicates an expected call of ExtendedLocation.
+func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocation() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocation", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocation))
+}
+
+// ExtendedLocationName mocks base method.
+func (m *MockAgentPoolScope) ExtendedLocationName() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocationName")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// ExtendedLocationName indicates an expected call of ExtendedLocationName.
+func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocationName() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationName", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocationName))
+}
+
+// ExtendedLocationType mocks base method.
+func (m *MockAgentPoolScope) ExtendedLocationType() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtendedLocationType")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// ExtendedLocationType indicates an expected call of ExtendedLocationType.
+func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocationType() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationType", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocationType))
+}
+
 // FailureDomains mocks base method.
 func (m *MockAgentPoolScope) FailureDomains() []string {
 	m.ctrl.T.Helper()
@@ -399,6 +441,18 @@ func (m *MockAgentPoolScope) SetLongRunningOperationState(arg0 *v1beta1.Future) 
 func (mr *MockAgentPoolScopeMockRecorder) SetLongRunningOperationState(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLongRunningOperationState", reflect.TypeOf((*MockAgentPoolScope)(nil).SetLongRunningOperationState), arg0)
+}
+
+// SetSubnetName mocks base method.
+func (m *MockAgentPoolScope) SetSubnetName() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetSubnetName")
+}
+
+// SetSubnetName indicates an expected call of SetSubnetName.
+func (mr *MockAgentPoolScopeMockRecorder) SetSubnetName() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSubnetName", reflect.TypeOf((*MockAgentPoolScope)(nil).SetSubnetName))
 }
 
 // SubscriptionID mocks base method.

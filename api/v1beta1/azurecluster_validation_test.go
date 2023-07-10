@@ -1075,7 +1075,7 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 				}, {
 					Name: "some-frontend-ip-2",
 				}},
-				FrontendIPsCount: pointer.Int32Ptr(2),
+				FrontendIPsCount: pointer.Int32(2),
 			},
 			old: &LoadBalancerSpec{
 				FrontendIPs: []FrontendIP{{
@@ -1088,7 +1088,7 @@ func TestValidateNodeOutboundLB(t *testing.T) {
 		{
 			name: "frontend ips count exceeds max value",
 			lb: &LoadBalancerSpec{
-				FrontendIPsCount: pointer.Int32Ptr(100),
+				FrontendIPsCount: pointer.Int32(100),
 			},
 			wantErr: true,
 			expectedErr: field.Error{
@@ -1164,7 +1164,7 @@ func TestValidateControlPlaneNodeOutboundLB(t *testing.T) {
 		{
 			name: "frontend ips count exceeds max value",
 			lb: &LoadBalancerSpec{
-				FrontendIPsCount: pointer.Int32Ptr(100),
+				FrontendIPsCount: pointer.Int32(100),
 			},
 			apiServerLB: LoadBalancerSpec{
 				LoadBalancerClassSpec: LoadBalancerClassSpec{
@@ -1357,7 +1357,7 @@ func createValidAPIServerLB() LoadBalancerSpec {
 
 func createValidNodeOutboundLB() *LoadBalancerSpec {
 	return &LoadBalancerSpec{
-		FrontendIPsCount: pointer.Int32Ptr(1),
+		FrontendIPsCount: pointer.Int32(1),
 	}
 }
 
@@ -1503,5 +1503,29 @@ func TestServiceEndpointsLackRequiredFieldLocations(t *testing.T) {
 		g.Expect(errs[0].Type).To(Equal(field.ErrorTypeRequired))
 		g.Expect(errs[0].Field).To(Equal("subnets[0].serviceEndpoints[0].locations"))
 		g.Expect(errs[0].Error()).To(ContainSubstring("locations are required for all service endpoints"))
+	})
+}
+
+func TestClusterWithExtendedLocationInvalid(t *testing.T) {
+	g := NewWithT(t)
+
+	type test struct {
+		name    string
+		cluster *AzureCluster
+	}
+
+	testCase := test{
+		name:    "azurecluster spec with extended location but not enable EdgeZone feature gate flag",
+		cluster: createValidCluster(),
+	}
+
+	testCase.cluster.Spec.ExtendedLocation = &ExtendedLocationSpec{
+		Name: "rr4",
+		Type: "EdgeZone",
+	}
+
+	t.Run(testCase.name, func(t *testing.T) {
+		err := testCase.cluster.validateClusterSpec(nil)
+		g.Expect(err).NotTo(BeNil())
 	})
 }

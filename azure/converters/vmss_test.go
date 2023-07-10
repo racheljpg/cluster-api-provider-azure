@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/onsi/gomega"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -38,47 +38,47 @@ func Test_SDKToVMSS(t *testing.T) {
 			Name: "ShouldPopulateWithData",
 			SubjectFactory: func(g *gomega.GomegaWithT) (compute.VirtualMachineScaleSet, []compute.VirtualMachineScaleSetVM) {
 				tags := map[string]*string{
-					"foo": to.StringPtr("bazz"),
+					"foo": pointer.String("bazz"),
 				}
 				zones := []string{"zone0", "zone1"}
 				return compute.VirtualMachineScaleSet{
 						Sku: &compute.Sku{
-							Name:     to.StringPtr("skuName"),
-							Tier:     to.StringPtr("skuTier"),
-							Capacity: to.Int64Ptr(2),
+							Name:     pointer.String("skuName"),
+							Tier:     pointer.String("skuTier"),
+							Capacity: pointer.Int64(2),
 						},
-						Zones:    to.StringSlicePtr(zones),
-						ID:       to.StringPtr("vmssID"),
-						Name:     to.StringPtr("vmssName"),
-						Location: to.StringPtr("westus2"),
+						Zones:    &zones,
+						ID:       pointer.String("vmssID"),
+						Name:     pointer.String("vmssName"),
+						Location: pointer.String("westus2"),
 						Tags:     tags,
 						VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
-							SinglePlacementGroup: to.BoolPtr(false),
-							ProvisioningState:    to.StringPtr(string(compute.ProvisioningState1Succeeded)),
+							SinglePlacementGroup: pointer.Bool(false),
+							ProvisioningState:    pointer.String(string(compute.ProvisioningState1Succeeded)),
 						},
 					},
 					[]compute.VirtualMachineScaleSetVM{
 						{
-							InstanceID: to.StringPtr("0"),
-							ID:         to.StringPtr("vm/0"),
-							Name:       to.StringPtr("vm0"),
-							Zones:      to.StringSlicePtr([]string{"zone0"}),
+							InstanceID: pointer.String("0"),
+							ID:         pointer.String("vm/0"),
+							Name:       pointer.String("vm0"),
+							Zones:      &[]string{"zone0"},
 							VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-								ProvisioningState: to.StringPtr(string(compute.ProvisioningState1Succeeded)),
+								ProvisioningState: pointer.String(string(compute.ProvisioningState1Succeeded)),
 								OsProfile: &compute.OSProfile{
-									ComputerName: to.StringPtr("instance-000000"),
+									ComputerName: pointer.String("instance-000000"),
 								},
 							},
 						},
 						{
-							InstanceID: to.StringPtr("1"),
-							ID:         to.StringPtr("vm/1"),
-							Name:       to.StringPtr("vm1"),
-							Zones:      to.StringSlicePtr([]string{"zone1"}),
+							InstanceID: pointer.String("1"),
+							ID:         pointer.String("vm/1"),
+							Name:       pointer.String("vm1"),
+							Zones:      &[]string{"zone1"},
 							VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-								ProvisioningState: to.StringPtr(string(compute.ProvisioningState1Succeeded)),
+								ProvisioningState: pointer.String(string(compute.ProvisioningState1Succeeded)),
 								OsProfile: &compute.OSProfile{
-									ComputerName: to.StringPtr("instance-000001"),
+									ComputerName: pointer.String("instance-000001"),
 								},
 							},
 						},
@@ -133,7 +133,7 @@ func Test_SDKToVMSSVM(t *testing.T) {
 		{
 			Name: "minimal VM",
 			SDKInstance: compute.VirtualMachineScaleSetVM{
-				ID: to.StringPtr("vm/0"),
+				ID: pointer.String("vm/0"),
 			},
 			VMSSVM: &azure.VMSSVM{
 				ID: "vm/0",
@@ -142,7 +142,7 @@ func Test_SDKToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with nil properties",
 			SDKInstance: compute.VirtualMachineScaleSetVM{
-				ID:                                 to.StringPtr("vm/0.5"),
+				ID:                                 pointer.String("vm/0.5"),
 				VirtualMachineScaleSetVMProperties: nil,
 			},
 			VMSSVM: &azure.VMSSVM{
@@ -152,10 +152,10 @@ func Test_SDKToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with state",
 			SDKInstance: compute.VirtualMachineScaleSetVM{
-				ID: to.StringPtr("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
+				ID: pointer.String("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
 				VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-					ProvisioningState: to.StringPtr(string(compute.ProvisioningState1Succeeded)),
-					OsProfile:         &compute.OSProfile{ComputerName: to.StringPtr("instance-000000")},
+					ProvisioningState: pointer.String(string(compute.ProvisioningState1Succeeded)),
+					OsProfile:         &compute.OSProfile{ComputerName: pointer.String("instance-000000")},
 				},
 			},
 			VMSSVM: &azure.VMSSVM{
@@ -167,12 +167,12 @@ func Test_SDKToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with storage",
 			SDKInstance: compute.VirtualMachineScaleSetVM{
-				ID: to.StringPtr("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
+				ID: pointer.String("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
 				VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-					OsProfile: &compute.OSProfile{ComputerName: to.StringPtr("instance-000001")},
+					OsProfile: &compute.OSProfile{ComputerName: pointer.String("instance-000001")},
 					StorageProfile: &compute.StorageProfile{
 						ImageReference: &compute.ImageReference{
-							ID: to.StringPtr("imageID"),
+							ID: pointer.String("imageID"),
 						},
 					},
 				},
@@ -181,8 +181,7 @@ func Test_SDKToVMSSVM(t *testing.T) {
 				ID:   "/subscriptions/foo/resourceGroups/my_resource_group/providers/bar",
 				Name: "instance-000001",
 				Image: infrav1.Image{
-					ID:          to.StringPtr("imageID"),
-					Marketplace: &infrav1.AzureMarketplaceImage{},
+					ID: pointer.String("imageID"),
 				},
 				State: "Creating",
 			},
@@ -190,9 +189,9 @@ func Test_SDKToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with zones",
 			SDKInstance: compute.VirtualMachineScaleSetVM{
-				ID: to.StringPtr("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
+				ID: pointer.String("/subscriptions/foo/resourceGroups/MY_RESOURCE_GROUP/providers/bar"),
 				VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-					OsProfile: &compute.OSProfile{ComputerName: to.StringPtr("instance-000002")},
+					OsProfile: &compute.OSProfile{ComputerName: pointer.String("instance-000002")},
 				},
 				Zones: &[]string{"zone0", "zone1"},
 			},
@@ -223,28 +222,25 @@ func Test_SDKImageToImage(t *testing.T) {
 		Image        infrav1.Image
 	}{
 		{
-			Name: "minimal image",
+			Name: "id image",
 			SDKImageRef: &compute.ImageReference{
-				ID: to.StringPtr("imageID"),
+				ID: pointer.String("imageID"),
 			},
 			IsThirdParty: false,
 			Image: infrav1.Image{
-				ID:          to.StringPtr("imageID"),
-				Marketplace: &infrav1.AzureMarketplaceImage{},
+				ID: pointer.String("imageID"),
 			},
 		},
 		{
 			Name: "marketplace image",
 			SDKImageRef: &compute.ImageReference{
-				ID:        to.StringPtr("imageID"),
-				Publisher: to.StringPtr("publisher"),
-				Offer:     to.StringPtr("offer"),
-				Sku:       to.StringPtr("sku"),
-				Version:   to.StringPtr("version"),
+				Publisher: pointer.String("publisher"),
+				Offer:     pointer.String("offer"),
+				Sku:       pointer.String("sku"),
+				Version:   pointer.String("version"),
 			},
 			IsThirdParty: true,
 			Image: infrav1.Image{
-				ID: to.StringPtr("imageID"),
 				Marketplace: &infrav1.AzureMarketplaceImage{
 					ImagePlan: infrav1.ImagePlan{
 						Publisher: "publisher",
@@ -255,6 +251,65 @@ func Test_SDKImageToImage(t *testing.T) {
 					ThirdPartyImage: true,
 				},
 			},
+		},
+		{
+			Name: "shared gallery image",
+			SDKImageRef: &compute.ImageReference{
+				SharedGalleryImageID: pointer.String("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/galleries/gallery/images/image/versions/version"),
+			},
+			Image: infrav1.Image{
+				SharedGallery: &infrav1.AzureSharedGalleryImage{
+					SubscriptionID: "subscription",
+					ResourceGroup:  "rg",
+					Gallery:        "gallery",
+					Name:           "image",
+					Version:        "version",
+				},
+			},
+		},
+		{
+			Name: "community gallery image",
+			SDKImageRef: &compute.ImageReference{
+				CommunityGalleryImageID: pointer.String("/CommunityGalleries/gallery/Images/image/Versions/version"),
+			},
+			Image: infrav1.Image{
+				ComputeGallery: &infrav1.AzureComputeGalleryImage{
+					Gallery: "gallery",
+					Name:    "image",
+					Version: "version",
+				},
+			},
+		},
+		{
+			Name: "compute gallery image",
+			SDKImageRef: &compute.ImageReference{
+				ID: pointer.String("/subscriptions/subscription/resourceGroups/rg/providers/Microsoft.Compute/galleries/gallery/images/image/versions/version"),
+			},
+			Image: infrav1.Image{
+				ComputeGallery: &infrav1.AzureComputeGalleryImage{
+					Gallery:        "gallery",
+					Name:           "image",
+					Version:        "version",
+					SubscriptionID: pointer.String("subscription"),
+					ResourceGroup:  pointer.String("rg"),
+				},
+			},
+		},
+		{
+			Name: "compute gallery image not formatted as expected",
+			SDKImageRef: &compute.ImageReference{
+				ID: pointer.String("/compute/gallery/not/formatted/as/expected"),
+			},
+			Image: infrav1.Image{
+				ID: pointer.String("/compute/gallery/not/formatted/as/expected"),
+			},
+		},
+		{
+			Name: "community gallery image not formatted as expected",
+			SDKImageRef: &compute.ImageReference{
+				CommunityGalleryImageID: pointer.String("/community/gallery/not/formatted/as/expected"),
+			},
+			Image: infrav1.Image{},
 		},
 	}
 
@@ -277,7 +332,7 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 		{
 			Name: "minimal VM",
 			Subject: compute.VirtualMachine{
-				ID: to.StringPtr("vmID1"),
+				ID: pointer.String("vmID1"),
 			},
 			Expected: &azure.VMSSVM{
 				ID: "vmID1",
@@ -286,13 +341,13 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with zones",
 			Subject: compute.VirtualMachine{
-				ID: to.StringPtr("vmID2"),
+				ID: pointer.String("vmID2"),
 				VirtualMachineProperties: &compute.VirtualMachineProperties{
 					OsProfile: &compute.OSProfile{
-						ComputerName: to.StringPtr("vmwithzones"),
+						ComputerName: pointer.String("vmwithzones"),
 					},
 				},
-				Zones: to.StringSlicePtr([]string{"zone0", "zone1"}),
+				Zones: &[]string{"zone0", "zone1"},
 			},
 			Expected: &azure.VMSSVM{
 				ID:               "vmID2",
@@ -304,14 +359,14 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with storage",
 			Subject: compute.VirtualMachine{
-				ID: to.StringPtr("vmID3"),
+				ID: pointer.String("vmID3"),
 				VirtualMachineProperties: &compute.VirtualMachineProperties{
 					OsProfile: &compute.OSProfile{
-						ComputerName: to.StringPtr("vmwithstorage"),
+						ComputerName: pointer.String("vmwithstorage"),
 					},
 					StorageProfile: &compute.StorageProfile{
 						ImageReference: &compute.ImageReference{
-							ID: to.StringPtr("imageID"),
+							ID: pointer.String("imageID"),
 						},
 					},
 				},
@@ -319,8 +374,7 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 			Expected: &azure.VMSSVM{
 				ID: "vmID3",
 				Image: infrav1.Image{
-					ID:          to.StringPtr("imageID"),
-					Marketplace: &infrav1.AzureMarketplaceImage{},
+					ID: pointer.String("imageID"),
 				},
 				Name:  "vmwithstorage",
 				State: "Creating",
@@ -329,12 +383,12 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 		{
 			Name: "VM with provisioning state",
 			Subject: compute.VirtualMachine{
-				ID: to.StringPtr("vmID4"),
+				ID: pointer.String("vmID4"),
 				VirtualMachineProperties: &compute.VirtualMachineProperties{
 					OsProfile: &compute.OSProfile{
-						ComputerName: to.StringPtr("vmwithstate"),
+						ComputerName: pointer.String("vmwithstate"),
 					},
-					ProvisioningState: to.StringPtr("Succeeded"),
+					ProvisioningState: pointer.String("Succeeded"),
 				},
 			},
 			Expected: &azure.VMSSVM{
@@ -350,7 +404,7 @@ func Test_SDKVMToVMSSVM(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			g := gomega.NewGomegaWithT(t)
-			subject := converters.SDKVMToVMSSVM(c.Subject)
+			subject := converters.SDKVMToVMSSVM(c.Subject, "")
 			g.Expect(subject).To(gomega.Equal(c.Expected))
 		})
 	}

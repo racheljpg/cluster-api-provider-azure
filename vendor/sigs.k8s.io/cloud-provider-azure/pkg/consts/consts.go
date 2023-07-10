@@ -19,6 +19,7 @@ package consts
 import (
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2021-09-01/storage"
 )
 
@@ -27,6 +28,8 @@ const (
 	VMTypeVMSS = "vmss"
 	// VMTypeStandard is the vmas vm type
 	VMTypeStandard = "standard"
+	// VMTypeVmssFlex is the vmssflex vm type
+	VMTypeVmssFlex = "vmssflex"
 
 	// ExternalResourceGroupLabel is the label representing the node is in a different
 	// resource group from other cloud provider components
@@ -125,6 +128,8 @@ const (
 	TagKeyValueDelimiter = "="
 	// VMSetNamesSharingPrimarySLBDelimiter is the delimiter of vmSet names sharing the primary SLB
 	VMSetNamesSharingPrimarySLBDelimiter = ","
+	// PremiumV2_LRS type for Azure Disk
+	PremiumV2LRS = compute.DiskStorageAccountTypes("PremiumV2_LRS")
 )
 
 // cache
@@ -135,6 +140,8 @@ const (
 	VMSSKey = "k8svmssKey"
 	// VMASKey is the key when querying vmss cache
 	VMASKey = "k8svmasKey"
+	// NonVmssUniformNodesKey is the key when querying nonVmssUniformNodes cache
+	NonVmssUniformNodesKey = "k8sNonVmssUniformNodesKey"
 	// AvailabilitySetNodesKey is the availability set nodes key
 	AvailabilitySetNodesKey = "k8sAvailabilitySetNodesKey"
 
@@ -143,7 +150,11 @@ const (
 
 	// GetNodeVmssFlexIDLockKey is the key for getting the lock for getNodeVmssFlexID function
 	GetNodeVmssFlexIDLockKey = "k8sGetNodeVmssFlexIDLockKey"
+	// VMManagementTypeLockKey is the key for getting the lock for getVMManagementType function
+	VMManagementTypeLockKey = "VMManagementType"
 
+	// NonVmssUniformNodesCacheTTLDefaultInSeconds is the TTL of the non vmss uniform node cache
+	NonVmssUniformNodesCacheTTLDefaultInSeconds = 900
 	// AvailabilitySetNodesCacheTTLDefaultInSeconds is the TTL of the availabilitySet node cache
 	AvailabilitySetNodesCacheTTLDefaultInSeconds = 900
 	// VMSSCacheTTLDefaultInSeconds is the TTL of the vmss cache
@@ -155,10 +166,8 @@ const (
 
 	// VmssFlexCacheTTLDefaultInSeconds is the TTL of the vmss flex cache
 	VmssFlexCacheTTLDefaultInSeconds = 600
-	// VmssFlexVMCacheTTLInSeconds is the TTL of the vmss flex vm cache
-	VmssFlexVMCacheTTLInSeconds = 600
-	// VmssFlexVMStatusCacheTTLInSeconds is the TTL of the vmss flex vm status cache
-	VmssFlexVMStatusCacheTTLInSeconds = 600
+	// VmssFlexVMCacheTTLDefaultInSeconds is the TTL of the vmss flex vm cache
+	VmssFlexVMCacheTTLDefaultInSeconds = 600
 
 	// ZoneFetchingInterval defines the interval of performing zoneClient.GetZones
 	ZoneFetchingInterval = 30 * time.Minute
@@ -291,7 +300,7 @@ const (
 
 	// ServiceAnnotationLoadBalancerHealthProbeRequestPath determines the request path of the load balancer health probe.
 	// This is only useful for the HTTP and HTTPS, and would be ignored when using TCP. If not set,
-	// `/healthz` would be configured by default.
+	// `/` would be configured by default.
 	ServiceAnnotationLoadBalancerHealthProbeRequestPath = "service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path"
 
 	// ServiceAnnotationAzurePIPTags determines what tags should be applied to the public IP of the service. The cluster name
@@ -351,9 +360,6 @@ const (
 	// LoadBalancerBackendPoolConfigurationTypePODIP is the lb backend pool config type pod ip
 	// TODO (nilo19): support pod IP in the future
 	LoadBalancerBackendPoolConfigurationTypePODIP = "podIP"
-
-	// To get pip, we need both resource group name and pip name, key in cache has format: pip_rg:pip_name
-	PIPCacheKeySeparator = ":"
 )
 
 // error messages
@@ -419,9 +425,27 @@ const RateLimited = "rate limited"
 // CreatedByTag tag key for CSI drivers
 const CreatedByTag = "k8s-azure-created-by"
 
+// port specific
+const (
+	PortAnnotationPrefixPattern            = "service.beta.kubernetes.io/port_%d_%s"
+	PortAnnotationNoLBRule      PortParams = "no_lb_rule"
+	// NoHealthProbeRule determines whether the port is only used for health probe. no lb probe rule will be created.
+	PortAnnotationNoHealthProbeRule PortParams = "no_probe_rule"
+)
+
+type PortParams string
+
 // health probe
 const (
-	HealthProbeAnnotationPrefixPattern = "service.beta.kubernetes.io/port_%d_health-probe_"
+	HealthProbeAnnotationPrefixPattern = "health-probe_%s"
+
+	// HealthProbeParamsProtocol determines the protocol for the health probe params.
+	// It always takes priority over spec.appProtocol or any other specified protocol
+	HealthProbeParamsProtocol HealthProbeParams = "protocol"
+
+	// HealthProbeParamsPort determines the probe port for the health probe params.
+	// It always takes priority over the NodePort of the spec.ports in a Service
+	HealthProbeParamsPort HealthProbeParams = "port"
 
 	// HealthProbeParamsProbeInterval determines the probe interval of the load balancer health probe.
 	// The minimum probe interval is 5 seconds and the default value is 5. The total duration of all intervals cannot exceed 120 seconds.

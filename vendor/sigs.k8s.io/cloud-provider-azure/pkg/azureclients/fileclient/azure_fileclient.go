@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 
 	"k8s.io/klog/v2"
+	"k8s.io/utils/pointer"
 
 	azclients "sigs.k8s.io/cloud-provider-azure/pkg/azureclients"
 	"sigs.k8s.io/cloud-provider-azure/pkg/metrics"
@@ -84,11 +85,13 @@ func (c *Client) WithSubscriptionID(subscriptionID string) Interface {
 }
 
 // CreateFileShare creates a file share
-func (c *Client) CreateFileShare(resourceGroupName, accountName string, shareOptions *ShareOptions) error {
+// expand - optional, used to expand the properties within share's properties. Valid values are: snapshots.
+// Should be passed as a string with delimiter ','
+func (c *Client) CreateFileShare(ctx context.Context, resourceGroupName, accountName string, shareOptions *ShareOptions, expand string) (storage.FileShare, error) {
 	mc := metrics.NewMetricContext("file_shares", "create", resourceGroupName, c.subscriptionID, "")
 
 	if shareOptions == nil {
-		return fmt.Errorf("share options is nil")
+		return storage.FileShare{}, fmt.Errorf("share options is nil")
 	}
 	quota := int32(shareOptions.RequestGiB)
 	fileShareProperties := &storage.FileShareProperties{
@@ -110,7 +113,7 @@ func (c *Client) CreateFileShare(resourceGroupName, accountName string, shareOpt
 		Name:                &shareOptions.Name,
 		FileShareProperties: fileShareProperties,
 	}
-	_, err := c.fileSharesClient.Create(context.Background(), resourceGroupName, accountName, shareOptions.Name, fileShare, "")
+	FileShare, err := c.fileSharesClient.Create(ctx, resourceGroupName, accountName, shareOptions.Name, fileShare, expand)
 	var rerr *retry.Error
 	if err != nil {
 		rerr = &retry.Error{
@@ -119,14 +122,16 @@ func (c *Client) CreateFileShare(resourceGroupName, accountName string, shareOpt
 	}
 	mc.Observe(rerr)
 
-	return err
+	return FileShare, err
 }
 
 // DeleteFileShare deletes a file share
-func (c *Client) DeleteFileShare(resourceGroupName, accountName, name string) error {
+// xMsSnapshot - optional, used to delete a snapshot.
+// It is a DateTime value that uniquely identifies the share snapshot. e.g. "2017-05-10T17:52:33.9551861Z"
+func (c *Client) DeleteFileShare(ctx context.Context, resourceGroupName, accountName, name, xMsSnapshot string) error {
 	mc := metrics.NewMetricContext("file_shares", "delete", resourceGroupName, c.subscriptionID, "")
 
-	_, err := c.fileSharesClient.Delete(context.Background(), resourceGroupName, accountName, name, "", "")
+	_, err := c.fileSharesClient.Delete(ctx, resourceGroupName, accountName, name, xMsSnapshot, "")
 	var rerr *retry.Error
 	if err != nil {
 		rerr = &retry.Error{
@@ -139,13 +144,13 @@ func (c *Client) DeleteFileShare(resourceGroupName, accountName, name string) er
 }
 
 // ResizeFileShare resizes a file share
-func (c *Client) ResizeFileShare(resourceGroupName, accountName, name string, sizeGiB int) error {
+func (c *Client) ResizeFileShare(ctx context.Context, resourceGroupName, accountName, name string, sizeGiB int) error {
 	mc := metrics.NewMetricContext("file_shares", "resize", resourceGroupName, c.subscriptionID, "")
 	var rerr *retry.Error
 
 	quota := int32(sizeGiB)
 
-	share, err := c.fileSharesClient.Get(context.Background(), resourceGroupName, accountName, name, "stats", "")
+	share, err := c.fileSharesClient.Get(ctx, resourceGroupName, accountName, name, "stats", "")
 	if err != nil {
 		rerr = &retry.Error{
 			RawError: err,
@@ -160,7 +165,7 @@ func (c *Client) ResizeFileShare(resourceGroupName, accountName, name string, si
 	}
 
 	share.FileShareProperties.ShareQuota = &quota
-	_, err = c.fileSharesClient.Update(context.Background(), resourceGroupName, accountName, name, share)
+	_, err = c.fileSharesClient.Update(ctx, resourceGroupName, accountName, name, share)
 	if err != nil {
 		rerr = &retry.Error{
 			RawError: err,
@@ -176,10 +181,12 @@ func (c *Client) ResizeFileShare(resourceGroupName, accountName, name string, si
 }
 
 // GetFileShare gets a file share
-func (c *Client) GetFileShare(resourceGroupName, accountName, name string) (storage.FileShare, error) {
+// xMsSnapshot - optional, used to retrieve properties of a snapshot.
+// It is a DateTime value that uniquely identifies the share snapshot. e.g. "2017-05-10T17:52:33.9551861Z"
+func (c *Client) GetFileShare(ctx context.Context, resourceGroupName, accountName, name, xMsSnapshot string) (storage.FileShare, error) {
 	mc := metrics.NewMetricContext("file_shares", "get", resourceGroupName, c.subscriptionID, "")
 
-	result, err := c.fileSharesClient.Get(context.Background(), resourceGroupName, accountName, name, "stats", "")
+	result, err := c.fileSharesClient.Get(ctx, resourceGroupName, accountName, name, "stats", xMsSnapshot)
 	var rerr *retry.Error
 	if err != nil {
 		rerr = &retry.Error{
@@ -191,12 +198,46 @@ func (c *Client) GetFileShare(resourceGroupName, accountName, name string) (stor
 	return result, err
 }
 
+// ListFileShare gets a file share list
+// expand - optional, used to expand the properties within share's properties. Valid values are: deleted,
+// snapshots. Should be passed as a string with delimiter ','
+func (c *Client) ListFileShare(ctx context.Context, resourceGroupName, accountName, filter, expand string) ([]storage.FileShareItem, error) {
+	mc := metrics.NewMetricContext("file_shares", "list", resourceGroupName, c.subscriptionID, "")
+
+	page, err := c.fileSharesClient.List(ctx, resourceGroupName, accountName, "", filter, expand)
+	var rerr *retry.Error
+	if err != nil {
+		rerr = &retry.Error{
+			RawError: err,
+		}
+	}
+	mc.Observe(rerr)
+
+	result := make([]storage.FileShareItem, 0)
+
+	for {
+		result = append(result, page.Values()...)
+
+		// Abort the loop when there's no nextLink in the response.
+		if pointer.StringDeref(page.Response().NextLink, "") == "" {
+			break
+		}
+
+		if err = page.NextWithContext(ctx); err != nil {
+			klog.V(5).Infof("Received error in %s: resourceID: %s, error: %s", "snapshot.list.next", resourceGroupName, err)
+			mc.Observe(retry.GetError(page.Response().Response.Response, err))
+		}
+	}
+
+	return result, err
+}
+
 // GetServiceProperties get service properties
-func (c *Client) GetServiceProperties(resourceGroupName, accountName string) (storage.FileServiceProperties, error) {
-	return c.fileServicesClient.GetServiceProperties(context.Background(), resourceGroupName, accountName)
+func (c *Client) GetServiceProperties(ctx context.Context, resourceGroupName, accountName string) (storage.FileServiceProperties, error) {
+	return c.fileServicesClient.GetServiceProperties(ctx, resourceGroupName, accountName)
 }
 
 // SetServiceProperties set service properties
-func (c *Client) SetServiceProperties(resourceGroupName, accountName string, parameters storage.FileServiceProperties) (storage.FileServiceProperties, error) {
-	return c.fileServicesClient.SetServiceProperties(context.Background(), resourceGroupName, accountName, parameters)
+func (c *Client) SetServiceProperties(ctx context.Context, resourceGroupName, accountName string, parameters storage.FileServiceProperties) (storage.FileServiceProperties, error) {
+	return c.fileServicesClient.SetServiceProperties(ctx, resourceGroupName, accountName, parameters)
 }

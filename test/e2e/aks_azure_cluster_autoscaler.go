@@ -24,11 +24,11 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/Azure/go-autorest/autorest/to"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/types"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"k8s.io/utils/pointer"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
@@ -51,10 +51,9 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 	containerserviceClient.Authorizer = auth
 
 	var expectedAksExpander containerservice.Expander
-	var newExpanderValue infrav1exp.Expander
-	var amcpInitialAutoScalerProfile = &infrav1exp.AutoScalerProfile{}
-	amcp := &infrav1exp.AzureManagedControlPlane{}
-
+	var newExpanderValue infrav1.Expander
+	var amcpInitialAutoScalerProfile = &infrav1.AutoScalerProfile{}
+	amcp := &infrav1.AzureManagedControlPlane{}
 	Eventually(func(g Gomega) {
 		err = mgmtClient.Get(ctx, types.NamespacedName{
 			Namespace: input.Cluster.Spec.ControlPlaneRef.Namespace,
@@ -70,10 +69,10 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 		// Conditional is based off of the actual AKS settings not the AzureManagedControlPlane
 		if aksInitialAutoScalerProfile == nil {
 			expectedAksExpander = containerservice.ExpanderLeastWaste
-			newExpanderValue = infrav1exp.ExpanderLeastWaste
+			newExpanderValue = infrav1.ExpanderLeastWaste
 		} else if aksInitialAutoScalerProfile.Expander == containerservice.ExpanderLeastWaste {
 			expectedAksExpander = containerservice.ExpanderMostPods
-			newExpanderValue = infrav1exp.ExpanderMostPods
+			newExpanderValue = infrav1.ExpanderMostPods
 		}
 
 		amcp.Spec.AutoScalerProfile = nil
@@ -100,8 +99,8 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 			Name:      input.Cluster.Spec.ControlPlaneRef.Name,
 		}, amcp)
 		g.Expect(err).NotTo(HaveOccurred())
-		amcp.Spec.AutoScalerProfile = &infrav1exp.AutoScalerProfile{
-			Expander: (*infrav1exp.Expander)(to.StringPtr(string(newExpanderValue))),
+		amcp.Spec.AutoScalerProfile = &infrav1.AutoScalerProfile{
+			Expander: (*infrav1.Expander)(pointer.String(string(newExpanderValue))),
 		}
 		g.Expect(mgmtClient.Update(ctx, amcp)).To(Succeed())
 	}, input.WaitIntervals...).Should(Succeed())
@@ -129,7 +128,6 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 			Name:      input.Cluster.Spec.ControlPlaneRef.Name,
 		}, amcp)
 		g.Expect(err).NotTo(HaveOccurred())
-		Expect(err).NotTo(HaveOccurred())
 		g.Expect(amcp.Spec.AutoScalerProfile).To(Equal(amcpInitialAutoScalerProfile))
 	}, input.WaitIntervals...).Should(Succeed())
 }

@@ -18,23 +18,25 @@ package scalesetvms
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesetvms/mock_scalesetvms"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachines/mock_virtualmachines"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomock2 "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -106,7 +108,7 @@ func TestService_Reconcile(t *testing.T) {
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
 				vm := compute.VirtualMachineScaleSetVM{
-					InstanceID: to.StringPtr("0"),
+					InstanceID: pointer.String("0"),
 				}
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(vm, nil)
 				s.SetVMSSVM(converters.SDKToVMSSVM(vm))
@@ -150,6 +152,7 @@ func TestService_Reconcile(t *testing.T) {
 			scopeMock.EXPECT().SubscriptionID().Return("subID").AnyTimes()
 			scopeMock.EXPECT().BaseURI().Return("https://localhost/").AnyTimes()
 			scopeMock.EXPECT().Authorizer().Return(nil).AnyTimes()
+			scopeMock.EXPECT().OrchestrationMode().Return(infrav1.UniformOrchestrationMode).AnyTimes()
 
 			service := NewService(scopeMock)
 			service.Client = clientMock
@@ -171,17 +174,18 @@ func TestService_Reconcile(t *testing.T) {
 func TestService_Delete(t *testing.T) {
 	cases := []struct {
 		Name       string
-		Setup      func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder)
+		Setup      func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder)
 		Err        error
 		CheckIsErr bool
 	}{
 		{
 			Name: "should start deleting successfully if no long running operation is active",
-			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder) {
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
+				s.OrchestrationMode().Return(infrav1.UniformOrchestrationMode)
 				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
@@ -198,11 +202,12 @@ func TestService_Delete(t *testing.T) {
 		},
 		{
 			Name: "should finish deleting successfully when there's a long running operation that has completed",
-			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder) {
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
+				s.OrchestrationMode().Return(infrav1.UniformOrchestrationMode)
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
 				}
@@ -214,11 +219,12 @@ func TestService_Delete(t *testing.T) {
 		},
 		{
 			Name: "should not error when deleting, but resource is 404",
-			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder) {
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
+				s.OrchestrationMode().Return(infrav1.UniformOrchestrationMode)
 				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomock2.AContext(), "rg", "scaleset", "0").Return(nil, autorest404)
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
@@ -226,11 +232,12 @@ func TestService_Delete(t *testing.T) {
 		},
 		{
 			Name: "should error when deleting, but a non-404 error is returned from DELETE call",
-			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder) {
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
+				s.OrchestrationMode().Return(infrav1.UniformOrchestrationMode)
 				s.GetLongRunningOperationState("0", serviceName, infrav1.DeleteFuture).Return(nil)
 				m.DeleteAsync(gomock2.AContext(), "rg", "scaleset", "0").Return(nil, errors.New("boom"))
 				m.Get(gomock2.AContext(), "rg", "scaleset", "0").Return(compute.VirtualMachineScaleSetVM{}, nil)
@@ -239,11 +246,12 @@ func TestService_Delete(t *testing.T) {
 		},
 		{
 			Name: "should return error when a long running operation is active and getting the result returns an error",
-			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder) {
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
 				s.ResourceGroup().Return("rg")
 				s.InstanceID().Return("0")
 				s.ProviderID().Return("foo")
 				s.ScaleSetName().Return("scaleset")
+				s.OrchestrationMode().Return(infrav1.UniformOrchestrationMode)
 				future := &infrav1.Future{
 					Type: infrav1.DeleteFuture,
 				}
@@ -253,15 +261,50 @@ func TestService_Delete(t *testing.T) {
 			},
 			Err: errors.Wrap(errors.New("boom"), "failed to get result of long running operation"),
 		},
+		{
+			Name: "(flex) should delete successfully if no long-running operation is active",
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
+				s.ResourceGroup().Return("my-cluster")
+				s.ScaleSetName().Return("scaleset")
+				s.InstanceID().Return("0")
+				s.ProviderID().Return("azure:///subscriptions/1234-5678/resourceGroups/my-cluster/providers/Microsoft.Compute/virtualMachines/my-cluster_1234abcd")
+				s.OrchestrationMode().Return(infrav1.FlexibleOrchestrationMode)
+				s.GetLongRunningOperationState("my-cluster_1234abcd", serviceName, infrav1.DeleteFuture).Return(nil)
+				vmGetter := &VMSSFlexVMGetter{
+					Name:          "my-cluster_1234abcd",
+					ResourceGroup: "my-cluster",
+				}
+				future := &infrav1.Future{
+					Type: infrav1.DeleteFuture,
+				}
+				sdkFuture, _ := converters.FutureToSDK(*future)
+				v.DeleteAsync(gomock2.AContext(), vmGetter).Return(sdkFuture, nil)
+				s.DeleteLongRunningOperationState("my-cluster_1234abcd", serviceName, infrav1.DeleteFuture)
+				v.GetByID(gomock2.AContext(), "/subscriptions/1234-5678/resourceGroups/my-cluster/providers/Microsoft.Compute/virtualMachines/my-cluster_1234abcd").Return(compute.VirtualMachine{}, nil)
+			},
+		},
+		{
+			Name: "(flex) should error if providerID is invalid",
+			Setup: func(s *mock_scalesetvms.MockScaleSetVMScopeMockRecorder, m *mock_scalesetvms.MockclientMockRecorder, v *mock_virtualmachines.MockClientMockRecorder) {
+				s.ResourceGroup().Return("my-cluster")
+				s.ScaleSetName().Return("scaleset")
+				s.InstanceID().Return("0")
+				s.ProviderID().Return("foo")
+				s.OrchestrationMode().Return(infrav1.FlexibleOrchestrationMode)
+				v.GetByID(gomock2.AContext(), "foo").Return(compute.VirtualMachine{}, nil)
+			},
+			Err: errors.Wrap(fmt.Errorf("invalid resource ID: resource id '%s' must start with '/'", "foo"), fmt.Sprintf("failed to parse resource id %q", "foo")),
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			var (
-				g          = NewWithT(t)
-				mockCtrl   = gomock.NewController(t)
-				scopeMock  = mock_scalesetvms.NewMockScaleSetVMScope(mockCtrl)
-				clientMock = mock_scalesetvms.NewMockclient(mockCtrl)
+				g            = NewWithT(t)
+				mockCtrl     = gomock.NewController(t)
+				scopeMock    = mock_scalesetvms.NewMockScaleSetVMScope(mockCtrl)
+				clientMock   = mock_scalesetvms.NewMockclient(mockCtrl)
+				vmClientMock = mock_virtualmachines.NewMockClient(mockCtrl)
 			)
 			defer mockCtrl.Finish()
 
@@ -271,7 +314,8 @@ func TestService_Delete(t *testing.T) {
 
 			service := NewService(scopeMock)
 			service.Client = clientMock
-			c.Setup(scopeMock.EXPECT(), clientMock.EXPECT())
+			service.VMClient = vmClientMock
+			c.Setup(scopeMock.EXPECT(), clientMock.EXPECT(), vmClientMock.EXPECT())
 
 			if err := service.Delete(context.TODO()); c.Err == nil {
 				g.Expect(err).To(Succeed())

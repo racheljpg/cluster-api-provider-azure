@@ -18,6 +18,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,7 +33,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 )
 
-func (fs *FlexScaleSet) newVmssFlexCache() (*azcache.TimedCache, error) {
+func (fs *FlexScaleSet) newVmssFlexCache(ctx context.Context) (*azcache.TimedCache, error) {
 	getter := func(key string) (interface{}, error) {
 		localCache := &sync.Map{}
 
@@ -41,8 +42,8 @@ func (fs *FlexScaleSet) newVmssFlexCache() (*azcache.TimedCache, error) {
 			return nil, err
 		}
 
-		for _, resourceGroup := range allResourceGroups.List() {
-			allScaleSets, rerr := fs.VirtualMachineScaleSetsClient.List(context.Background(), resourceGroup)
+		for _, resourceGroup := range allResourceGroups.UnsortedList() {
+			allScaleSets, rerr := fs.VirtualMachineScaleSetsClient.List(ctx, resourceGroup)
 			if rerr != nil {
 				if rerr.IsNotFound() {
 					klog.Warningf("Skip caching vmss for resource group %s due to error: %v", resourceGroup, rerr.Error())
@@ -74,12 +75,9 @@ func (fs *FlexScaleSet) newVmssFlexCache() (*azcache.TimedCache, error) {
 	return azcache.NewTimedcache(time.Duration(fs.Config.VmssFlexCacheTTLInSeconds)*time.Second, getter)
 }
 
-func (fs *FlexScaleSet) newVmssFlexVMCache() (*azcache.TimedCache, error) {
+func (fs *FlexScaleSet) newVmssFlexVMCache(ctx context.Context) (*azcache.TimedCache, error) {
 	getter := func(key string) (interface{}, error) {
 		localCache := &sync.Map{}
-
-		ctx, cancel := getContextWithCancel()
-		defer cancel()
 
 		vms, rerr := fs.VirtualMachinesClient.ListVmssFlexVMsWithoutInstanceView(ctx, key)
 		if rerr != nil {
@@ -122,7 +120,7 @@ func (fs *FlexScaleSet) newVmssFlexVMCache() (*azcache.TimedCache, error) {
 	}
 
 	if fs.Config.VmssFlexVMCacheTTLInSeconds == 0 {
-		fs.Config.VmssFlexVMCacheTTLInSeconds = consts.VmssFlexVMCacheTTLInSeconds
+		fs.Config.VmssFlexVMCacheTTLInSeconds = consts.VmssFlexVMCacheTTLDefaultInSeconds
 	}
 	return azcache.NewTimedcache(time.Duration(fs.Config.VmssFlexVMCacheTTLInSeconds)*time.Second, getter)
 }
@@ -159,7 +157,7 @@ func (fs *FlexScaleSet) getNodeNameByVMName(vmName string) (string, error) {
 	}
 
 	nodeName, err := getter(vmName, azcache.CacheReadTypeDefault)
-	if err == cloudprovider.InstanceNotFound {
+	if errors.Is(err, cloudprovider.InstanceNotFound) {
 		klog.V(2).Infof("Could not find node (%s) in the existing cache. Forcely freshing the cache to check again...", nodeName)
 		return getter(vmName, azcache.CacheReadTypeForceRefresh)
 	}
@@ -200,7 +198,7 @@ func (fs *FlexScaleSet) getNodeVmssFlexID(nodeName string) (string, error) {
 	}
 
 	vmssFlexID, err := getter(nodeName, azcache.CacheReadTypeDefault)
-	if err == cloudprovider.InstanceNotFound {
+	if errors.Is(err, cloudprovider.InstanceNotFound) {
 		klog.V(2).Infof("Could not find node (%s) in the existing cache. Forcely freshing the cache to check again...", nodeName)
 		return getter(nodeName, azcache.CacheReadTypeForceRefresh)
 	}
@@ -218,7 +216,6 @@ func (fs *FlexScaleSet) getVmssFlexVM(nodeName string, crt azcache.AzureCacheRea
 	if err != nil {
 		return vm, err
 	}
-
 	vmMap := cached.(*sync.Map)
 	cachedVM, ok := vmMap.Load(nodeName)
 	if !ok {
@@ -234,7 +231,6 @@ func (fs *FlexScaleSet) getVmssFlexByVmssFlexID(vmssFlexID string, crt azcache.A
 	if err != nil {
 		return nil, err
 	}
-
 	vmssFlexes := cached.(*sync.Map)
 	if vmssFlex, ok := vmssFlexes.Load(vmssFlexID); ok {
 		result := vmssFlex.(*compute.VirtualMachineScaleSet)
@@ -246,7 +242,6 @@ func (fs *FlexScaleSet) getVmssFlexByVmssFlexID(vmssFlexID string, crt azcache.A
 	if err != nil {
 		return nil, err
 	}
-
 	vmssFlexes = cached.(*sync.Map)
 	if vmssFlex, ok := vmssFlexes.Load(vmssFlexID); ok {
 		result := vmssFlex.(*compute.VirtualMachineScaleSet)
@@ -272,7 +267,6 @@ func (fs *FlexScaleSet) getVmssFlexIDByName(vmssFlexName string) (string, error)
 	if err != nil {
 		return "", err
 	}
-
 	var targetVmssFlexID string
 	vmssFlexes := cached.(*sync.Map)
 	vmssFlexes.Range(func(key, value interface{}) bool {
@@ -330,7 +324,6 @@ func (fs *FlexScaleSet) DeleteCacheForNode(nodeName string) error {
 	if err != nil {
 		return err
 	}
-
 	vmMap := cached.(*sync.Map)
 	vmMap.Delete(nodeName)
 

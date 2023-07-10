@@ -21,18 +21,23 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"fmt"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/go-autorest/autorest/to"
 	guuid "github.com/google/uuid"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	utilfeature "k8s.io/component-base/featuregate/testing"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,18 +49,41 @@ var (
 	one               = intstr.FromInt(1)
 )
 
+type mockClient struct {
+	client.Client
+	Version     string
+	ReturnError bool
+}
+
+func (m mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	obj.(*expv1.MachinePool).Spec.Template.Spec.Version = &m.Version
+	return nil
+}
+
+func (m mockClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if m.ReturnError {
+		return errors.New("MachinePool.cluster.x-k8s.io \"mock-machinepool-mp-0\" not found")
+	}
+	mp := &expv1.MachinePool{}
+	mp.Spec.Template.Spec.Version = &m.Version
+	list.(*expv1.MachinePoolList).Items = []expv1.MachinePool{*mp}
+
+	return nil
+}
+
 func TestAzureMachinePool_ValidateCreate(t *testing.T) {
-	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the web hook
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
 	// must prevent creating new objects in case the feature flag is disabled.
 	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
 
 	g := NewWithT(t)
 
 	tests := []struct {
-		name    string
-		amp     *AzureMachinePool
-		version string
-		wantErr bool
+		name          string
+		amp           *AzureMachinePool
+		version       string
+		ownerNotFound bool
+		wantErr       bool
 	}{
 		{
 			name:    "valid",
@@ -64,32 +92,32 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachinepool with marketplace image - full",
-			amp:     createMachinePoolWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0", to.IntPtr(10)),
+			amp:     createMachinePoolWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0", pointer.Int(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with marketplace image - missing publisher",
-			amp:     createMachinePoolWithMarketPlaceImage("", "OFFER1234", "SKU1234", "1.0.0", to.IntPtr(10)),
+			amp:     createMachinePoolWithMarketPlaceImage("", "OFFER1234", "SKU1234", "1.0.0", pointer.Int(10)),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachinepool with shared gallery image - full",
-			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", to.IntPtr(10)),
+			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with marketplace image - missing subscription",
-			amp:     createMachinePoolWithSharedImage("", "RG123", "NAME123", "GALLERY1", "1.0.0", to.IntPtr(10)),
+			amp:     createMachinePoolWithSharedImage("", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(10)),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachinepool with image by - with id",
-			amp:     createMachinePoolWithImageByID("ID123", to.IntPtr(10)),
+			amp:     createMachinePoolWithImageByID("ID123", pointer.Int(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with image by - without id",
-			amp:     createMachinePoolWithImageByID("", to.IntPtr(10)),
+			amp:     createMachinePoolWithImageByID("", pointer.Int(10)),
 			wantErr: true,
 		},
 		{
@@ -104,7 +132,7 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachinepool with wrong terminate notification",
-			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", to.IntPtr(35)),
+			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(35)),
 			wantErr: true,
 		},
 		{
@@ -201,12 +229,22 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 			version: "v1.25.6",
 			wantErr: true,
 		},
+		{
+			name:          "azuremachinepool with Flexible orchestration mode and invalid Kubernetes version, no owner",
+			amp:           createMachinePoolWithOrchestrationMode(compute.OrchestrationModeFlexible),
+			version:       "v1.25.6",
+			ownerNotFound: true,
+			wantErr:       true,
+		},
 	}
 
 	for _, tc := range tests {
-		client := mockClient{Version: tc.version}
+		client := mockClient{Version: tc.version, ReturnError: tc.ownerNotFound}
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.amp.ValidateCreate(client)
+			ampw := &azureMachinePoolWebhook{
+				Client: client,
+			}
+			err := ampw.ValidateCreate(context.Background(), tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -216,18 +254,51 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 	}
 }
 
-type mockClient struct {
+type mockDefaultClient struct {
 	client.Client
-	Version string
+	Name           string
+	ClusterName    string
+	SubscriptionID string
+	Version        string
+	ReturnError    bool
 }
 
-func (m mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	obj.(*expv1.MachinePool).Spec.Template.Spec.Version = &m.Version
+func (m mockDefaultClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	switch obj := obj.(type) {
+	case *infrav1.AzureCluster:
+		obj.Spec.SubscriptionID = m.SubscriptionID
+	case *clusterv1.Cluster:
+		obj.Spec.InfrastructureRef = &corev1.ObjectReference{
+			Kind: "AzureCluster",
+			Name: "test-cluster",
+		}
+	default:
+		return errors.New("invalid object type")
+	}
+	return nil
+}
+
+func (m mockDefaultClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	list.(*expv1.MachinePoolList).Items = []expv1.MachinePool{
+		{
+			Spec: expv1.MachinePoolSpec{
+				Template: clusterv1.MachineTemplateSpec{
+					Spec: clusterv1.MachineSpec{
+						InfrastructureRef: corev1.ObjectReference{
+							Name: m.Name,
+						},
+					},
+				},
+				ClusterName: m.ClusterName,
+			},
+		},
+	}
+
 	return nil
 }
 
 func TestAzureMachinePool_ValidateUpdate(t *testing.T) {
-	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the web hook
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
 	// must prevent creating new objects in case the feature flag is disabled.
 	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
 
@@ -313,7 +384,8 @@ func TestAzureMachinePool_ValidateUpdate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.amp.ValidateUpdate(tc.oldAMP, nil)
+			ampw := &azureMachinePoolWebhook{}
+			err := ampw.ValidateUpdate(context.Background(), tc.oldAMP, tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -324,7 +396,7 @@ func TestAzureMachinePool_ValidateUpdate(t *testing.T) {
 }
 
 func TestAzureMachinePool_Default(t *testing.T) {
-	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the web hook
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
 	// must prevent creating new objects in case the feature flag is disabled.
 	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
 
@@ -339,29 +411,78 @@ func TestAzureMachinePool_Default(t *testing.T) {
 	publicKeyNotExistTest := test{amp: createMachinePoolWithSSHPublicKey("")}
 
 	existingRoleAssignmentName := "42862306-e485-4319-9bf0-35dbc6f6fe9c"
-	roleAssignmentExistTest := test{amp: &AzureMachinePool{Spec: AzureMachinePoolSpec{
-		Identity:           "SystemAssigned",
-		RoleAssignmentName: existingRoleAssignmentName,
-	}}}
 
-	roleAssignmentEmptyTest := test{amp: &AzureMachinePool{Spec: AzureMachinePoolSpec{
-		Identity:           "SystemAssigned",
-		RoleAssignmentName: "",
-	}}}
+	fakeSubscriptionID := guuid.New().String()
+	fakeClusterName := "testcluster"
+	fakeMachinePoolName := "testmachinepool"
+	mockClient := mockDefaultClient{Name: fakeMachinePoolName, ClusterName: fakeClusterName, SubscriptionID: fakeSubscriptionID}
 
-	roleAssignmentExistTest.amp.Default(nil)
-	g.Expect(roleAssignmentExistTest.amp.Spec.RoleAssignmentName).To(Equal(existingRoleAssignmentName))
+	roleAssignmentExistTest := test{amp: &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Identity: "SystemAssigned",
+			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+				Name:         existingRoleAssignmentName,
+				Scope:        "scope",
+				DefinitionID: "definitionID",
+			},
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fakeMachinePoolName,
+		},
+	}}
 
-	roleAssignmentEmptyTest.amp.Default(nil)
-	g.Expect(roleAssignmentEmptyTest.amp.Spec.RoleAssignmentName).To(Not(BeEmpty()))
-	_, err := guuid.Parse(roleAssignmentEmptyTest.amp.Spec.RoleAssignmentName)
-	g.Expect(err).To(Not(HaveOccurred()))
+	emptyTest := test{amp: &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Identity:                   "SystemAssigned",
+			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{},
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fakeMachinePoolName,
+		},
+	}}
 
-	publicKeyExistTest.amp.Default(nil)
+	systemAssignedIdentityRoleExistTest := test{amp: &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Identity: "SystemAssigned",
+			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+				DefinitionID: "testroledefinitionid",
+				Scope:        "testscope",
+			},
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: fakeMachinePoolName,
+		},
+	}}
+
+	ampw := &azureMachinePoolWebhook{
+		Client: mockClient,
+	}
+
+	err := ampw.Default(context.Background(), roleAssignmentExistTest.amp)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(roleAssignmentExistTest.amp.Spec.SystemAssignedIdentityRole.Name).To(Equal(existingRoleAssignmentName))
+
+	err = ampw.Default(context.Background(), publicKeyExistTest.amp)
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyExistTest.amp.Spec.Template.SSHPublicKey).To(Equal(existingPublicKey))
 
-	publicKeyNotExistTest.amp.Default(nil)
+	err = ampw.Default(context.Background(), publicKeyNotExistTest.amp)
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyNotExistTest.amp.Spec.Template.SSHPublicKey).NotTo(BeEmpty())
+
+	err = ampw.Default(context.Background(), systemAssignedIdentityRoleExistTest.amp)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(systemAssignedIdentityRoleExistTest.amp.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal("testroledefinitionid"))
+	g.Expect(systemAssignedIdentityRoleExistTest.amp.Spec.SystemAssignedIdentityRole.Scope).To(Equal("testscope"))
+
+	err = ampw.Default(context.Background(), emptyTest.amp)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.Name).To(Not(BeEmpty()))
+	_, err = guuid.Parse(emptyTest.amp.Spec.SystemAssignedIdentityRole.Name)
+	g.Expect(err).To(Not(HaveOccurred()))
+	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole).To(Not(BeNil()))
+	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.Scope).To(Equal(fmt.Sprintf("/subscriptions/%s/", fakeSubscriptionID)))
+	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", fakeSubscriptionID, infrav1.ContributorRoleID)))
 }
 
 func createMachinePoolWithMarketPlaceImage(publisher, offer, sku, version string, terminateNotificationTimeout *int) *AzureMachinePool {
@@ -439,8 +560,12 @@ func createMachinePoolWithImageByID(imageID string, terminateNotificationTimeout
 func createMachinePoolWithSystemAssignedIdentity(role string) *AzureMachinePool {
 	return &AzureMachinePool{
 		Spec: AzureMachinePoolSpec{
-			Identity:           infrav1.VMIdentitySystemAssigned,
-			RoleAssignmentName: role,
+			Identity: infrav1.VMIdentitySystemAssigned,
+			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+				Name:         role,
+				Scope:        "scope",
+				DefinitionID: "definitionID",
+			},
 		},
 	}
 }
@@ -533,7 +658,8 @@ func TestAzureMachinePool_ValidateCreateFailure(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			defer tc.deferFunc()
-			err := tc.amp.ValidateCreate(nil)
+			ampw := &azureMachinePoolWebhook{}
+			err := ampw.ValidateCreate(context.Background(), tc.amp)
 			g.Expect(err).To(HaveOccurred())
 		})
 	}
@@ -555,10 +681,14 @@ func getKnownValidAzureMachinePool() *AzureMachinePool {
 			Template: AzureMachinePoolMachineTemplate{
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
-				TerminateNotificationTimeout: to.IntPtr(10),
+				TerminateNotificationTimeout: pointer.Int(10),
 			},
-			Identity:           infrav1.VMIdentitySystemAssigned,
-			RoleAssignmentName: string(uuid.NewUUID()),
+			Identity: infrav1.VMIdentitySystemAssigned,
+			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{
+				Name:         string(uuid.NewUUID()),
+				Scope:        "scope",
+				DefinitionID: "definitionID",
+			},
 			Strategy: AzureMachinePoolDeploymentStrategy{
 				Type: RollingUpdateAzureMachinePoolDeploymentStrategyType,
 				RollingUpdate: &MachineRollingUpdateDeployment{

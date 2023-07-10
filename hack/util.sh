@@ -18,13 +18,15 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+CURL_RETRIES=3
+
 capz::util::get_latest_ci_version() {
     release="${1}"
     ci_version_url="https://dl.k8s.io/ci/latest-${release}.txt"
-    if ! curl -fL "${ci_version_url}" > /dev/null; then
+    if ! curl --retry "${CURL_RETRIES}" -fL "${ci_version_url}" > /dev/null; then
         ci_version_url="https://dl.k8s.io/ci/latest.txt"
     fi
-    curl -sSL "${ci_version_url}"
+    curl --retry "${CURL_RETRIES}" -sSL "${ci_version_url}"
 }
 
 capz::util::should_build_kubernetes() {
@@ -39,6 +41,26 @@ capz::util::should_build_kubernetes() {
     echo "false"
 }
 
+capz::util::should_build_ccm() {
+    # TEST_CCM is an environment variable set by a prow job to indicate that the CCM should be built and tested.
+    if [[ -n "${TEST_CCM:-}" ]]; then
+        echo "true" && return
+    fi
+    # If testing a custom Kubernetes version, CCM should be built.
+    if [[ "$(capz::util::should_build_kubernetes)" == "true" ]]; then
+        echo "true" && return
+    fi
+    # If using Kubernetes CI artifacts, CCM should be built.
+    if [[ "${E2E_ARGS:-}" == "-kubetest.use-ci-artifacts" ]]; then
+        echo "true" && return
+    fi
+    # If the Kubernetes version contains "latest", CCM should be built.
+    if [[ "${KUBERNETES_VERSION:-}" =~ "latest" ]]; then
+        echo "true" && return
+    fi
+    echo "false"
+}
+
 # all test regions must support AvailabilityZones
 capz::util::get_random_region() {
     local REGIONS=("canadacentral" "eastus" "eastus2" "northeurope" "uksouth" "westeurope" "westus2" "westus3")
@@ -47,6 +69,11 @@ capz::util::get_random_region() {
 # all regions below must have GPU availability for the chosen GPU VM SKU
 capz::util::get_random_region_gpu() {
     local REGIONS=("eastus" "eastus2" "northeurope" "uksouth" "westeurope" "westus2")
+    echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
+}
+# all regions below must support ExtendedLocation
+capz::util::get_random_region_edgezone() {
+    local REGIONS=("canadacentral")
     echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
 }
 

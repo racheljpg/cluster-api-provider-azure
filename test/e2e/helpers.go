@@ -35,7 +35,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2020-09-01/compute/mgmt/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2022-03-02/compute"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/blang/semver"
 	. "github.com/onsi/ginkgo/v2"
@@ -58,13 +58,10 @@ import (
 	typedappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1"
 	typedbatchv1 "k8s.io/client-go/kubernetes/typed/batch/v1"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
@@ -78,6 +75,8 @@ const (
 	retryableOperationTimeout             = 30 * time.Second
 	retryableDeleteOperationTimeout       = 3 * time.Minute
 	retryableOperationSleepBetweenRetries = 3 * time.Second
+	helmInstallTimeout                    = 3 * time.Minute
+	sshConnectionTimeout                  = 30 * time.Second
 )
 
 // deploymentsClientAdapter adapts a Deployment to work with WaitForDeploymentsAvailable.
@@ -270,13 +269,17 @@ type WaitForDaemonsetInput struct {
 func WaitForDaemonset(ctx context.Context, input WaitForDaemonsetInput, intervals ...interface{}) {
 	start := time.Now()
 	namespace, name := input.DaemonSet.GetNamespace(), input.DaemonSet.GetName()
-	Byf("waiting for daemonset %s/%s to be complete", namespace, name)
-	Logf("waiting for daemonset %s/%s to be complete", namespace, name)
 	Eventually(func() bool {
 		key := client.ObjectKey{Namespace: namespace, Name: name}
 		if err := input.Getter.Get(ctx, key, input.DaemonSet); err == nil {
-			if input.DaemonSet.Status.DesiredNumberScheduled == input.DaemonSet.Status.NumberReady {
-				Logf("%d daemonset %s/%s pods are running, took %v", input.DaemonSet.Status.NumberReady, namespace, name, time.Since(start))
+			if input.DaemonSet.Status.DesiredNumberScheduled > 0 {
+				Byf("waiting for %d daemonset %s/%s pods to be Running", input.DaemonSet.Status.DesiredNumberScheduled, namespace, name)
+				if input.DaemonSet.Status.DesiredNumberScheduled == input.DaemonSet.Status.NumberReady {
+					Logf("%d daemonset %s/%s pods are running, took %v", input.DaemonSet.Status.NumberReady, namespace, name, time.Since(start))
+					return true
+				}
+			} else {
+				Byf("daemonset %s/%s has no schedulable nodes, will skip", namespace, name)
 				return true
 			}
 		}
@@ -284,19 +287,21 @@ func WaitForDaemonset(ctx context.Context, input WaitForDaemonsetInput, interval
 	}, intervals...).Should(BeTrue(), func() string { return DescribeFailedDaemonset(ctx, input) })
 }
 
-// GetWaitForDaemonsetAvailableInput is a convenience func to compose a WaitForDaemonsetInput
-func GetWaitForDaemonsetAvailableInput(ctx context.Context, clusterProxy framework.ClusterProxy, name, namespace string, specName string) WaitForDaemonsetInput {
+// WaitForDaemonsets retries during E2E until all daemonsets pods are all Running.
+func WaitForDaemonsets(ctx context.Context, clusterProxy framework.ClusterProxy, specName string, intervals ...interface{}) {
 	Expect(clusterProxy).NotTo(BeNil())
 	cl := clusterProxy.GetClient()
-	var ds = &appsv1.DaemonSet{}
+	var dsList = &appsv1.DaemonSetList{}
 	Eventually(func() error {
-		return cl.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, ds)
-	}, e2eConfig.GetIntervals(specName, "wait-daemonset")...).Should(Succeed())
-	clientset := clusterProxy.GetClientSet()
-	return WaitForDaemonsetInput{
-		DaemonSet: ds,
-		Clientset: clientset,
-		Getter:    cl,
+		return cl.List(ctx, dsList)
+	}, intervals...).Should(Succeed())
+	for i := range dsList.Items {
+		waitForDaemonsetInput := WaitForDaemonsetInput{
+			DaemonSet: &dsList.Items[i],
+			Clientset: clusterProxy.GetClientSet(),
+			Getter:    cl,
+		}
+		WaitForDaemonset(ctx, waitForDaemonsetInput, intervals...)
 	}
 }
 
@@ -420,7 +425,7 @@ func getAvailabilityZonesForRegion(location string, size string) ([]string, erro
 //	INFO: "With 1 worker node" started at Tue, 22 Sep 2020 13:19:08 PDT on Ginkgo node 2 of 3
 //	INFO: "With 1 worker node" ran for 18m34s on Ginkgo node 2 of 3
 func logCheckpoint(specTimes map[string]time.Time) {
-	text := CurrentGinkgoTestDescription().TestText
+	text := CurrentSpecReport().LeafNodeText
 	start, started := specTimes[text]
 	suiteConfig, reporterConfig := GinkgoConfiguration()
 	if !started {
@@ -459,26 +464,35 @@ func isAzureMachinePoolWindows(amp *infrav1exp.AzureMachinePool) bool {
 
 // getProxiedSSHClient creates a SSH client object that connects to a target node
 // proxied through a control plane node.
-func getProxiedSSHClient(controlPlaneEndpoint, hostname, port string) (*ssh.Client, error) {
+func getProxiedSSHClient(controlPlaneEndpoint, hostname, port string, ioTimeout time.Duration) (*ssh.Client, error) {
 	config, err := newSSHConfig()
 	if err != nil {
 		return nil, err
 	}
 
 	// Init a client connection to a control plane node via the public load balancer
-	lbClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%s", controlPlaneEndpoint, port), config)
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", controlPlaneEndpoint, port), config.Timeout)
 	if err != nil {
 		return nil, errors.Wrapf(err, "dialing public load balancer at %s", controlPlaneEndpoint)
 	}
+	err = c.SetDeadline(time.Now().Add(ioTimeout))
+	if err != nil {
+		return nil, errors.Wrapf(err, "setting timeout for connection to public load balancer at %s", controlPlaneEndpoint)
+	}
+	conn, chans, reqs, err := ssh.NewClientConn(c, fmt.Sprintf("%s:%s", controlPlaneEndpoint, port), config)
+	if err != nil {
+		return nil, errors.Wrapf(err, "connecting to public load balancer at %s", controlPlaneEndpoint)
+	}
+	lbClient := ssh.NewClient(conn, chans, reqs)
 
 	// Init a connection from the control plane to the target node
-	c, err := lbClient.Dial("tcp", fmt.Sprintf("%s:%s", hostname, port))
+	c, err = lbClient.Dial("tcp", fmt.Sprintf("%s:%s", hostname, port))
 	if err != nil {
 		return nil, errors.Wrapf(err, "dialing from control plane to target node at %s", hostname)
 	}
 
 	// Establish an authenticated SSH conn over the client -> control plane -> target transport
-	conn, chans, reqs, err := ssh.NewClientConn(c, hostname, config)
+	conn, chans, reqs, err = ssh.NewClientConn(c, hostname, config)
 	if err != nil {
 		return nil, errors.Wrap(err, "getting a new SSH client connection")
 	}
@@ -488,9 +502,9 @@ func getProxiedSSHClient(controlPlaneEndpoint, hostname, port string) (*ssh.Clie
 
 // execOnHost runs the specified command directly on a node's host, using a SSH connection
 // proxied through a control plane host and copies the output to a file.
-func execOnHost(controlPlaneEndpoint, hostname, port string, f io.StringWriter, command string,
+func execOnHost(controlPlaneEndpoint, hostname, port string, ioTimeout time.Duration, f io.StringWriter, command string,
 	args ...string) error {
-	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port)
+	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port, ioTimeout)
 	if err != nil {
 		return err
 	}
@@ -519,10 +533,10 @@ func execOnHost(controlPlaneEndpoint, hostname, port string, f io.StringWriter, 
 
 // sftpCopyFile copies a file from a node to the specified destination, using a SSH connection
 // proxied through a control plane node.
-func sftpCopyFile(controlPlaneEndpoint, hostname, port, sourcePath, destPath string) error {
+func sftpCopyFile(controlPlaneEndpoint, hostname, port string, ioTimeout time.Duration, sourcePath, destPath string) error {
 	Logf("Attempting to copy file %s on node %s to %s", sourcePath, hostname, destPath)
 
-	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port)
+	client, err := getProxiedSSHClient(controlPlaneEndpoint, hostname, port, ioTimeout)
 	if err != nil {
 		return err
 	}
@@ -587,6 +601,7 @@ func newSSHConfig() (*ssh.ClientConfig, error) {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // Non-production code
 		User:            azure.DefaultUserName,
 		Auth:            []ssh.AuthMethod{pubkey},
+		Timeout:         sshConnectionTimeout,
 	}
 	return &sshConfig, nil
 }
@@ -650,7 +665,7 @@ func latestCIVersion(label string) (string, error) {
 
 // resolveKubetestRepoListPath will set the correct repo list for Windows:
 // - if WIN_REPO_URL is set use the custom file downloaded via makefile
-// - if CI version is "latest" do not set repo list since they are not needed K8s v1.25+
+// - if CI version is "latest" do not set repo list since they are not needed K8s v1.24+
 // - if CI version is  "latest-1.xx" will compare values and use correct repoList
 // - if standard version will compare values and use correct repoList
 // - if unable to determine version falls back to using latest
@@ -669,18 +684,18 @@ func resolveKubetestRepoListPath(version string, path string) (string, error) {
 		return "", err
 	}
 
-	v125, err := semver.Make("1.25.0-alpha.0.0")
+	v124, err := semver.Make("1.24.0-alpha.0.0")
 	if err != nil {
 		return "", err
 	}
 
-	if currentVersion.GT(v125) {
+	if currentVersion.GT(v124) {
 		return "", nil
 	}
 
 	// - prior to K8s v1.21 repo-list-k8sprow.yaml should be used
 	//   since all test images need to come from k8sprow.azurecr.io
-	// - starting with K8s v1.25 repo lists repo list is not needed
+	// - starting with K8s v1.24 repo lists repo list is not needed
 	// - use repo-list.yaml for everything in between which has only
 	//   some images in k8sprow.azurecr.io
 
@@ -692,6 +707,7 @@ func resolveKubetestRepoListPath(version string, path string) (string, error) {
 func resolveKubernetesVersions(config *clusterctl.E2EConfig) {
 	ubuntuVersions := getVersionsInOffer(context.TODO(), os.Getenv(AzureLocation), capiImagePublisher, capiOfferName)
 	windowsVersions := getVersionsInOffer(context.TODO(), os.Getenv(AzureLocation), capiImagePublisher, capiWindowsOfferName)
+	flatcarK8sVersions := getFlatcarK8sVersions(context.TODO(), os.Getenv(AzureLocation), flatcarCAPICommunityGallery)
 
 	// find the intersection of ubuntu and windows versions available, since we need an image for both.
 	var versions semver.Versions
@@ -710,16 +726,42 @@ func resolveKubernetesVersions(config *clusterctl.E2EConfig) {
 	if config.HasVariable(capi_e2e.KubernetesVersionUpgradeTo) {
 		resolveKubernetesVersion(config, versions, capi_e2e.KubernetesVersionUpgradeTo)
 	}
+	if config.HasVariable(FlatcarKubernetesVersion) && config.HasVariable(FlatcarVersion) {
+		resolveFlatcarKubernetesVersion(config, flatcarK8sVersions, FlatcarKubernetesVersion)
+		flatcarVersions := getFlatcarVersions(context.TODO(), os.Getenv(AzureLocation), flatcarCAPICommunityGallery, config.GetVariable(FlatcarKubernetesVersion))
+		resolveFlatcarVersion(config, flatcarVersions, FlatcarVersion)
+	}
 }
 
 func resolveKubernetesVersion(config *clusterctl.E2EConfig, versions semver.Versions, varName string) {
+	resolveVariable(config, varName, getLatestVersionForMinor(config.GetVariable(varName), versions, "capi offer"))
+}
+
+func resolveVariable(config *clusterctl.E2EConfig, varName, v string) {
 	oldVersion := config.GetVariable(varName)
-	v := getLatestSkuForMinor(oldVersion, versions)
 	if _, ok := os.LookupEnv(varName); ok {
 		Expect(os.Setenv(varName, v)).To(Succeed())
 	}
 	config.Variables[varName] = v
 	Logf("Resolved %s (set to %s) to %s", varName, oldVersion, v)
+}
+
+func resolveFlatcarKubernetesVersion(config *clusterctl.E2EConfig, versions semver.Versions, varName string) {
+	resolveVariable(config, varName, getLatestVersionForMinor(config.GetVariable(varName), versions, "Flatcar Community Gallery"))
+}
+
+func resolveFlatcarVersion(config *clusterctl.E2EConfig, versions semver.Versions, varName string) {
+	version := config.GetVariable(varName)
+	if version != "latest" {
+		Expect(versions).To(ContainElement(semver.MustParse(version)), fmt.Sprintf("Provided Flatcar version %q does not have a corresponding VM image in the Flatcar Community Gallery", version))
+	}
+
+	if version == "latest" {
+		semver.Sort(versions)
+		version = versions[0].String()
+	}
+
+	resolveVariable(config, varName, version)
 }
 
 // newImagesClient returns a new VM images client using environmental settings for auth.
@@ -733,6 +775,30 @@ func newImagesClient() compute.VirtualMachineImagesClient {
 	imagesClient.Authorizer = authorizer
 
 	return imagesClient
+}
+
+func newCommunityGalleryImagesClient() compute.CommunityGalleryImagesClient {
+	settings, err := auth.GetSettingsFromEnvironment()
+	Expect(err).NotTo(HaveOccurred())
+	subscriptionID := settings.GetSubscriptionID()
+	authorizer, err := azureutil.GetAuthorizer(settings)
+	Expect(err).NotTo(HaveOccurred())
+	communityGalleryImagesClient := compute.NewCommunityGalleryImagesClient(subscriptionID)
+	communityGalleryImagesClient.Authorizer = authorizer
+
+	return communityGalleryImagesClient
+}
+
+func newCommunityGalleryImageVersionsClient() compute.CommunityGalleryImageVersionsClient {
+	settings, err := auth.GetSettingsFromEnvironment()
+	Expect(err).NotTo(HaveOccurred())
+	subscriptionID := settings.GetSubscriptionID()
+	authorizer, err := azureutil.GetAuthorizer(settings)
+	Expect(err).NotTo(HaveOccurred())
+	communityGalleryImageVersionsClient := compute.NewCommunityGalleryImageVersionsClient(subscriptionID)
+	communityGalleryImageVersionsClient.Authorizer = authorizer
+
+	return communityGalleryImageVersionsClient
 }
 
 // getVersionsInOffer returns a map of Kubernetes versions as strings to semver.Versions.
@@ -775,8 +841,8 @@ func getVersionsInOffer(ctx context.Context, location, publisher, offer string) 
 	return versions
 }
 
-// getLatestSkuForMinor gets the latest available patch version in the provided list of sku versions that corresponds to the provided k8s version.
-func getLatestSkuForMinor(version string, skus semver.Versions) string {
+// getLatestVersionForMinor gets the latest available patch version in the provided list of sku versions that corresponds to the provided k8s version.
+func getLatestVersionForMinor(version string, versions semver.Versions, imagesSource string) string {
 	isStable, match := validateStableReleaseString(version)
 	if isStable {
 		// if the version is in the format "stable-1.21", we find the latest 1.21.x version.
@@ -784,21 +850,73 @@ func getLatestSkuForMinor(version string, skus semver.Versions) string {
 		Expect(err).NotTo(HaveOccurred())
 		minor, err := strconv.ParseUint(match[2], 10, 64)
 		Expect(err).NotTo(HaveOccurred())
-		semver.Sort(skus)
-		for i := len(skus) - 1; i >= 0; i-- {
-			if skus[i].Major == major && skus[i].Minor == minor {
-				version = "v" + skus[i].String()
+		semver.Sort(versions)
+		for i := len(versions) - 1; i >= 0; i-- {
+			if versions[i].Major == major && versions[i].Minor == minor {
+				version = "v" + versions[i].String()
 				break
 			}
 		}
 	} else if v, err := semver.ParseTolerant(version); err == nil {
 		if len(v.Pre) == 0 {
 			// if the version is in the format "v1.21.2", we make sure we have an existing image for it.
-			Expect(skus).To(ContainElement(v), fmt.Sprintf("Provided Kubernetes version %s does not have a corresponding VM image in the capi offer", version))
+			Expect(versions).To(ContainElement(v), fmt.Sprintf("Provided Kubernetes version %s does not have a corresponding VM image in the %q", version, imagesSource))
 		}
 	}
 	// otherwise, we just return the version as-is. This allows for versions in other formats, such as "latest" or "latest-1.21".
 	return version
+}
+
+func getFlatcarVersions(ctx context.Context, location, galleryName, k8sVersion string) semver.Versions {
+	image := fmt.Sprintf("flatcar-stable-amd64-capi-%s", k8sVersion)
+
+	Logf("Finding Flatcar versions in community gallery %q in location %q for image %q", galleryName, location, image)
+	var versions semver.Versions
+	communityGalleryImageVersionsClient := newCommunityGalleryImageVersionsClient()
+	imageVersionsIterator, err := communityGalleryImageVersionsClient.List(ctx, location, galleryName, image)
+	Expect(err).NotTo(HaveOccurred())
+	imageVersions := imageVersionsIterator.Response()
+
+	if imageVersions.Value == nil {
+		return versions
+	}
+
+	for _, imageVersion := range *imageVersions.Value {
+		versions = append(versions, semver.MustParse(*imageVersion.Name))
+	}
+
+	return versions
+}
+
+func getFlatcarK8sVersions(ctx context.Context, location, communityGalleryName string) semver.Versions {
+	Logf("Finding Flatcar images and versions in community gallery %q in location %q", communityGalleryName, location)
+	var versions semver.Versions
+	k8sVersion := regexp.MustCompile(`flatcar-stable-amd64-capi-v(\d+)\.(\d+).(\d+)`)
+	communityGalleryImagesClient := newCommunityGalleryImagesClient()
+	communityGalleryImageVersionsClient := newCommunityGalleryImageVersionsClient()
+	imagesIterator, err := communityGalleryImagesClient.ListComplete(ctx, location, communityGalleryName)
+	Expect(err).NotTo(HaveOccurred())
+	images := imagesIterator.Response()
+
+	if images.Value == nil {
+		return versions
+	}
+
+	for _, image := range *images.Value {
+		resIterator, err := communityGalleryImageVersionsClient.List(ctx, location, communityGalleryName, *image.Name)
+		Expect(err).NotTo(HaveOccurred())
+		res := resIterator.Response()
+
+		if res.Value == nil || len(*res.Value) == 0 {
+			continue
+		}
+
+		match := k8sVersion.FindStringSubmatch(*image.Name)
+		stringVer := fmt.Sprintf("%s.%s.%s", match[1], match[2], match[3])
+		versions = append(versions, semver.MustParse(stringVer))
+	}
+
+	return versions
 }
 
 // getPodLogs returns the logs of a pod, or an error in string format.
@@ -818,8 +936,7 @@ func getPodLogs(ctx context.Context, clientset *kubernetes.Clientset, pod corev1
 }
 
 // InstallHelmChart takes a helm repo URL, a chart name, and release name, and installs a helm release onto the E2E workload cluster.
-func InstallHelmChart(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, namespace, repoURL, chartName, releaseName string, options *helmVals.Options) {
-	clusterProxy := input.ClusterProxy.GetWorkloadCluster(ctx, input.ConfigCluster.Namespace, input.ConfigCluster.ClusterName)
+func InstallHelmChart(ctx context.Context, clusterProxy framework.ClusterProxy, namespace, repoURL, chartName, releaseName string, options *helmVals.Options) {
 	kubeConfigPath := clusterProxy.GetKubeconfigPath()
 	settings := helmCli.New()
 	settings.KubeConfig = kubeConfigPath
@@ -840,7 +957,7 @@ func InstallHelmChart(ctx context.Context, input clusterctl.ApplyClusterTemplate
 			releaseExists = true
 		}
 		return err
-	}, input.WaitForControlPlaneIntervals...).Should(Succeed())
+	}, helmInstallTimeout, retryableOperationSleepBetweenRetries).Should(Succeed())
 	if releaseExists {
 		Logf("Release %s already exists, skipping install", releaseName)
 	} else {
@@ -852,72 +969,45 @@ func InstallHelmChart(ctx context.Context, input clusterctl.ApplyClusterTemplate
 		i.ReleaseName = releaseName
 		i.Namespace = namespace
 		i.CreateNamespace = true
-		Eventually(func() error {
+		Eventually(func(g Gomega) {
 			cp, err := i.ChartPathOptions.LocateChart(chartName, helmCli.New())
-			if err != nil {
-				return err
-			}
+			g.Expect(err).NotTo(HaveOccurred())
 			p := helmGetter.All(settings)
 			if options == nil {
 				options = &helmVals.Options{}
 			}
 			valueOpts := options
 			vals, err := valueOpts.MergeValues(p)
-			if err != nil {
-				return err
-			}
+			g.Expect(err).NotTo(HaveOccurred())
 			chartRequested, err := helmLoader.Load(cp)
-			if err != nil {
-				return err
-			}
+			g.Expect(err).NotTo(HaveOccurred())
 			release, err := i.RunWithContext(ctx, chartRequested, vals)
 			if err != nil {
-				return err
+				Logf("Failed to install release %s, attempting to cleanup so we can retry", releaseName)
+				// Best effort attempt to delete the failed release so we can retry.
+				_, delErr := helmAction.NewUninstall(actionConfig).Run(releaseName)
+				if delErr != nil {
+					Logf("Failed to delete release %s", releaseName)
+				} else {
+					Logf("Deleted failed release %s", releaseName)
+				}
 			}
+			g.Expect(err).NotTo(HaveOccurred())
 			Logf(release.Info.Description)
-			return nil
-		}, input.WaitForControlPlaneIntervals...).Should(Succeed())
+		}, helmInstallTimeout, retryableOperationSleepBetweenRetries).Should(Succeed())
 	}
 }
 
-func defaultConfigCluster(clusterName, namespace string) clusterctl.ConfigClusterInput {
-	return clusterctl.ConfigClusterInput{
-		LogFolder:                filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
-		ClusterctlConfigPath:     clusterctlConfigPath,
-		KubeconfigPath:           bootstrapClusterProxy.GetKubeconfigPath(),
-		InfrastructureProvider:   clusterctl.DefaultInfrastructureProvider,
-		Flavor:                   clusterctl.DefaultFlavor,
-		Namespace:                namespace,
-		ClusterName:              clusterName,
-		KubernetesVersion:        e2eConfig.GetVariable(capi_e2e.KubernetesVersion),
-		ControlPlaneMachineCount: pointer.Int64Ptr(3),
-		WorkerMachineCount:       pointer.Int64Ptr(0),
-	}
-}
-
-func createClusterWithControlPlaneWaiters(ctx context.Context, configCluster clusterctl.ConfigClusterInput,
-	cpWaiters clusterctl.ControlPlaneWaiters,
-	result *clusterctl.ApplyClusterTemplateAndWaitResult) (*clusterv1.Cluster,
-	*controlplanev1.KubeadmControlPlane) {
-	clusterctl.ApplyClusterTemplateAndWait(ctx, clusterctl.ApplyClusterTemplateAndWaitInput{
-		ClusterProxy:                 bootstrapClusterProxy,
-		ConfigCluster:                configCluster,
-		WaitForClusterIntervals:      e2eConfig.GetIntervals("", "wait-cluster"),
-		WaitForControlPlaneIntervals: e2eConfig.GetIntervals("", "wait-control-plane"),
-		WaitForMachineDeployments:    e2eConfig.GetIntervals("", "wait-worker-nodes"),
-		ControlPlaneWaiters:          cpWaiters,
-	}, result)
-	return result.Cluster, result.ControlPlane
-}
-
-func CopyConfigMap(ctx context.Context, cl client.Client, cmName, fromNamespace, toNamespace string) {
+func CopyConfigMap(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, cl client.Client, cmName, fromNamespace, toNamespace string) {
 	cm := &corev1.ConfigMap{}
-	Expect(cl.Get(ctx, client.ObjectKey{Name: cmName, Namespace: fromNamespace}, cm)).To(Succeed())
-	cm.SetNamespace(toNamespace)
-	cm.SetResourceVersion("")
-	framework.EnsureNamespace(ctx, cl, toNamespace)
-	err := cl.Create(ctx, cm.DeepCopy())
-	if !apierrors.IsAlreadyExists(err) {
-		Expect(err).To(Succeed())
-	}
+	Eventually(func(g Gomega) {
+		g.Expect(cl.Get(ctx, client.ObjectKey{Name: cmName, Namespace: fromNamespace}, cm)).To(Succeed())
+		cm.SetNamespace(toNamespace)
+		cm.SetResourceVersion("")
+		framework.EnsureNamespace(ctx, cl, toNamespace)
+		err := cl.Create(ctx, cm.DeepCopy())
+		if !apierrors.IsAlreadyExists(err) {
+			g.Expect(err).To(Succeed())
+		}
+	}, input.WaitForControlPlaneIntervals...).Should(Succeed())
 }

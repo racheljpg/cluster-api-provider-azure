@@ -21,12 +21,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/maps"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -43,13 +42,13 @@ type ManagedMachinePoolScopeParams struct {
 	ManagedMachinePool
 	Client                   client.Client
 	Cluster                  *clusterv1.Cluster
-	ControlPlane             *infrav1exp.AzureManagedControlPlane
+	ControlPlane             *infrav1.AzureManagedControlPlane
 	ManagedControlPlaneScope azure.ManagedClusterScoper
 }
 
 // ManagedMachinePool defines the scope interface for a managed machine pool.
 type ManagedMachinePool struct {
-	InfraMachinePool *infrav1exp.AzureManagedMachinePool
+	InfraMachinePool *infrav1.AzureManagedMachinePool
 	MachinePool      *expv1.MachinePool
 }
 
@@ -98,8 +97,8 @@ type ManagedMachinePoolScope struct {
 	azure.ManagedClusterScoper
 	Cluster          *clusterv1.Cluster
 	MachinePool      *expv1.MachinePool
-	ControlPlane     *infrav1exp.AzureManagedControlPlane
-	InfraMachinePool *infrav1exp.AzureManagedMachinePool
+	ControlPlane     *infrav1.AzureManagedControlPlane
+	InfraMachinePool *infrav1.AzureManagedMachinePool
 }
 
 // PatchObject persists the cluster configuration and status.
@@ -135,14 +134,26 @@ func (s *ManagedMachinePoolScope) Name() string {
 	return s.InfraMachinePool.Name
 }
 
+// SetSubnetName updates AzureManagedMachinePool.SubnetName if AzureManagedMachinePool.SubnetName is empty with s.ControlPlane.Spec.VirtualNetwork.Subnet.Name.
+func (s *ManagedMachinePoolScope) SetSubnetName() {
+	s.InfraMachinePool.Spec.SubnetName = getAgentPoolSubnet(s.ControlPlane, s.InfraMachinePool)
+}
+
 // AgentPoolSpec returns an azure.ResourceSpecGetter for currently reconciled AzureManagedMachinePool.
 func (s *ManagedMachinePoolScope) AgentPoolSpec() azure.ResourceSpecGetter {
 	return buildAgentPoolSpec(s.ControlPlane, s.MachinePool, s.InfraMachinePool, s.AgentPoolAnnotations())
 }
 
-func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane,
+func getAgentPoolSubnet(controlPlane *infrav1.AzureManagedControlPlane, infraMachinePool *infrav1.AzureManagedMachinePool) *string {
+	if infraMachinePool.Spec.SubnetName == nil {
+		return pointer.String(controlPlane.Spec.VirtualNetwork.Subnet.Name)
+	}
+	return infraMachinePool.Spec.SubnetName
+}
+
+func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 	machinePool *expv1.MachinePool,
-	managedMachinePool *infrav1exp.AzureManagedMachinePool,
+	managedMachinePool *infrav1.AzureManagedMachinePool,
 	agentPoolAnnotations map[string]string) azure.ResourceSpecGetter {
 	var normalizedVersion *string
 	if machinePool.Spec.Template.Spec.Version != nil {
@@ -156,7 +167,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 	}
 
 	agentPoolSpec := &agentpools.AgentPoolSpec{
-		Name:          to.String(managedMachinePool.Spec.Name),
+		Name:          pointer.StringDeref(managedMachinePool.Spec.Name, ""),
 		ResourceGroup: managedControlPlane.Spec.ResourceGroupName,
 		Cluster:       managedControlPlane.Name,
 		SKU:           managedMachinePool.Spec.SKU,
@@ -167,19 +178,20 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 			managedControlPlane.Spec.SubscriptionID,
 			managedControlPlane.Spec.VirtualNetwork.ResourceGroup,
 			managedControlPlane.Spec.VirtualNetwork.Name,
-			managedControlPlane.Spec.VirtualNetwork.Subnet.Name,
+			pointer.StringDeref(getAgentPoolSubnet(managedControlPlane, managedMachinePool), ""),
 		),
 		Mode:                 managedMachinePool.Spec.Mode,
 		MaxPods:              managedMachinePool.Spec.MaxPods,
 		AvailabilityZones:    managedMachinePool.Spec.AvailabilityZones,
 		OsDiskType:           managedMachinePool.Spec.OsDiskType,
 		EnableUltraSSD:       managedMachinePool.Spec.EnableUltraSSD,
-		Headers:              maps.FilterByKeyPrefix(agentPoolAnnotations, azure.CustomHeaderPrefix),
+		Headers:              maps.FilterByKeyPrefix(agentPoolAnnotations, infrav1.CustomHeaderPrefix),
 		EnableNodePublicIP:   managedMachinePool.Spec.EnableNodePublicIP,
 		NodePublicIPPrefixID: managedMachinePool.Spec.NodePublicIPPrefixID,
 		ScaleSetPriority:     managedMachinePool.Spec.ScaleSetPriority,
 		AdditionalTags:       managedMachinePool.Spec.AdditionalTags,
 		KubeletDiskType:      managedMachinePool.Spec.KubeletDiskType,
+		LinuxOSConfig:        managedMachinePool.Spec.LinuxOSConfig,
 	}
 
 	if managedMachinePool.Spec.OSDiskSizeGB != nil {
@@ -195,7 +207,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 	}
 
 	if managedMachinePool.Spec.Scaling != nil {
-		agentPoolSpec.EnableAutoScaling = to.BoolPtr(true)
+		agentPoolSpec.EnableAutoScaling = pointer.Bool(true)
 		agentPoolSpec.MaxCount = managedMachinePool.Spec.Scaling.MaxSize
 		agentPoolSpec.MinCount = managedMachinePool.Spec.Scaling.MinSize
 	}
@@ -203,7 +215,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1exp.AzureManagedControlPlane
 	if len(managedMachinePool.Spec.NodeLabels) > 0 {
 		agentPoolSpec.NodeLabels = make(map[string]*string, len(managedMachinePool.Spec.NodeLabels))
 		for k, v := range managedMachinePool.Spec.NodeLabels {
-			agentPoolSpec.NodeLabels[k] = to.StringPtr(v)
+			agentPoolSpec.NodeLabels[k] = pointer.String(v)
 		}
 	}
 

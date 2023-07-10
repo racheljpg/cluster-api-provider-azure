@@ -35,7 +35,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/identity"
 	"sigs.k8s.io/cluster-api-provider-azure/util/system"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -68,7 +67,7 @@ type AzureClusterCredentialsProvider struct {
 // ManagedControlPlaneCredentialsProvider wraps AzureCredentialsProvider with AzureManagedControlPlane.
 type ManagedControlPlaneCredentialsProvider struct {
 	AzureCredentialsProvider
-	AzureManagedControlPlane *infrav1exp.AzureManagedControlPlane
+	AzureManagedControlPlane *infrav1.AzureManagedControlPlane
 }
 
 var _ CredentialsProvider = (*AzureClusterCredentialsProvider)(nil)
@@ -107,7 +106,7 @@ func (p *AzureClusterCredentialsProvider) GetAuthorizer(ctx context.Context, res
 }
 
 // NewManagedControlPlaneCredentialsProvider creates a new ManagedControlPlaneCredentialsProvider from the supplied inputs.
-func NewManagedControlPlaneCredentialsProvider(ctx context.Context, kubeClient client.Client, managedControlPlane *infrav1exp.AzureManagedControlPlane) (*ManagedControlPlaneCredentialsProvider, error) {
+func NewManagedControlPlaneCredentialsProvider(ctx context.Context, kubeClient client.Client, managedControlPlane *infrav1.AzureManagedControlPlane) (*ManagedControlPlaneCredentialsProvider, error) {
 	if managedControlPlane.Spec.IdentityRef == nil {
 		return nil, errors.New("failed to generate new ManagedControlPlaneCredentialsProvider from empty identityName")
 	}
@@ -251,9 +250,9 @@ func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1
 				aadpodv1.BehaviorKey: "namespaced",
 			},
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName:                  clusterMeta.Name,
-				infrav1.ClusterLabelNamespace:               clusterMeta.Namespace,
-				clusterctl.ClusterctlMoveHierarchyLabelName: "true",
+				clusterv1.ClusterNameLabel:              clusterMeta.Name,
+				infrav1.ClusterLabelNamespace:           clusterMeta.Namespace,
+				clusterctl.ClusterctlMoveHierarchyLabel: "true",
 			},
 		},
 		Spec: aadpodv1.AzureIdentitySpec{
@@ -280,9 +279,9 @@ func createAzureIdentityWithBindings(ctx context.Context, azureIdentity *infrav1
 			Name:      fmt.Sprintf("%s-binding", copiedIdentity.Name),
 			Namespace: copiedIdentity.Namespace,
 			Labels: map[string]string{
-				clusterv1.ClusterLabelName:                  clusterMeta.Name,
-				infrav1.ClusterLabelNamespace:               clusterMeta.Namespace,
-				clusterctl.ClusterctlMoveHierarchyLabelName: "true",
+				clusterv1.ClusterNameLabel:              clusterMeta.Name,
+				infrav1.ClusterLabelNamespace:           clusterMeta.Namespace,
+				clusterctl.ClusterctlMoveHierarchyLabel: "true",
 			},
 		},
 		Spec: aadpodv1.AzureIdentityBindingSpec{

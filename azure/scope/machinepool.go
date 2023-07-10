@@ -18,13 +18,13 @@ package scope
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"strings"
-	"time"
 
-	azureautorest "github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,7 +122,7 @@ func (m *MachinePoolScope) ScaleSetSpec() azure.ScaleSetSpec {
 	return azure.ScaleSetSpec{
 		Name:                         m.Name(),
 		Size:                         m.AzureMachinePool.Spec.Template.VMSize,
-		Capacity:                     int64(to.Int32(m.MachinePool.Spec.Replicas)),
+		Capacity:                     int64(pointer.Int32Deref(m.MachinePool.Spec.Replicas, 0)),
 		SSHKeyData:                   m.AzureMachinePool.Spec.Template.SSHPublicKey,
 		OSDisk:                       m.AzureMachinePool.Spec.Template.OSDisk,
 		DataDisks:                    m.AzureMachinePool.Spec.Template.DataDisks,
@@ -140,6 +140,7 @@ func (m *MachinePoolScope) ScaleSetSpec() azure.ScaleSetSpec {
 		FailureDomains:               m.MachinePool.Spec.FailureDomains,
 		TerminateNotificationTimeout: m.AzureMachinePool.Spec.Template.TerminateNotificationTimeout,
 		NetworkInterfaces:            m.AzureMachinePool.Spec.Template.NetworkInterfaces,
+		IPv6Enabled:                  m.IsIPv6Enabled(),
 		OrchestrationMode:            m.AzureMachinePool.Spec.OrchestrationMode,
 	}
 }
@@ -165,6 +166,30 @@ func (m *MachinePoolScope) ProviderID() string {
 // SetProviderID sets the AzureMachinePool providerID in spec.
 func (m *MachinePoolScope) SetProviderID(v string) {
 	m.AzureMachinePool.Spec.ProviderID = v
+}
+
+// SystemAssignedIdentityName returns the scope for the system assigned identity.
+func (m *MachinePoolScope) SystemAssignedIdentityName() string {
+	if m.AzureMachinePool.Spec.SystemAssignedIdentityRole != nil {
+		return m.AzureMachinePool.Spec.SystemAssignedIdentityRole.Name
+	}
+	return ""
+}
+
+// SystemAssignedIdentityScope returns the scope for the system assigned identity.
+func (m *MachinePoolScope) SystemAssignedIdentityScope() string {
+	if m.AzureMachinePool.Spec.SystemAssignedIdentityRole != nil {
+		return m.AzureMachinePool.Spec.SystemAssignedIdentityRole.Scope
+	}
+	return ""
+}
+
+// SystemAssignedIdentityDefinitionID returns the role definition ID for the system assigned identity.
+func (m *MachinePoolScope) SystemAssignedIdentityDefinitionID() string {
+	if m.AzureMachinePool.Spec.SystemAssignedIdentityRole != nil {
+		return m.AzureMachinePool.Spec.SystemAssignedIdentityRole.DefinitionID
+	}
+	return ""
 }
 
 // ProvisioningState returns the AzureMachinePool provisioning state.
@@ -198,7 +223,7 @@ func (m *MachinePoolScope) NeedsRequeue() bool {
 
 // DesiredReplicas returns the replica count on machine pool or 0 if machine pool replicas is nil.
 func (m MachinePoolScope) DesiredReplicas() int32 {
-	return to.Int32(m.MachinePool.Spec.Replicas)
+	return pointer.Int32Deref(m.MachinePool.Spec.Replicas, 0)
 }
 
 // MaxSurge returns the number of machines to surge, or 0 if the deployment strategy does not support surge.
@@ -245,7 +270,7 @@ func (m *MachinePoolScope) getMachinePoolMachines(ctx context.Context) ([]infrav
 	defer done()
 
 	labels := map[string]string{
-		clusterv1.ClusterLabelName:      m.ClusterName(),
+		clusterv1.ClusterNameLabel:      m.ClusterName(),
 		infrav1exp.MachinePoolNameLabel: m.AzureMachinePool.Name,
 	}
 	ampml := &infrav1exp.AzureMachinePoolMachineList{}
@@ -266,7 +291,7 @@ func (m *MachinePoolScope) applyAzureMachinePoolMachines(ctx context.Context) er
 	}
 
 	labels := map[string]string{
-		clusterv1.ClusterLabelName:      m.ClusterName(),
+		clusterv1.ClusterNameLabel:      m.ClusterName(),
 		infrav1exp.MachinePoolNameLabel: m.AzureMachinePool.Name,
 	}
 	ampml := &infrav1exp.AzureMachinePoolMachineList{}
@@ -280,7 +305,7 @@ func (m *MachinePoolScope) applyAzureMachinePoolMachines(ctx context.Context) er
 	}
 
 	// determine which machines need to be created to reflect the current state in Azure
-	azureMachinesByProviderID := m.vmssState.InstancesByProviderID()
+	azureMachinesByProviderID := m.vmssState.InstancesByProviderID(m.AzureMachinePool.Spec.OrchestrationMode)
 	for key, val := range azureMachinesByProviderID {
 		if _, ok := existingMachinesByProviderID[key]; !ok {
 			log.V(4).Info("creating AzureMachinePoolMachine", "providerID", key)
@@ -300,7 +325,7 @@ func (m *MachinePoolScope) applyAzureMachinePoolMachines(ctx context.Context) er
 			log.V(4).Info("deleting AzureMachinePoolMachine because it no longer exists in the VMSS", "providerID", key)
 			delete(existingMachinesByProviderID, key)
 			if err := m.client.Delete(ctx, &machine); err != nil {
-				return errors.Wrap(err, "failed deleting AzureMachinePoolMachine to reduce replica count")
+				return errors.Wrap(err, "failed deleting AzureMachinePoolMachine no longer existing in Azure")
 			}
 		}
 	}
@@ -316,6 +341,12 @@ func (m *MachinePoolScope) applyAzureMachinePoolMachines(ctx context.Context) er
 		futures.Has(m.AzureMachinePool, m.Name(), ScalesetsServiceName, infrav1.DeleteFuture) {
 		log.V(4).Info("exiting early due an in-progress long running operation on the ScaleSet")
 		// exit early to be less greedy about delete
+		return nil
+	}
+
+	// when replicas are externally managed, we do not want to scale down manually since that is handled by the external scaler.
+	if m.HasReplicasExternallyManaged(ctx) {
+		log.V(4).Info("exiting early due to replicas externally managed")
 		return nil
 	}
 
@@ -347,11 +378,11 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.createMachine")
 	defer done()
 
-	parsed, err := azureautorest.ParseResourceID(machine.ID)
+	parsed, err := arm.ParseResourceID(machine.ID)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to parse resource id %q", machine.ID))
 	}
-	instanceID := strings.ReplaceAll(parsed.ResourceName, "_", "-")
+	instanceID := strings.ReplaceAll(parsed.Name, "_", "-")
 
 	ampm := infrav1exp.AzureMachinePoolMachine{
 		ObjectMeta: metav1.ObjectMeta{
@@ -362,13 +393,13 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 					APIVersion:         infrav1exp.GroupVersion.String(),
 					Kind:               "AzureMachinePool",
 					Name:               m.AzureMachinePool.Name,
-					BlockOwnerDeletion: to.BoolPtr(true),
+					BlockOwnerDeletion: pointer.Bool(true),
 					UID:                m.AzureMachinePool.UID,
 				},
 			},
 			Labels: map[string]string{
 				m.ClusterName():                 string(infrav1.ResourceLifecycleOwned),
-				clusterv1.ClusterLabelName:      m.ClusterName(),
+				clusterv1.ClusterNameLabel:      m.ClusterName(),
 				infrav1exp.MachinePoolNameLabel: m.AzureMachinePool.Name,
 			},
 		},
@@ -450,35 +481,12 @@ func (m *MachinePoolScope) SetNotReady() {
 
 // SetFailureMessage sets the AzureMachinePool status failure message.
 func (m *MachinePoolScope) SetFailureMessage(v error) {
-	m.AzureMachinePool.Status.FailureMessage = pointer.StringPtr(v.Error())
+	m.AzureMachinePool.Status.FailureMessage = pointer.String(v.Error())
 }
 
 // SetFailureReason sets the AzureMachinePool status failure reason.
 func (m *MachinePoolScope) SetFailureReason(v capierrors.MachineStatusError) {
 	m.AzureMachinePool.Status.FailureReason = &v
-}
-
-// SetBootstrapConditions sets the AzureMachinePool BootstrapSucceeded condition based on the extension provisioning states.
-func (m *MachinePoolScope) SetBootstrapConditions(ctx context.Context, provisioningState string, extensionName string) error {
-	_, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.SetBootstrapConditions")
-	defer done()
-
-	switch infrav1.ProvisioningState(provisioningState) {
-	case infrav1.Succeeded:
-		log.V(4).Info("extension provisioning state is succeeded", "vm extension", extensionName, "scale set", m.Name())
-		conditions.MarkTrue(m.AzureMachinePool, infrav1.BootstrapSucceededCondition)
-		return nil
-	case infrav1.Creating:
-		log.V(4).Info("extension provisioning state is creating", "vm extension", extensionName, "scale set", m.Name())
-		conditions.MarkFalse(m.AzureMachinePool, infrav1.BootstrapSucceededCondition, infrav1.BootstrapInProgressReason, clusterv1.ConditionSeverityInfo, "")
-		return azure.WithTransientError(errors.New("extension is still in provisioning state. This likely means that bootstrapping has not yet completed on the VM"), 30*time.Second)
-	case infrav1.Failed:
-		log.V(4).Info("extension provisioning state is failed", "vm extension", extensionName, "scale set", m.Name())
-		conditions.MarkFalse(m.AzureMachinePool, infrav1.BootstrapSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityError, "")
-		return azure.WithTerminalError(errors.New("extension state failed. This likely means the Kubernetes node bootstrapping process failed or timed out. Check VM boot diagnostics logs to learn more"))
-	default:
-		return nil
-	}
 }
 
 // AdditionalTags merges AdditionalTags from the scope's AzureCluster and AzureMachinePool. If the same key is present in both,
@@ -536,6 +544,12 @@ func (m *MachinePoolScope) Close(ctx context.Context) error {
 		if err := m.updateReplicasAndProviderIDs(ctx); err != nil {
 			return errors.Wrap(err, "failed to update replicas and providerIDs")
 		}
+		if m.HasReplicasExternallyManaged(ctx) {
+			if err := m.updateCustomDataHash(ctx); err != nil {
+				// ignore errors to calculating the custom data hash since it's not absolutely crucial.
+				log.V(4).Error(err, "unable to update custom data hash, ignoring.")
+			}
+		}
 	}
 
 	if err := m.PatchObject(ctx); err != nil {
@@ -569,9 +583,42 @@ func (m *MachinePoolScope) GetBootstrapData(ctx context.Context) (string, error)
 	return base64.StdEncoding.EncodeToString(value), nil
 }
 
+// calculateBootstrapDataHash calculates the sha256 hash of the bootstrap data.
+func (m *MachinePoolScope) calculateBootstrapDataHash(ctx context.Context) (string, error) {
+	bootstrapData, err := m.GetBootstrapData(ctx)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	n, err := io.WriteString(h, bootstrapData)
+	if err != nil || n == 0 {
+		return "", fmt.Errorf("unable to write custom data (bytes written: %q): %w", n, err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// HasBootstrapDataChanges calculates the sha256 hash of the bootstrap data and compares it with the saved hash in AzureMachinePool.Status.
+func (m *MachinePoolScope) HasBootstrapDataChanges(ctx context.Context) (bool, error) {
+	newHash, err := m.calculateBootstrapDataHash(ctx)
+	if err != nil {
+		return false, err
+	}
+	return m.AzureMachinePool.GetAnnotations()[azure.CustomDataHashAnnotation] != newHash, nil
+}
+
+// updateCustomDataHash calculates the sha256 hash of the bootstrap data and saves it in AzureMachinePool.Status.
+func (m *MachinePoolScope) updateCustomDataHash(ctx context.Context) error {
+	newHash, err := m.calculateBootstrapDataHash(ctx)
+	if err != nil {
+		return err
+	}
+	m.SetAnnotation(azure.CustomDataHashAnnotation, newHash)
+	return nil
+}
+
 // GetVMImage picks an image from the AzureMachinePool configuration, or uses a default one.
 func (m *MachinePoolScope) GetVMImage(ctx context.Context) (*infrav1.Image, error) {
-	_, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.GetVMImage")
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.GetVMImage")
 	defer done()
 
 	// Use custom Marketplace image, Image ID or a Shared Image Gallery image if provided
@@ -589,9 +636,9 @@ func (m *MachinePoolScope) GetVMImage(ctx context.Context) (*infrav1.Image, erro
 		runtime := m.AzureMachinePool.Annotations["runtime"]
 		windowsServerVersion := m.AzureMachinePool.Annotations["windowsServerVersion"]
 		log.V(4).Info("No image specified for machine, using default Windows Image", "machine", m.MachinePool.GetName(), "runtime", runtime, "windowsServerVersion", windowsServerVersion)
-		defaultImage, err = svc.GetDefaultWindowsImage(ctx, m.Location(), to.String(m.MachinePool.Spec.Template.Spec.Version), runtime, windowsServerVersion)
+		defaultImage, err = svc.GetDefaultWindowsImage(ctx, m.Location(), pointer.StringDeref(m.MachinePool.Spec.Template.Spec.Version, ""), runtime, windowsServerVersion)
 	} else {
-		defaultImage, err = svc.GetDefaultUbuntuImage(ctx, m.Location(), to.String(m.MachinePool.Spec.Template.Spec.Version))
+		defaultImage, err = svc.GetDefaultUbuntuImage(ctx, m.Location(), pointer.StringDeref(m.MachinePool.Spec.Template.Spec.Version, ""))
 	}
 
 	if err != nil {
@@ -611,11 +658,13 @@ func (m *MachinePoolScope) RoleAssignmentSpecs(principalID *string) []azure.Reso
 	roles := make([]azure.ResourceSpecGetter, 1)
 	if m.HasSystemAssignedIdentity() {
 		roles[0] = &roleassignments.RoleAssignmentSpec{
-			Name:          m.AzureMachinePool.Spec.RoleAssignmentName,
-			MachineName:   m.Name(),
-			ResourceGroup: m.ResourceGroup(),
-			ResourceType:  azure.VirtualMachineScaleSet,
-			PrincipalID:   principalID,
+			Name:             m.SystemAssignedIdentityName(),
+			MachineName:      m.Name(),
+			ResourceGroup:    m.ResourceGroup(),
+			ResourceType:     azure.VirtualMachineScaleSet,
+			Scope:            m.SystemAssignedIdentityScope(),
+			RoleDefinitionID: m.SystemAssignedIdentityDefinitionID(),
+			PrincipalID:      principalID,
 		}
 		return roles
 	}

@@ -27,12 +27,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/system"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -53,7 +53,7 @@ type AzureIdentityReconciler struct {
 
 // SetupWithManager initializes this controller with a manager.
 func (r *AzureIdentityReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
-	_, log, done := tele.StartSpanWithLogger(ctx,
+	ctx, log, done := tele.StartSpanWithLogger(ctx,
 		"controllers.AzureIdentityReconciler.SetupWithManager",
 		tele.KVP("controller", "AzureIdentity"),
 	)
@@ -70,10 +70,10 @@ func (r *AzureIdentityReconciler) SetupWithManager(ctx context.Context, mgr ctrl
 		return errors.Wrap(err, "error creating controller")
 	}
 
-	// Add a watch on infrav1exp.AzureManagedControlPlane if aks is enabled.
-	if feature.Gates.Enabled(feature.AKS) {
+	// Add a watch on infrav1.AzureManagedControlPlane if Cluster API 'MachinePool' feature is enabled.
+	if feature.Gates.Enabled(capifeature.MachinePool) {
 		if err = c.Watch(
-			&source.Kind{Type: &infrav1exp.AzureManagedControlPlane{}},
+			&source.Kind{Type: &infrav1.AzureManagedControlPlane{}},
 			&handler.EnqueueRequestForObject{},
 			predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue),
 		); err != nil {
@@ -120,9 +120,9 @@ func (r *AzureIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	identityOwner = azureCluster
 	err := r.Get(ctx, req.NamespacedName, azureCluster)
 	if err != nil && apierrors.IsNotFound(err) {
-		if feature.Gates.Enabled(feature.AKS) {
+		if feature.Gates.Enabled(capifeature.MachinePool) {
 			// Fetch the AzureManagedControlPlane instance
-			azureManagedControlPlane := &infrav1exp.AzureManagedControlPlane{}
+			azureManagedControlPlane := &infrav1.AzureManagedControlPlane{}
 			identityOwner = azureManagedControlPlane
 			err = r.Get(ctx, req.NamespacedName, azureManagedControlPlane)
 			if err != nil && apierrors.IsNotFound(err) {
@@ -154,7 +154,7 @@ func (r *AzureIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		log = log.WithValues("azureidentitybinding", b.Name)
 
 		binding := b
-		clusterName := binding.ObjectMeta.Labels[clusterv1.ClusterLabelName]
+		clusterName := binding.ObjectMeta.Labels[clusterv1.ClusterNameLabel]
 		clusterNamespace := binding.ObjectMeta.Labels[infrav1.ClusterLabelNamespace]
 
 		key := client.ObjectKey{Name: clusterName, Namespace: clusterNamespace}
@@ -172,8 +172,8 @@ func (r *AzureIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					return ctrl.Result{}, errors.Wrap(err, "failed to get AzureCluster")
 				}
 			}
-		case infrav1exp.AzureManagedControlPlane:
-			azManagedControlPlane := &infrav1exp.AzureManagedControlPlane{}
+		case infrav1.AzureManagedControlPlane:
+			azManagedControlPlane := &infrav1.AzureManagedControlPlane{}
 			if err := r.Get(ctx, key, azManagedControlPlane); err != nil {
 				if apierrors.IsNotFound(err) {
 					bindingsToDelete = append(bindingsToDelete, b)

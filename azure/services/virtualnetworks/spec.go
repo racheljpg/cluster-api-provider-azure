@@ -20,19 +20,20 @@ import (
 	"context"
 
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/to"
+	"k8s.io/utils/pointer"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 )
 
 // VNetSpec defines the specification for a Virtual Network.
 type VNetSpec struct {
-	ResourceGroup  string
-	Name           string
-	CIDRs          []string
-	Location       string
-	ClusterName    string
-	AdditionalTags infrav1.Tags
+	ResourceGroup    string
+	Name             string
+	CIDRs            []string
+	Location         string
+	ExtendedLocation *infrav1.ExtendedLocationSpec
+	ClusterName      string
+	AdditionalTags   infrav1.Tags
 }
 
 // ResourceName returns the name of the vnet.
@@ -60,11 +61,12 @@ func (s *VNetSpec) Parameters(ctx context.Context, existing interface{}) (interf
 		Tags: converters.TagsToMap(infrav1.Build(infrav1.BuildParams{
 			ClusterName: s.ClusterName,
 			Lifecycle:   infrav1.ResourceLifecycleOwned,
-			Name:        to.StringPtr(s.Name),
-			Role:        to.StringPtr(infrav1.CommonRole),
+			Name:        pointer.String(s.Name),
+			Role:        pointer.String(infrav1.CommonRole),
 			Additional:  s.AdditionalTags,
 		})),
-		Location: to.StringPtr(s.Location),
+		Location:         pointer.String(s.Location),
+		ExtendedLocation: converters.ExtendedLocationToNetworkSDK(s.ExtendedLocation),
 		VirtualNetworkPropertiesFormat: &network.VirtualNetworkPropertiesFormat{
 			AddressSpace: &network.AddressSpace{
 				AddressPrefixes: &s.CIDRs,

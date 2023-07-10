@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-10-01/resources"
-	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
+	"k8s.io/utils/pointer"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -57,6 +57,14 @@ func (s *Service) Name() string {
 	return serviceName
 }
 
+// Some resource types are always assumed to be managed by CAPZ whether or not
+// they have the canonical "owned" tag applied to most resources. The annotation
+// key for those types should be listed here so their tags are always
+// interpreted as managed.
+var alwaysManagedAnnotations = map[string]struct{}{
+	azure.ManagedClusterTagsLastAppliedAnnotation: {},
+}
+
 // Reconcile ensures tags are correct.
 func (s *Service) Reconcile(ctx context.Context) error {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "tags.Service.Reconcile")
@@ -72,7 +80,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			tags = existingTags.Properties.Tags
 		}
 
-		if !s.isResourceManaged(tags) {
+		if _, alwaysManaged := alwaysManagedAnnotations[tagsSpec.Annotation]; !alwaysManaged && !s.isResourceManaged(tags) {
 			log.V(4).Info("Skipping tags reconcile for not managed resource")
 			continue
 		}
@@ -87,7 +95,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			if len(createdOrUpdated) > 0 {
 				createdOrUpdatedTags := make(map[string]*string)
 				for k, v := range createdOrUpdated {
-					createdOrUpdatedTags[k] = to.StringPtr(v)
+					createdOrUpdatedTags[k] = pointer.String(v)
 				}
 
 				if _, err := s.client.UpdateAtScope(ctx, tagsSpec.Scope, resources.TagsPatchResource{Operation: "Merge", Properties: &resources.Tags{Tags: createdOrUpdatedTags}}); err != nil {
@@ -98,19 +106,20 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			if len(deleted) > 0 {
 				deletedTags := make(map[string]*string)
 				for k, v := range deleted {
-					deletedTags[k] = to.StringPtr(v)
+					deletedTags[k] = pointer.String(v)
 				}
 
 				if _, err := s.client.UpdateAtScope(ctx, tagsSpec.Scope, resources.TagsPatchResource{Operation: "Delete", Properties: &resources.Tags{Tags: deletedTags}}); err != nil {
 					return errors.Wrap(err, "cannot update tags")
 				}
 			}
-
-			// We also need to update the annotation if anything changed.
-			if err := s.Scope.UpdateAnnotationJSON(tagsSpec.Annotation, newAnnotation); err != nil {
-				return err
-			}
 			log.V(2).Info("successfully updated tags")
+		}
+
+		// We also need to update the annotation even if nothing changed to
+		// ensure it's set immediately following resource creation.
+		if err := s.Scope.UpdateAnnotationJSON(tagsSpec.Annotation, newAnnotation); err != nil {
+			return err
 		}
 	}
 	return nil

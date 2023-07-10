@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	azureautorest "github.com/Azure/go-autorest/autorest/azure"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
@@ -42,6 +42,7 @@ type (
 		InstanceID() string
 		ProviderID() string
 		ScaleSetName() string
+		OrchestrationMode() infrav1.OrchestrationModeType
 		SetVMSSVM(vmssvm *azure.VMSSVM)
 	}
 
@@ -77,10 +78,11 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		vmssName      = s.Scope.ScaleSetName()
 		instanceID    = s.Scope.InstanceID()
 		providerID    = s.Scope.ProviderID()
+		isFlex        = s.Scope.OrchestrationMode() == infrav1.FlexibleOrchestrationMode
 	)
 
 	// Fetch the latest instance or VM data. AzureMachinePoolReconciler handles model mutations.
-	if isFlex(instanceID) {
+	if isFlex {
 		resourceID := strings.TrimPrefix(providerID, azure.ProviderIDPrefix)
 		log.V(4).Info("VMSS is flex", "vmssName", vmssName, "providerID", providerID, "resourceID", resourceID)
 		// Using VMSS Flex, so fetch by resource ID.
@@ -91,7 +93,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			}
 			return errors.Wrap(err, "failed getting vm")
 		}
-		s.Scope.SetVMSSVM(converters.SDKVMToVMSSVM(vm))
+		s.Scope.SetVMSSVM(converters.SDKVMToVMSSVM(vm, infrav1.FlexibleOrchestrationMode))
 		return nil
 	}
 
@@ -116,6 +118,7 @@ func (s *Service) Delete(ctx context.Context) error {
 		vmssName      = s.Scope.ScaleSetName()
 		instanceID    = s.Scope.InstanceID()
 		providerID    = s.Scope.ProviderID()
+		isFlex        = s.Scope.OrchestrationMode() == infrav1.FlexibleOrchestrationMode
 	)
 
 	ctx, log, done := tele.StartSpanWithLogger(
@@ -127,14 +130,10 @@ func (s *Service) Delete(ctx context.Context) error {
 	)
 	defer done()
 
-	if isFlex(instanceID) {
+	if isFlex {
 		return s.deleteVMSSFlexVM(ctx, strings.TrimPrefix(providerID, azure.ProviderIDPrefix))
 	}
 	return s.deleteVMSSUniformInstance(ctx, resourceGroup, vmssName, instanceID, log)
-}
-
-func isFlex(instanceID string) bool {
-	return instanceID == ""
 }
 
 func (s *Service) deleteVMSSFlexVM(ctx context.Context, resourceID string) error {
@@ -144,19 +143,15 @@ func (s *Service) deleteVMSSFlexVM(ctx context.Context, resourceID string) error
 	defer func() {
 		if vm, err := s.VMClient.GetByID(ctx, resourceID); err == nil && vm.VirtualMachineProperties != nil {
 			log.V(4).Info("vmss vm delete in progress", "state", vm.ProvisioningState)
-			s.Scope.SetVMSSVM(converters.SDKVMToVMSSVM(vm))
+			s.Scope.SetVMSSVM(converters.SDKVMToVMSSVM(vm, s.Scope.OrchestrationMode()))
 		}
 	}()
 
-	parsed, err := azureautorest.ParseResourceID(resourceID)
+	parsed, err := arm.ParseResourceID(resourceID)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to parse resource id %q", resourceID))
 	}
-
-	resourceGroup := parsed.ResourceGroup
-	resourceName := strings.TrimPrefix(s.Scope.ProviderID(), azure.ProviderIDPrefix)
-	resourceNameSplits := strings.Split(resourceName, "/")
-	resourceName = resourceNameSplits[len(resourceNameSplits)-3] + "_" + resourceNameSplits[len(resourceNameSplits)-1]
+	resourceGroup, resourceName := parsed.ResourceGroupName, parsed.Name
 
 	log.V(4).Info("entering delete")
 	future := s.Scope.GetLongRunningOperationState(resourceName, serviceName, infrav1.DeleteFuture)

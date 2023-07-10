@@ -24,42 +24,54 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// SetupWebhookWithManager sets up and registers the webhook with the manager.
-func (amp *AzureMachinePool) SetupWebhookWithManager(mgr ctrl.Manager) error {
+// SetupAzureMachinePoolWebhookWithManager sets up and registers the webhook with the manager.
+func SetupAzureMachinePoolWebhookWithManager(mgr ctrl.Manager) error {
+	ampw := &azureMachinePoolWebhook{Client: mgr.GetClient()}
 	return ctrl.NewWebhookManagedBy(mgr).
-		For(amp).
+		For(&AzureMachinePool{}).
+		WithDefaulter(ampw).
+		WithValidator(ampw).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/mutate-infrastructure-cluster-x-k8s-io-v1beta1-azuremachinepool,mutating=true,failurePolicy=fail,groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepools,verbs=create;update,versions=v1beta1,name=default.azuremachinepool.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
+// azureMachinePoolWebhook implements a validating and defaulting webhook for AzureMachinePool.
+type azureMachinePoolWebhook struct {
+	Client client.Client
+}
+
 // Default implements webhook.Defaulter so a webhook will be registered for the type.
-func (amp *AzureMachinePool) Default(client client.Client) {
-	if err := amp.SetDefaultSSHPublicKey(); err != nil {
-		ctrl.Log.WithName("AzureMachinePoolLogger").Error(err, "SetDefaultSshPublicKey failed")
+func (ampw *azureMachinePoolWebhook) Default(ctx context.Context, obj runtime.Object) error {
+	amp, ok := obj.(*AzureMachinePool)
+	if !ok {
+		return apierrors.NewBadRequest("expected an AzureMachinePool")
 	}
-	amp.SetIdentityDefaults()
-	amp.SetDiagnosticsDefaults()
-	amp.SetNetworkInterfacesDefaults()
+	return amp.SetDefaults(ampw.Client)
 }
 
 // +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremachinepool,mutating=false,failurePolicy=fail,groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepools,versions=v1beta1,name=validation.azuremachinepool.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (amp *AzureMachinePool) ValidateCreate(client client.Client) error {
-	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the web hook
+func (ampw *azureMachinePoolWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) error {
+	amp, ok := obj.(*AzureMachinePool)
+	if !ok {
+		return apierrors.NewBadRequest("expected an AzureMachinePool")
+	}
+	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
 	// must prevent creating new objects in case the feature flag is disabled.
 	if !feature.Gates.Enabled(capifeature.MachinePool) {
 		return field.Forbidden(
@@ -67,16 +79,20 @@ func (amp *AzureMachinePool) ValidateCreate(client client.Client) error {
 			"can be set only if the MachinePool feature flag is enabled",
 		)
 	}
-	return amp.Validate(nil, client)
+	return amp.Validate(nil, ampw.Client)
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (amp *AzureMachinePool) ValidateUpdate(old runtime.Object, client client.Client) error {
-	return amp.Validate(old, client)
+func (ampw *azureMachinePoolWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) error {
+	amp, ok := newObj.(*AzureMachinePool)
+	if !ok {
+		return apierrors.NewBadRequest("expected an AzureMachinePool")
+	}
+	return amp.Validate(oldObj, ampw.Client)
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (amp *AzureMachinePool) ValidateDelete(client.Client) error {
+func (ampw *azureMachinePoolWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) error {
 	return nil
 }
 
@@ -91,6 +107,7 @@ func (amp *AzureMachinePool) Validate(old runtime.Object, client client.Client) 
 		amp.ValidateOrchestrationMode(client),
 		amp.ValidateStrategy(),
 		amp.ValidateSystemAssignedIdentity(old),
+		amp.ValidateSystemAssignedIdentityRole,
 		amp.ValidateNetwork,
 	}
 
@@ -191,16 +208,48 @@ func (amp *AzureMachinePool) ValidateSystemAssignedIdentity(old runtime.Object) 
 				return fmt.Errorf("unexpected type for old azure machine pool object. Expected: %q, Got: %q",
 					"AzureMachinePool", reflect.TypeOf(old))
 			}
-			oldRole = oldMachinePool.Spec.RoleAssignmentName
+			if amp.Spec.SystemAssignedIdentityRole != nil {
+				oldRole = oldMachinePool.Spec.SystemAssignedIdentityRole.Name
+			}
+		}
+
+		roleAssignmentName := ""
+		if amp.Spec.SystemAssignedIdentityRole != nil {
+			roleAssignmentName = amp.Spec.SystemAssignedIdentityRole.Name
 		}
 
 		fldPath := field.NewPath("roleAssignmentName")
-		if errs := infrav1.ValidateSystemAssignedIdentity(amp.Spec.Identity, oldRole, amp.Spec.RoleAssignmentName, fldPath); len(errs) > 0 {
+		if errs := infrav1.ValidateSystemAssignedIdentity(amp.Spec.Identity, oldRole, roleAssignmentName, fldPath); len(errs) > 0 {
 			return kerrors.NewAggregate(errs.ToAggregate().Errors())
 		}
 
 		return nil
 	}
+}
+
+// ValidateSystemAssignedIdentityRole validates the scope and roleDefinitionID for the system-assigned identity.
+func (amp *AzureMachinePool) ValidateSystemAssignedIdentityRole() error {
+	var allErrs field.ErrorList
+	if amp.Spec.RoleAssignmentName != "" && amp.Spec.SystemAssignedIdentityRole != nil && amp.Spec.SystemAssignedIdentityRole.Name != "" {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("systemAssignedIdentityRole"), amp.Spec.SystemAssignedIdentityRole.Name, "cannot set both roleAssignmentName and systemAssignedIdentityRole.name"))
+	}
+	if amp.Spec.Identity == infrav1.VMIdentitySystemAssigned {
+		if amp.Spec.SystemAssignedIdentityRole.DefinitionID == "" {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("systemAssignedIdentityRole", "DefinitionID"), amp.Spec.SystemAssignedIdentityRole.DefinitionID, "the roleDefinitionID field cannot be empty"))
+		}
+		if amp.Spec.SystemAssignedIdentityRole.Scope == "" {
+			allErrs = append(allErrs, field.Invalid(field.NewPath("systemAssignedIdentityRole", "Scope"), amp.Spec.SystemAssignedIdentityRole.Scope, "the scope field cannot be empty"))
+		}
+	}
+	if amp.Spec.Identity != infrav1.VMIdentitySystemAssigned && amp.Spec.SystemAssignedIdentityRole != nil {
+		allErrs = append(allErrs, field.Invalid(field.NewPath("systemAssignedIdentityRole"), amp.Spec.SystemAssignedIdentityRole, "systemAssignedIdentityRole can only be set when identity is set to 'SystemAssigned'"))
+	}
+
+	if len(allErrs) > 0 {
+		return kerrors.NewAggregate(allErrs.ToAggregate().Errors())
+	}
+
+	return nil
 }
 
 // ValidateDiagnostics validates the Diagnostic spec.
@@ -249,22 +298,15 @@ func (amp *AzureMachinePool) ValidateOrchestrationMode(c client.Client) func() e
 	return func() error {
 		// Only Flexible orchestration mode requires validation.
 		if amp.Spec.OrchestrationMode == infrav1.OrchestrationModeType(compute.OrchestrationModeFlexible) {
-			// Find the owner MachinePool
-			ownerMachinePool := &expv1.MachinePool{}
-			key := client.ObjectKey{
-				Namespace: amp.Namespace,
-				Name:      amp.Name,
+			parent, err := azure.FindParentMachinePoolWithRetry(amp.Name, c, 5)
+			if err != nil {
+				return errors.Wrap(err, "failed to find parent MachinePool")
 			}
-			ctx := context.Background()
-			if err := c.Get(ctx, key, ownerMachinePool); err != nil {
-				return errors.Wrap(err, "failed to get owner MachinePool")
-			}
-
 			// Kubernetes must be >= 1.26.0 for cloud-provider-azure Helm chart support.
-			if ownerMachinePool.Spec.Template.Spec.Version == nil {
+			if parent.Spec.Template.Spec.Version == nil {
 				return errors.New("could not find Kubernetes version in MachinePool")
 			}
-			k8sVersion, err := semver.ParseTolerant(*ownerMachinePool.Spec.Template.Spec.Version)
+			k8sVersion, err := semver.ParseTolerant(*parent.Spec.Template.Spec.Version)
 			if err != nil {
 				return errors.Wrap(err, "failed to parse Kubernetes version")
 			}
