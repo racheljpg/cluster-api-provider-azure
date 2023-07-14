@@ -24,7 +24,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +39,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/controllers/noderefutil"
 	capierrors "sigs.k8s.io/cluster-api/errors"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/annotations"
@@ -130,7 +128,7 @@ func (m *MachinePoolScope) ScaleSetSpec() azure.ScaleSetSpec {
 		VNetName:                     m.Vnet().Name,
 		VNetResourceGroup:            m.Vnet().ResourceGroup,
 		PublicLBName:                 m.OutboundLBName(infrav1.Node),
-		PublicLBAddressPoolName:      azure.GenerateOutboundBackendAddressPoolName(m.OutboundLBName(infrav1.Node)),
+		PublicLBAddressPoolName:      m.OutboundPoolName(infrav1.Node),
 		AcceleratedNetworking:        m.AzureMachinePool.Spec.Template.NetworkInterfaces[0].AcceleratedNetworking,
 		Identity:                     m.AzureMachinePool.Spec.Identity,
 		UserAssignedIdentities:       m.AzureMachinePool.Spec.UserAssignedIdentities,
@@ -154,13 +152,13 @@ func (m *MachinePoolScope) Name() string {
 	return m.AzureMachinePool.Name
 }
 
-// ProviderID returns the AzureMachinePool ID by parsing Spec.FakeProviderID.
+// ProviderID returns the AzureMachinePool ID by parsing Spec.ProviderID.
 func (m *MachinePoolScope) ProviderID() string {
-	parsed, err := noderefutil.NewProviderID(m.AzureMachinePool.Spec.ProviderID)
+	resourceID, err := azure.ParseResourceID(m.AzureMachinePool.Spec.ProviderID)
 	if err != nil {
 		return ""
 	}
-	return parsed.ID()
+	return resourceID.Name
 }
 
 // SetProviderID sets the AzureMachinePool providerID in spec.
@@ -378,7 +376,7 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.createMachine")
 	defer done()
 
-	parsed, err := arm.ParseResourceID(machine.ID)
+	parsed, err := azure.ParseResourceID(machine.ID)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to parse resource id %q", machine.ID))
 	}

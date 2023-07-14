@@ -222,7 +222,7 @@ github.com/docker/cli/cli/config
 github.com/docker/cli/cli/config/configfile
 github.com/docker/cli/cli/config/credentials
 github.com/docker/cli/cli/config/types
-# github.com/docker/distribution v2.8.1+incompatible
+# github.com/docker/distribution v2.8.2+incompatible
 ## explicit
 github.com/docker/distribution
 github.com/docker/distribution/digestset
@@ -1648,7 +1648,7 @@ sigs.k8s.io/cloud-provider-azure/pkg/provider/virtualmachine
 sigs.k8s.io/cloud-provider-azure/pkg/retry
 sigs.k8s.io/cloud-provider-azure/pkg/util/deepcopy
 sigs.k8s.io/cloud-provider-azure/pkg/version
-# sigs.k8s.io/cluster-api v1.4.2 => sigs.k8s.io/cluster-api v1.4.2
+# sigs.k8s.io/cluster-api v1.4.3 => sigs.k8s.io/cluster-api v1.4.3
 ## explicit; go 1.19
 sigs.k8s.io/cluster-api/api/v1alpha3
 sigs.k8s.io/cluster-api/api/v1alpha4
@@ -1724,7 +1724,7 @@ sigs.k8s.io/cluster-api/util/topology
 sigs.k8s.io/cluster-api/util/version
 sigs.k8s.io/cluster-api/util/yaml
 sigs.k8s.io/cluster-api/version
-# sigs.k8s.io/cluster-api/test v1.4.2
+# sigs.k8s.io/cluster-api/test v1.4.3
 ## explicit; go 1.19
 sigs.k8s.io/cluster-api/test/e2e
 sigs.k8s.io/cluster-api/test/e2e/internal/log
@@ -1925,4 +1925,4 @@ sigs.k8s.io/structured-merge-diff/v4/value
 # sigs.k8s.io/yaml v1.3.0
 ## explicit; go 1.12
 sigs.k8s.io/yaml
-# sigs.k8s.io/cluster-api => sigs.k8s.io/cluster-api v1.4.2
+# sigs.k8s.io/cluster-api => sigs.k8s.io/cluster-api v1.4.3
