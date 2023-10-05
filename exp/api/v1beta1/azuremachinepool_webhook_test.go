@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	guuid "github.com/google/uuid"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
@@ -34,7 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	utilfeature "k8s.io/component-base/featuregate/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -92,32 +92,32 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachinepool with marketplace image - full",
-			amp:     createMachinePoolWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0", pointer.Int(10)),
+			amp:     createMachinePoolWithMarketPlaceImage("PUB1234", "OFFER1234", "SKU1234", "1.0.0", ptr.To(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with marketplace image - missing publisher",
-			amp:     createMachinePoolWithMarketPlaceImage("", "OFFER1234", "SKU1234", "1.0.0", pointer.Int(10)),
+			amp:     createMachinePoolWithMarketPlaceImage("", "OFFER1234", "SKU1234", "1.0.0", ptr.To(10)),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachinepool with shared gallery image - full",
-			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(10)),
+			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", ptr.To(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with marketplace image - missing subscription",
-			amp:     createMachinePoolWithSharedImage("", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(10)),
+			amp:     createMachinePoolWithSharedImage("", "RG123", "NAME123", "GALLERY1", "1.0.0", ptr.To(10)),
 			wantErr: true,
 		},
 		{
 			name:    "azuremachinepool with image by - with id",
-			amp:     createMachinePoolWithImageByID("ID123", pointer.Int(10)),
+			amp:     createMachinePoolWithImageByID("ID123", ptr.To(10)),
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with image by - without id",
-			amp:     createMachinePoolWithImageByID("", pointer.Int(10)),
+			amp:     createMachinePoolWithImageByID("", ptr.To(10)),
 			wantErr: true,
 		},
 		{
@@ -132,7 +132,7 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachinepool with wrong terminate notification",
-			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", pointer.Int(35)),
+			amp:     createMachinePoolWithSharedImage("SUB123", "RG123", "NAME123", "GALLERY1", "1.0.0", ptr.To(35)),
 			wantErr: true,
 		},
 		{
@@ -146,8 +146,11 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "azuremachinepool with user assigned identity",
-			amp:     createMachinePoolWithUserAssignedIdentity([]string{"azure:://id1", "azure:://id2"}),
+			name: "azuremachinepool with user assigned identity",
+			amp: createMachinePoolWithUserAssignedIdentity([]string{
+				"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-20202-control-plane-7w265",
+				"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-20202-control-plane-a6b7d",
+			}),
 			wantErr: false,
 		},
 		{
@@ -219,19 +222,19 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachinepool with Flexible orchestration mode",
-			amp:     createMachinePoolWithOrchestrationMode(compute.OrchestrationModeFlexible),
+			amp:     createMachinePoolWithOrchestrationMode(armcompute.OrchestrationModeFlexible),
 			version: "v1.26.0",
 			wantErr: false,
 		},
 		{
 			name:    "azuremachinepool with Flexible orchestration mode and invalid Kubernetes version",
-			amp:     createMachinePoolWithOrchestrationMode(compute.OrchestrationModeFlexible),
+			amp:     createMachinePoolWithOrchestrationMode(armcompute.OrchestrationModeFlexible),
 			version: "v1.25.6",
 			wantErr: true,
 		},
 		{
 			name:          "azuremachinepool with Flexible orchestration mode and invalid Kubernetes version, no owner",
-			amp:           createMachinePoolWithOrchestrationMode(compute.OrchestrationModeFlexible),
+			amp:           createMachinePoolWithOrchestrationMode(armcompute.OrchestrationModeFlexible),
 			version:       "v1.25.6",
 			ownerNotFound: true,
 			wantErr:       true,
@@ -244,7 +247,7 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 			ampw := &azureMachinePoolWebhook{
 				Client: client,
 			}
-			err := ampw.ValidateCreate(context.Background(), tc.amp)
+			_, err := ampw.ValidateCreate(context.Background(), tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -385,7 +388,7 @@ func TestAzureMachinePool_ValidateUpdate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			ampw := &azureMachinePoolWebhook{}
-			err := ampw.ValidateUpdate(context.Background(), tc.oldAMP, tc.amp)
+			_, err := ampw.ValidateUpdate(context.Background(), tc.oldAMP, tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -628,7 +631,7 @@ func createMachinePoolWithStrategy(strategy AzureMachinePoolDeploymentStrategy) 
 	}
 }
 
-func createMachinePoolWithOrchestrationMode(mode compute.OrchestrationMode) *AzureMachinePool {
+func createMachinePoolWithOrchestrationMode(mode armcompute.OrchestrationMode) *AzureMachinePool {
 	return &AzureMachinePool{
 		Spec: AzureMachinePoolSpec{
 			OrchestrationMode: infrav1.OrchestrationModeType(mode),
@@ -659,7 +662,7 @@ func TestAzureMachinePool_ValidateCreateFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			defer tc.deferFunc()
 			ampw := &azureMachinePoolWebhook{}
-			err := ampw.ValidateCreate(context.Background(), tc.amp)
+			_, err := ampw.ValidateCreate(context.Background(), tc.amp)
 			g.Expect(err).To(HaveOccurred())
 		})
 	}
@@ -681,7 +684,7 @@ func getKnownValidAzureMachinePool() *AzureMachinePool {
 			Template: AzureMachinePoolMachineTemplate{
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
-				TerminateNotificationTimeout: pointer.Int(10),
+				TerminateNotificationTimeout: ptr.To(10),
 			},
 			Identity: infrav1.VMIdentitySystemAssigned,
 			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{

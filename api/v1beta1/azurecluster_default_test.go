@@ -21,8 +21,9 @@ import (
 	"reflect"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 func TestResourceGroupDefault(t *testing.T) {
@@ -139,7 +140,12 @@ func TestVnetDefaults(t *testing.T) {
 							},
 						},
 						NodeOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
+						},
+					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
 						},
 					},
 				},
@@ -153,6 +159,11 @@ func TestVnetDefaults(t *testing.T) {
 				},
 				Spec: AzureClusterSpec{
 					ResourceGroup: "cluster-test",
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
+						},
+					},
 				},
 			},
 			output: &AzureCluster{
@@ -168,6 +179,11 @@ func TestVnetDefaults(t *testing.T) {
 							VnetClassSpec: VnetClassSpec{
 								CIDRBlocks: []string{DefaultVnetCIDR},
 							},
+						},
+					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
 						},
 					},
 				},
@@ -188,6 +204,11 @@ func TestVnetDefaults(t *testing.T) {
 							},
 						},
 					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
+						},
+					},
 				},
 			},
 			output: &AzureCluster{
@@ -203,6 +224,11 @@ func TestVnetDefaults(t *testing.T) {
 							VnetClassSpec: VnetClassSpec{
 								CIDRBlocks: []string{"10.0.0.0/16"},
 							},
+						},
+					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
 						},
 					},
 				},
@@ -223,6 +249,11 @@ func TestVnetDefaults(t *testing.T) {
 							},
 						},
 					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
+						},
+					},
 				},
 			},
 			output: &AzureCluster{
@@ -238,6 +269,11 @@ func TestVnetDefaults(t *testing.T) {
 							VnetClassSpec: VnetClassSpec{
 								CIDRBlocks: []string{DefaultVnetCIDR, "2001:1234:5678:9a00::/56"},
 							},
+						},
+					},
+					AzureClusterClassSpec: AzureClusterClassSpec{
+						IdentityRef: &corev1.ObjectReference{
+							Kind: "AzureClusterIdentity",
 						},
 					},
 				},
@@ -656,10 +692,11 @@ func TestSubnetDefaults(t *testing.T) {
 												Description:      "allow port 50000",
 												Protocol:         "*",
 												Priority:         2202,
-												SourcePorts:      pointer.String("*"),
-												DestinationPorts: pointer.String("*"),
-												Source:           pointer.String("*"),
-												Destination:      pointer.String("*"),
+												SourcePorts:      ptr.To("*"),
+												DestinationPorts: ptr.To("*"),
+												Source:           ptr.To("*"),
+												Destination:      ptr.To("*"),
+												Action:           SecurityRuleActionAllow,
 											},
 										},
 									},
@@ -691,11 +728,104 @@ func TestSubnetDefaults(t *testing.T) {
 												Description:      "allow port 50000",
 												Protocol:         "*",
 												Priority:         2202,
-												SourcePorts:      pointer.String("*"),
-												DestinationPorts: pointer.String("*"),
-												Source:           pointer.String("*"),
-												Destination:      pointer.String("*"),
+												SourcePorts:      ptr.To("*"),
+												DestinationPorts: ptr.To("*"),
+												Source:           ptr.To("*"),
+												Destination:      ptr.To("*"),
 												Direction:        SecurityRuleDirectionInbound,
+												Action:           SecurityRuleActionAllow,
+											},
+										},
+									},
+									Name: "my-custom-sg",
+								},
+							},
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       SubnetNode,
+									CIDRBlocks: []string{DefaultNodeSubnetCIDR},
+									Name:       "cluster-test-node-subnet",
+								},
+								SecurityGroup: SecurityGroup{Name: "cluster-test-node-nsg"},
+								RouteTable:    RouteTable{Name: "cluster-test-node-routetable"},
+								NatGateway: NatGateway{
+									NatGatewayIP: PublicIPSpec{
+										Name: "",
+									},
+									NatGatewayClassSpec: NatGatewayClassSpec{
+										Name: "cluster-test-node-natgw",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "subnets with custom security group to deny port 49999",
+			cluster: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role: "control-plane",
+									Name: "cluster-test-controlplane-subnet",
+								},
+								SecurityGroup: SecurityGroup{
+									SecurityGroupClass: SecurityGroupClass{
+										SecurityRules: []SecurityRule{
+											{
+												Name:             "deny_port_49999",
+												Description:      "deny port 49999",
+												Protocol:         "*",
+												Priority:         2201,
+												SourcePorts:      ptr.To("*"),
+												DestinationPorts: ptr.To("*"),
+												Source:           ptr.To("*"),
+												Destination:      ptr.To("*"),
+												Action:           SecurityRuleActionDeny,
+											},
+										},
+									},
+									Name: "my-custom-sg",
+								},
+							},
+						},
+					},
+				},
+			},
+			output: &AzureCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster-test",
+				},
+				Spec: AzureClusterSpec{
+					NetworkSpec: NetworkSpec{
+						Subnets: Subnets{
+							{
+								SubnetClassSpec: SubnetClassSpec{
+									Role:       "control-plane",
+									CIDRBlocks: []string{DefaultControlPlaneSubnetCIDR},
+									Name:       "cluster-test-controlplane-subnet",
+								},
+								SecurityGroup: SecurityGroup{
+									SecurityGroupClass: SecurityGroupClass{
+										SecurityRules: []SecurityRule{
+											{
+												Name:             "deny_port_49999",
+												Description:      "deny port 49999",
+												Protocol:         "*",
+												Priority:         2201,
+												SourcePorts:      ptr.To("*"),
+												DestinationPorts: ptr.To("*"),
+												Source:           ptr.To("*"),
+												Destination:      ptr.To("*"),
+												Direction:        SecurityRuleDirectionInbound,
+												Action:           SecurityRuleActionDeny,
 											},
 										},
 									},
@@ -970,7 +1100,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1014,7 +1144,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Internal,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 							Name: "cluster-test-internal-lb",
 						},
@@ -1062,7 +1192,7 @@ func TestAPIServerLBDefaults(t *testing.T) {
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Internal,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 							Name: "cluster-test-internal-lb",
 						},
@@ -1310,11 +1440,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1409,11 +1539,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1623,11 +1753,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "cluster-test-outboundBackendPool",
 							},
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 					},
@@ -1671,12 +1801,12 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Public}},
 						NodeOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: pointer.Int32(2),
+							FrontendIPsCount: ptr.To[int32](2),
 							BackendPool: BackendPool{
 								Name: "custom-backend-pool",
 							},
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: pointer.Int32(15),
+								IdleTimeoutInMinutes: ptr.To[int32](15),
 							},
 						},
 					},
@@ -1711,11 +1841,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "custom-backend-pool",
 							},
-							FrontendIPsCount: pointer.Int32(2), // we expect the original value to be respected here
+							FrontendIPsCount: ptr.To[int32](2), // we expect the original value to be respected here
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(15), // we expect the original value to be respected here
+								IdleTimeoutInMinutes: ptr.To[int32](15), // we expect the original value to be respected here
 							},
 							Name: "cluster-test",
 						},
@@ -1805,11 +1935,11 @@ func TestNodeOutboundLBDefaults(t *testing.T) {
 							BackendPool: BackendPool{
 								Name: "user-defined-name-outboundBackendPool",
 							},
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(DefaultOutboundRuleIdleTimeoutInMinutes),
+								IdleTimeoutInMinutes: ptr.To[int32](DefaultOutboundRuleIdleTimeoutInMinutes),
 							},
 						},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
@@ -1905,9 +2035,9 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 					NetworkSpec: NetworkSpec{
 						APIServerLB: LoadBalancerSpec{LoadBalancerClassSpec: LoadBalancerClassSpec{Type: Internal}},
 						ControlPlaneOutboundLB: &LoadBalancerSpec{
-							FrontendIPsCount: pointer.Int32(2),
+							FrontendIPsCount: ptr.To[int32](2),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: pointer.Int32(15),
+								IdleTimeoutInMinutes: ptr.To[int32](15),
 							},
 						},
 					},
@@ -1943,11 +2073,11 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							FrontendIPsCount: pointer.Int32(2),
+							FrontendIPsCount: ptr.To[int32](2),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(15),
+								IdleTimeoutInMinutes: ptr.To[int32](15),
 							},
 						},
 					},
@@ -1968,7 +2098,7 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 								Name: "custom-outbound-lb",
 							},
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
-								IdleTimeoutInMinutes: pointer.Int32(15),
+								IdleTimeoutInMinutes: ptr.To[int32](15),
 							},
 						},
 					},
@@ -1998,11 +2128,11 @@ func TestControlPlaneOutboundLBDefaults(t *testing.T) {
 									},
 								},
 							},
-							FrontendIPsCount: pointer.Int32(1),
+							FrontendIPsCount: ptr.To[int32](1),
 							LoadBalancerClassSpec: LoadBalancerClassSpec{
 								SKU:                  SKUStandard,
 								Type:                 Public,
-								IdleTimeoutInMinutes: pointer.Int32(15),
+								IdleTimeoutInMinutes: ptr.To[int32](15),
 							},
 						},
 					},

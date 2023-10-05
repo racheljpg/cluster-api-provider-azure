@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/routetables"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/securitygroups"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/tags"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vnetpeerings"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -55,22 +54,65 @@ func newAzureClusterService(scope *scope.ClusterScope) (*azureClusterService, er
 	if err != nil {
 		return nil, errors.Wrap(err, "failed creating a NewCache")
 	}
+	securityGroupsSvc, err := securitygroups.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	routeTablesSvc, err := routetables.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	bastionHostsSvc, err := bastionhosts.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	privateEndpointsSvc, err := privateendpoints.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	natGatewaysSvc, err := natgateways.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	publicIPsSvc, err := publicips.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	privateDNSSvc, err := privatedns.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	subnetsSvc, err := subnets.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	virtualNetworksSvc, err := virtualnetworks.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	vnetPeeringsSvc, err := vnetpeerings.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	loadbalancersSvc, err := loadbalancers.New(scope)
+	if err != nil {
+		return nil, err
+	}
 	return &azureClusterService{
 		scope: scope,
 		services: []azure.ServiceReconciler{
 			groups.New(scope),
-			virtualnetworks.New(scope),
-			securitygroups.New(scope),
-			routetables.New(scope),
-			publicips.New(scope),
-			natgateways.New(scope),
-			subnets.New(scope),
-			vnetpeerings.New(scope),
-			loadbalancers.New(scope),
-			privatedns.New(scope),
-			bastionhosts.New(scope),
-			privateendpoints.New(scope),
-			tags.New(scope),
+			virtualNetworksSvc,
+			securityGroupsSvc,
+			routeTablesSvc,
+			publicIPsSvc,
+			natGatewaysSvc,
+			subnetsSvc,
+			vnetPeeringsSvc,
+			loadbalancersSvc,
+			privateDNSSvc,
+			bastionHostsSvc,
+			privateEndpointsSvc,
 		},
 		skuCache: skuCache,
 	}, nil
@@ -98,25 +140,30 @@ func (s *azureClusterService) Reconcile(ctx context.Context) error {
 	return nil
 }
 
+// Pause pauses all components making up the cluster.
+func (s *azureClusterService) Pause(ctx context.Context) error {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureClusterService.Pause")
+	defer done()
+
+	for _, service := range s.services {
+		pauser, ok := service.(azure.Pauser)
+		if !ok {
+			continue
+		}
+		if err := pauser.Pause(ctx); err != nil {
+			return errors.Wrapf(err, "failed to pause AzureCluster service %s", service.Name())
+		}
+	}
+
+	return nil
+}
+
 // Delete reconciles all the services in a predetermined order.
 func (s *azureClusterService) Delete(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureClusterService.Delete")
 	defer done()
 
-	groupSvc, err := s.getService(groups.ServiceName)
-	if err != nil {
-		return errors.Wrap(err, "failed to get group service")
-	}
-
-	managed, err := groupSvc.IsManaged(ctx)
-	if err != nil {
-		if azure.ResourceNotFound(err) {
-			// If the resource group is not found, there is nothing to delete, return early.
-			return nil
-		}
-		return errors.Wrap(err, "failed to determine if the AzureCluster resource group is managed")
-	}
-	if managed {
+	if !ShouldDeleteIndividualResources(ctx, s.scope) {
 		// If the resource group is managed, delete it.
 		// We need to explicitly delete vnet peerings, as it is not part of the resource group.
 		vnetPeeringsSvc, err := s.getService(vnetpeerings.ServiceName)
@@ -125,6 +172,11 @@ func (s *azureClusterService) Delete(ctx context.Context) error {
 		}
 		if err := vnetPeeringsSvc.Delete(ctx); err != nil {
 			return errors.Wrap(err, "failed to delete peerings")
+		}
+
+		groupSvc, err := s.getService(groups.ServiceName)
+		if err != nil {
+			return errors.Wrap(err, "failed to get group service")
 		}
 		// Delete the entire resource group directly.
 		if err := groupSvc.Delete(ctx); err != nil {

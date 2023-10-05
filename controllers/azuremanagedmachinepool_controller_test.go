@@ -22,17 +22,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"github.com/pkg/errors"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
@@ -45,6 +47,11 @@ import (
 )
 
 func TestAzureManagedMachinePoolReconcile(t *testing.T) {
+	type pausingReconciler struct {
+		*mock_azure.MockReconciler
+		*mock_azure.MockPauser
+	}
+
 	os.Setenv(auth.ClientID, "fooClient")
 	os.Setenv(auth.ClientSecret, "fooSecret")
 	os.Setenv(auth.TenantID, "fooTenant")
@@ -52,19 +59,19 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		Setup  func(cb *fake.ClientBuilder, reconciler *mock_azure.MockReconcilerMockRecorder, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder)
+		Setup  func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder)
 		Verify func(g *WithT, result ctrl.Result, err error)
 	}{
 		{
 			name: "Reconcile succeed",
-			Setup: func(cb *fake.ClientBuilder, reconciler *mock_azure.MockReconcilerMockRecorder, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder) {
+			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder) {
 				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
 				fakeAgentPoolSpec := fakeAgentPool()
 				providerIDs := []string{"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"}
 				fakeVirtualMachineScaleSet := fakeVirtualMachineScaleSet()
 				fakeVirtualMachineScaleSetVM := fakeVirtualMachineScaleSetVM()
 
-				reconciler.Reconcile(gomock2.AContext()).Return(nil)
+				reconciler.MockReconciler.EXPECT().Reconcile(gomock2.AContext()).Return(nil)
 				agentpools.SetSubnetName()
 				agentpools.AgentPoolSpec().Return(&fakeAgentPoolSpec)
 				agentpools.NodeResourceGroup().Return("fake-rg")
@@ -82,10 +89,24 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			},
 		},
 		{
-			name: "Reconcile delete",
-			Setup: func(cb *fake.ClientBuilder, reconciler *mock_azure.MockReconcilerMockRecorder, _ *mock_agentpools.MockAgentPoolScopeMockRecorder, _ *MockNodeListerMockRecorder) {
+			name: "Reconcile pause",
+			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder) {
 				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
-				reconciler.Delete(gomock2.AContext()).Return(nil)
+				cluster.Spec.Paused = true
+
+				reconciler.MockPauser.EXPECT().Pause(gomock2.AContext()).Return(nil)
+
+				cb.WithObjects(cluster, azManagedCluster, azManagedControlPlane, ammp, mp)
+			},
+			Verify: func(g *WithT, result ctrl.Result, err error) {
+				g.Expect(err).NotTo(HaveOccurred())
+			},
+		},
+		{
+			name: "Reconcile delete",
+			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, _ *mock_agentpools.MockAgentPoolScopeMockRecorder, _ *MockNodeListerMockRecorder) {
+				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
+				reconciler.MockReconciler.EXPECT().Delete(gomock2.AContext()).Return(nil)
 				ammp.DeletionTimestamp = &metav1.Time{
 					Time: time.Now(),
 				}
@@ -93,6 +114,22 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			},
 			Verify: func(g *WithT, result ctrl.Result, err error) {
 				g.Expect(err).NotTo(HaveOccurred())
+			},
+		},
+		{
+			name: "Reconcile delete transient error",
+			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, _ *MockNodeListerMockRecorder) {
+				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
+				reconciler.MockReconciler.EXPECT().Delete(gomock2.AContext()).Return(azure.WithTransientError(errors.New("transient"), 76*time.Second))
+				agentpools.Name()
+				ammp.DeletionTimestamp = &metav1.Time{
+					Time: time.Now(),
+				}
+				cb.WithObjects(cluster, azManagedCluster, azManagedControlPlane, ammp, mp)
+			},
+			Verify: func(g *WithT, result ctrl.Result, err error) {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(result.RequeueAfter).To(Equal(76 * time.Second))
 			},
 		},
 	}
@@ -103,7 +140,10 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			var (
 				g          = NewWithT(t)
 				mockCtrl   = gomock.NewController(t)
-				reconciler = mock_azure.NewMockReconciler(mockCtrl)
+				reconciler = pausingReconciler{
+					MockReconciler: mock_azure.NewMockReconciler(mockCtrl),
+					MockPauser:     mock_azure.NewMockPauser(mockCtrl),
+				}
 				agentpools = mock_agentpools.NewMockAgentPoolScope(mockCtrl)
 				nodelister = NewMockNodeLister(mockCtrl)
 				scheme     = func() *runtime.Scheme {
@@ -119,11 +159,15 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 
 					return s
 				}()
-				cb = fake.NewClientBuilder().WithScheme(scheme)
+				cb = fake.NewClientBuilder().
+					WithStatusSubresource(
+						&infrav1.AzureManagedMachinePool{},
+					).
+					WithScheme(scheme)
 			)
 			defer mockCtrl.Finish()
 
-			c.Setup(cb, reconciler.EXPECT(), agentpools.EXPECT(), nodelister.EXPECT())
+			c.Setup(cb, reconciler, agentpools.EXPECT(), nodelister.EXPECT())
 			controller := NewAzureManagedMachinePoolReconciler(cb.Build(), nil, 30*time.Second, "foo")
 			controller.createAzureManagedMachinePoolService = func(_ *scope.ManagedMachinePoolScope) (*azureManagedMachinePoolService, error) {
 				return &azureManagedMachinePoolService{
@@ -212,8 +256,9 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 	// AzureManagedMachinePool
 	ammp := &infrav1.AzureManagedMachinePool{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "foo-ammp",
-			Namespace: "foobar",
+			Name:       "foo-ammp",
+			Namespace:  "foobar",
+			Finalizers: []string{"test"},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					Name:       "foo-mp1",
@@ -263,21 +308,21 @@ func fakeAgentPool(changes ...func(*agentpools.AgentPoolSpec)) agentpools.AgentP
 		ResourceGroup:     "fake-rg",
 		Cluster:           "fake-cluster",
 		AvailabilityZones: []string{"fake-zone"},
-		EnableAutoScaling: pointer.Bool(true),
-		EnableUltraSSD:    pointer.Bool(true),
-		KubeletDiskType:   (*infrav1.KubeletDiskType)(pointer.String("fake-kubelet-disk-type")),
-		MaxCount:          pointer.Int32(5),
-		MaxPods:           pointer.Int32(10),
-		MinCount:          pointer.Int32(1),
+		EnableAutoScaling: true,
+		EnableUltraSSD:    ptr.To(true),
+		KubeletDiskType:   (*infrav1.KubeletDiskType)(ptr.To("fake-kubelet-disk-type")),
+		MaxCount:          ptr.To[int32](5),
+		MaxPods:           ptr.To[int32](10),
+		MinCount:          ptr.To[int32](1),
 		Mode:              "fake-mode",
-		NodeLabels:        map[string]*string{"fake-label": pointer.String("fake-value")},
+		NodeLabels:        map[string]*string{"fake-label": ptr.To("fake-value")},
 		NodeTaints:        []string{"fake-taint"},
 		OSDiskSizeGB:      2,
-		OsDiskType:        pointer.String("fake-os-disk-type"),
-		OSType:            pointer.String("fake-os-type"),
+		OsDiskType:        ptr.To("fake-os-disk-type"),
+		OSType:            ptr.To("fake-os-type"),
 		Replicas:          1,
 		SKU:               "fake-sku",
-		Version:           pointer.String("fake-version"),
+		Version:           ptr.To("fake-version"),
 		VnetSubnetID:      "fake-vnet-subnet-id",
 		Headers:           map[string]string{"fake-header": "fake-value"},
 		AdditionalTags:    infrav1.Tags{"fake": "tag"},
@@ -290,17 +335,17 @@ func fakeAgentPool(changes ...func(*agentpools.AgentPoolSpec)) agentpools.AgentP
 	return pool
 }
 
-func fakeVirtualMachineScaleSetVM() []compute.VirtualMachineScaleSetVM {
-	virtualMachineScaleSetVM := []compute.VirtualMachineScaleSetVM{
+func fakeVirtualMachineScaleSetVM() []armcompute.VirtualMachineScaleSetVM {
+	virtualMachineScaleSetVM := []armcompute.VirtualMachineScaleSetVM{
 		{
-			InstanceID: pointer.String("0"),
-			ID:         pointer.String("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"),
-			Name:       pointer.String("vm0"),
-			Zones:      &[]string{"zone0"},
-			VirtualMachineScaleSetVMProperties: &compute.VirtualMachineScaleSetVMProperties{
-				ProvisioningState: pointer.String(string(compute.ProvisioningState1Succeeded)),
-				OsProfile: &compute.OSProfile{
-					ComputerName: pointer.String("instance-000000"),
+			InstanceID: ptr.To("0"),
+			ID:         ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"),
+			Name:       ptr.To("vm0"),
+			Zones:      []*string{ptr.To("zone0")},
+			Properties: &armcompute.VirtualMachineScaleSetVMProperties{
+				ProvisioningState: ptr.To("Succeeded"),
+				OSProfile: &armcompute.OSProfile{
+					ComputerName: ptr.To("instance-000000"),
 				},
 			},
 		},
@@ -308,27 +353,27 @@ func fakeVirtualMachineScaleSetVM() []compute.VirtualMachineScaleSetVM {
 	return virtualMachineScaleSetVM
 }
 
-func fakeVirtualMachineScaleSet() []compute.VirtualMachineScaleSet {
+func fakeVirtualMachineScaleSet() []armcompute.VirtualMachineScaleSet {
 	tags := map[string]*string{
-		"foo":      pointer.String("bazz"),
-		"poolName": pointer.String("fake-agent-pool-name"),
+		"foo":      ptr.To("bazz"),
+		"poolName": ptr.To("fake-agent-pool-name"),
 	}
 	zones := []string{"zone0", "zone1"}
-	virtualMachineScaleSet := []compute.VirtualMachineScaleSet{
+	virtualMachineScaleSet := []armcompute.VirtualMachineScaleSet{
 		{
-			Sku: &compute.Sku{
-				Name:     pointer.String("skuName"),
-				Tier:     pointer.String("skuTier"),
-				Capacity: pointer.Int64(2),
+			SKU: &armcompute.SKU{
+				Name:     ptr.To("skuName"),
+				Tier:     ptr.To("skuTier"),
+				Capacity: ptr.To[int64](2),
 			},
-			Zones:    &zones,
-			ID:       pointer.String("vmssID"),
-			Name:     pointer.String("vmssName"),
-			Location: pointer.String("westus2"),
+			Zones:    azure.PtrSlice(&zones),
+			ID:       ptr.To("vmssID"),
+			Name:     ptr.To("vmssName"),
+			Location: ptr.To("westus2"),
 			Tags:     tags,
-			VirtualMachineScaleSetProperties: &compute.VirtualMachineScaleSetProperties{
-				SinglePlacementGroup: pointer.Bool(false),
-				ProvisioningState:    pointer.String(string(compute.ProvisioningState1Succeeded)),
+			Properties: &armcompute.VirtualMachineScaleSetProperties{
+				SinglePlacementGroup: ptr.To(false),
+				ProvisioningState:    ptr.To("Succeeded"),
 			},
 		},
 	}

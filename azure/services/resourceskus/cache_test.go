@@ -20,10 +20,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 func TestCacheGet(t *testing.T) {
@@ -31,21 +31,21 @@ func TestCacheGet(t *testing.T) {
 		sku          string
 		location     string
 		resourceType ResourceType
-		have         []compute.ResourceSku
+		have         []armcompute.ResourceSKU
 		err          string
 	}{
 		"should find": {
 			sku:          "foo",
 			location:     "test",
 			resourceType: "bar",
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("other"),
-					ResourceType: pointer.String("baz"),
+					Name:         ptr.To("other"),
+					ResourceType: ptr.To("baz"),
 				},
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String("bar"),
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To("bar"),
 				},
 			},
 		},
@@ -53,9 +53,9 @@ func TestCacheGet(t *testing.T) {
 			sku:          "foo",
 			location:     "test",
 			resourceType: "bar",
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name: pointer.String("other"),
+					Name: ptr.To("other"),
 				},
 			},
 			err: "reconcile error that cannot be recovered occurred: resource sku with name 'foo' and category 'bar' not found in location 'test'. Object will not be requeued",
@@ -104,21 +104,21 @@ func TestCacheGet(t *testing.T) {
 
 func TestCacheGetZones(t *testing.T) {
 	cases := map[string]struct {
-		have []compute.ResourceSku
+		have []armcompute.ResourceSKU
 		want []string
 	}{
 		"should find 1 result": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
@@ -126,30 +126,30 @@ func TestCacheGetZones(t *testing.T) {
 			want: []string{"1"},
 		},
 		"should find 2 results": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"2"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("2")},
 						},
 					},
 				},
@@ -157,17 +157,17 @@ func TestCacheGetZones(t *testing.T) {
 			want: []string{"1", "2"},
 		},
 		"should not find due to location mismatch": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"foobar",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("foobar"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("foobar"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("foobar"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
@@ -175,23 +175,23 @@ func TestCacheGetZones(t *testing.T) {
 			want: nil,
 		},
 		"should not find due to location restriction": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
-					Restrictions: &[]compute.ResourceSkuRestrictions{
+					Restrictions: []*armcompute.ResourceSKURestrictions{
 						{
-							Type:   compute.ResourceSkuRestrictionsTypeLocation,
-							Values: &[]string{"baz"},
+							Type:   ptr.To(armcompute.ResourceSKURestrictionsTypeLocation),
+							Values: []*string{ptr.To("baz")},
 						},
 					},
 				},
@@ -199,24 +199,24 @@ func TestCacheGetZones(t *testing.T) {
 			want: nil,
 		},
 		"should not find due to zone restriction": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
-					Restrictions: &[]compute.ResourceSkuRestrictions{
+					Restrictions: []*armcompute.ResourceSKURestrictions{
 						{
-							Type: compute.ResourceSkuRestrictionsTypeZone,
-							RestrictionInfo: &compute.ResourceSkuRestrictionInfo{
-								Zones: &[]string{"1"},
+							Type: ptr.To(armcompute.ResourceSKURestrictionsTypeZone),
+							RestrictionInfo: &armcompute.ResourceSKURestrictionInfo{
+								Zones: []*string{ptr.To("1")},
 							},
 						},
 					},
@@ -248,21 +248,21 @@ func TestCacheGetZones(t *testing.T) {
 
 func TestCacheGetZonesWithVMSize(t *testing.T) {
 	cases := map[string]struct {
-		have []compute.ResourceSku
+		have []armcompute.ResourceSKU
 		want []string
 	}{
 		"should find 1 result": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
@@ -270,17 +270,17 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 			want: []string{"1"},
 		},
 		"should find 2 results": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1", "2"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1"), ptr.To("2")},
 						},
 					},
 				},
@@ -288,17 +288,17 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 			want: []string{"1", "2"},
 		},
 		"should not find due to size mismatch": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foobar"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foobar"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
@@ -306,17 +306,17 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 			want: nil,
 		},
 		"should not find due to location mismatch": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"foobar",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("foobar"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("foobar"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("foobar"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
 				},
@@ -324,23 +324,23 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 			want: nil,
 		},
 		"should not find due to location restriction": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
-					Restrictions: &[]compute.ResourceSkuRestrictions{
+					Restrictions: []*armcompute.ResourceSKURestrictions{
 						{
-							Type:   compute.ResourceSkuRestrictionsTypeLocation,
-							Values: &[]string{"baz"},
+							Type:   ptr.To(armcompute.ResourceSKURestrictionsTypeLocation),
+							Values: []*string{ptr.To("baz")},
 						},
 					},
 				},
@@ -348,24 +348,24 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 			want: nil,
 		},
 		"should not find due to zone restriction": {
-			have: []compute.ResourceSku{
+			have: []armcompute.ResourceSKU{
 				{
-					Name:         pointer.String("foo"),
-					ResourceType: pointer.String(string(VirtualMachines)),
-					Locations: &[]string{
-						"baz",
+					Name:         ptr.To("foo"),
+					ResourceType: ptr.To(string(VirtualMachines)),
+					Locations: []*string{
+						ptr.To("baz"),
 					},
-					LocationInfo: &[]compute.ResourceSkuLocationInfo{
+					LocationInfo: []*armcompute.ResourceSKULocationInfo{
 						{
-							Location: pointer.String("baz"),
-							Zones:    &[]string{"1"},
+							Location: ptr.To("baz"),
+							Zones:    []*string{ptr.To("1")},
 						},
 					},
-					Restrictions: &[]compute.ResourceSkuRestrictions{
+					Restrictions: []*armcompute.ResourceSKURestrictions{
 						{
-							Type: compute.ResourceSkuRestrictionsTypeZone,
-							RestrictionInfo: &compute.ResourceSkuRestrictionInfo{
-								Zones: &[]string{"1"},
+							Type: ptr.To(armcompute.ResourceSKURestrictionsTypeZone),
+							RestrictionInfo: &armcompute.ResourceSKURestrictionInfo{
+								Zones: []*string{ptr.To("1")},
 							},
 						},
 					},

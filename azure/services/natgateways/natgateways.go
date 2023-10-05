@@ -19,7 +19,7 @@ package natgateways
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -45,12 +45,16 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope NatGatewayScope) *Service {
-	client := newClient(scope)
-	return &Service{
-		Scope:      scope,
-		Reconciler: async.New(scope, client, client),
+func New(scope NatGatewayScope) (*Service, error) {
+	client, err := newClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armnetwork.NatGatewaysClientCreateOrUpdateResponse,
+			armnetwork.NatGatewaysClientDeleteResponse](scope, client, client),
+	}, nil
 }
 
 // Name returns the service name.
@@ -91,10 +95,10 @@ func (s *Service) Reconcile(ctx context.Context) error {
 			}
 		}
 		if err == nil {
-			natGateway, ok := result.(network.NatGateway)
+			natGateway, ok := result.(armnetwork.NatGateway)
 			if !ok {
 				// Return out of loop since this would be an unexpected fatal error
-				resultingErr = errors.Errorf("created resource %T is not a network.NatGateway", result)
+				resultingErr = errors.Errorf("created resource %T is not an armnetwork.NatGateway", result)
 				break
 			}
 

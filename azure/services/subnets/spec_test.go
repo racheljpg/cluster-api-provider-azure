@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -41,13 +41,12 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeSubnetOneCidrParams = network.Subnet{
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefix:        pointer.String("10.0.0.0/16"),
-			RouteTable:           &network.RouteTable{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
-			NetworkSecurityGroup: &network.SecurityGroup{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
-			NatGateway:           &network.SubResource{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-nat-gateway")},
-			ServiceEndpoints:     &[]network.ServiceEndpointPropertiesFormat{},
+	fakeSubnetOneCidrParams = armnetwork.Subnet{
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefix:        ptr.To("10.0.0.0/16"),
+			RouteTable:           &armnetwork.RouteTable{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
+			NatGateway:           &armnetwork.SubResource{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-nat-gateway")},
 		},
 	}
 
@@ -65,17 +64,16 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeSubnetMultipleCidrParams = network.Subnet{
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefixes: &[]string{
-				"10.0.0.0/16",
-				"10.1.0.0/16",
-				"10.2.0.0/16",
+	fakeSubnetMultipleCidrParams = armnetwork.Subnet{
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefixes: []*string{
+				ptr.To("10.0.0.0/16"),
+				ptr.To("10.1.0.0/16"),
+				ptr.To("10.2.0.0/16"),
 			},
-			RouteTable:           &network.RouteTable{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
-			NetworkSecurityGroup: &network.SecurityGroup{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
-			NatGateway:           &network.SubResource{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-nat-gateway")},
-			ServiceEndpoints:     &[]network.ServiceEndpointPropertiesFormat{},
+			RouteTable:           &armnetwork.RouteTable{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
+			NatGateway:           &armnetwork.SubResource{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-nat-gateway")},
 		},
 	}
 
@@ -92,16 +90,16 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeIpv6SubnetNotManaged = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet"),
-		Name: pointer.String("my-ipv6-subnet"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefixes: &[]string{
-				"10.0.0.0/16",
-				"2001:1234:5678:9abd::/64",
+	fakeIpv6SubnetNotManaged = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet"),
+		Name: ptr.To("my-ipv6-subnet"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefixes: []*string{
+				ptr.To("10.0.0.0/16"),
+				ptr.To("2001:1234:5678:9abd::/64"),
 			},
-			RouteTable:           &network.RouteTable{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
-			NetworkSecurityGroup: &network.SecurityGroup{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
+			RouteTable:           &armnetwork.RouteTable{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
 		},
 	}
 )
@@ -203,7 +201,7 @@ func TestSubnetSpec_shouldUpdate(t *testing.T) {
 		ServiceEndpoints  infrav1.ServiceEndpoints
 	}
 	type args struct {
-		existingSubnet network.Subnet
+		existingSubnet armnetwork.Subnet
 	}
 	tests := []struct {
 		name   string
@@ -220,8 +218,8 @@ func TestSubnetSpec_shouldUpdate(t *testing.T) {
 				IsVNetManaged:  false,
 			},
 			args: args{
-				existingSubnet: network.Subnet{
-					Name: pointer.String("my-subnet"),
+				existingSubnet: armnetwork.Subnet{
+					Name: ptr.To("my-subnet"),
 				},
 			},
 			want: false,
@@ -236,9 +234,9 @@ func TestSubnetSpec_shouldUpdate(t *testing.T) {
 				NatGatewayName: "my-nat-gateway",
 			},
 			args: args{
-				existingSubnet: network.Subnet{
-					Name: pointer.String("my-subnet"),
-					SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
+				existingSubnet: armnetwork.Subnet{
+					Name: ptr.To("my-subnet"),
+					Properties: &armnetwork.SubnetPropertiesFormat{
 						NatGateway: nil,
 					},
 				},
@@ -259,9 +257,9 @@ func TestSubnetSpec_shouldUpdate(t *testing.T) {
 				},
 			},
 			args: args{
-				existingSubnet: network.Subnet{
-					Name: pointer.String("my-subnet"),
-					SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
+				existingSubnet: armnetwork.Subnet{
+					Name: ptr.To("my-subnet"),
+					Properties: &armnetwork.SubnetPropertiesFormat{
 						ServiceEndpoints: nil,
 					},
 				},
@@ -278,10 +276,10 @@ func TestSubnetSpec_shouldUpdate(t *testing.T) {
 				CIDRs:          []string{"10.1.0.0/16"},
 			},
 			args: args{
-				existingSubnet: network.Subnet{
-					Name: pointer.String("my-subnet"),
-					SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-						AddressPrefixes: &[]string{"10.1.0.0/8"},
+				existingSubnet: armnetwork.Subnet{
+					Name: ptr.To("my-subnet"),
+					Properties: &armnetwork.SubnetPropertiesFormat{
+						AddressPrefixes: []*string{ptr.To("10.1.0.0/8")},
 					},
 				},
 			},

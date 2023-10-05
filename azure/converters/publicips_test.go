@@ -20,8 +20,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"k8s.io/utils/pointer"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -29,7 +29,7 @@ func TestIPTagsToSDK(t *testing.T) {
 	tests := []struct {
 		name   string
 		ipTags []infrav1.IPTag
-		want   *[]network.IPTag
+		want   []*armnetwork.IPTag
 	}{
 		{
 			name:   "empty",
@@ -48,14 +48,14 @@ func TestIPTagsToSDK(t *testing.T) {
 					Tag:  "foo",
 				},
 			},
-			want: &[]network.IPTag{
+			want: []*armnetwork.IPTag{
 				{
-					IPTagType: pointer.String("tag"),
-					Tag:       pointer.String("value"),
+					IPTagType: ptr.To("tag"),
+					Tag:       ptr.To("value"),
 				},
 				{
-					IPTagType: pointer.String("internal"),
-					Tag:       pointer.String("foo"),
+					IPTagType: ptr.To("internal"),
+					Tag:       ptr.To("foo"),
 				},
 			},
 		},

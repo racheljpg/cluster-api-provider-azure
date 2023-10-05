@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,10 +31,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
-	"sigs.k8s.io/cluster-api-provider-azure/util/azure"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // SetupAzureMachinePoolWebhookWithManager sets up and registers the webhook with the manager.
@@ -66,34 +67,34 @@ func (ampw *azureMachinePoolWebhook) Default(ctx context.Context, obj runtime.Ob
 // +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremachinepool,mutating=false,failurePolicy=fail,groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepools,versions=v1beta1,name=validation.azuremachinepool.infrastructure.cluster.x-k8s.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (ampw *azureMachinePoolWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) error {
+func (ampw *azureMachinePoolWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	amp, ok := obj.(*AzureMachinePool)
 	if !ok {
-		return apierrors.NewBadRequest("expected an AzureMachinePool")
+		return nil, apierrors.NewBadRequest("expected an AzureMachinePool")
 	}
 	// NOTE: AzureMachinePool is behind MachinePool feature gate flag; the webhook
 	// must prevent creating new objects in case the feature flag is disabled.
 	if !feature.Gates.Enabled(capifeature.MachinePool) {
-		return field.Forbidden(
+		return nil, field.Forbidden(
 			field.NewPath("spec"),
 			"can be set only if the MachinePool feature flag is enabled",
 		)
 	}
-	return amp.Validate(nil, ampw.Client)
+	return nil, amp.Validate(nil, ampw.Client)
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (ampw *azureMachinePoolWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) error {
+func (ampw *azureMachinePoolWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	amp, ok := newObj.(*AzureMachinePool)
 	if !ok {
-		return apierrors.NewBadRequest("expected an AzureMachinePool")
+		return nil, apierrors.NewBadRequest("expected an AzureMachinePool")
 	}
-	return amp.Validate(oldObj, ampw.Client)
+	return nil, amp.Validate(oldObj, ampw.Client)
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (ampw *azureMachinePoolWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) error {
-	return nil
+func (ampw *azureMachinePoolWebhook) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+	return nil, nil
 }
 
 // Validate the Azure Machine Pool and return an aggregate error.
@@ -297,8 +298,8 @@ func (amp *AzureMachinePool) ValidateDiagnostics() error {
 func (amp *AzureMachinePool) ValidateOrchestrationMode(c client.Client) func() error {
 	return func() error {
 		// Only Flexible orchestration mode requires validation.
-		if amp.Spec.OrchestrationMode == infrav1.OrchestrationModeType(compute.OrchestrationModeFlexible) {
-			parent, err := azure.FindParentMachinePoolWithRetry(amp.Name, c, 5)
+		if amp.Spec.OrchestrationMode == infrav1.OrchestrationModeType(armcompute.OrchestrationModeFlexible) {
+			parent, err := azureutil.FindParentMachinePoolWithRetry(amp.Name, c, 5)
 			if err != nil {
 				return errors.Wrap(err, "failed to find parent MachinePool")
 			}

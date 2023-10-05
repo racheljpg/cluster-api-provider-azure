@@ -20,35 +20,35 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 func TestGetSubnetAddresses(t *testing.T) {
 	tests := []struct {
 		name   string
-		subnet network.Subnet
+		subnet armnetwork.Subnet
 		want   []string
 	}{
 		{
 			name:   "nil properties subnet",
-			subnet: network.Subnet{},
+			subnet: armnetwork.Subnet{},
 		},
 		{
 			name: "subnet with single address prefix",
-			subnet: network.Subnet{
-				SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-					AddressPrefix: pointer.String("test-address-prefix"),
+			subnet: armnetwork.Subnet{
+				Properties: &armnetwork.SubnetPropertiesFormat{
+					AddressPrefix: ptr.To("test-address-prefix"),
 				},
 			},
 			want: []string{"test-address-prefix"},
 		},
 		{
 			name: "subnet with multiple address prefixes",
-			subnet: network.Subnet{
-				SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-					AddressPrefixes: &[]string{"test-address-prefix-1", "test-address-prefix-2"},
+			subnet: armnetwork.Subnet{
+				Properties: &armnetwork.SubnetPropertiesFormat{
+					AddressPrefixes: []*string{ptr.To("test-address-prefix-1"), ptr.To("test-address-prefix-2")},
 				},
 			},
 			want: []string{"test-address-prefix-1", "test-address-prefix-2"},
@@ -59,7 +59,7 @@ func TestGetSubnetAddresses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			g := NewGomegaWithT(t)
-			got := GetSubnetAddresses(tt.subnet)
+			got := GetSubnetAddresses(&tt.subnet)
 			g.Expect(got).To(Equal(tt.want), fmt.Sprintf("got: %v, want: %v", got, tt.want))
 		})
 	}

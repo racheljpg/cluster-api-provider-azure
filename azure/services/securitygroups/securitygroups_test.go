@@ -20,11 +20,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -66,10 +66,11 @@ var (
 		Priority:         2200,
 		Protocol:         infrav1.SecurityGroupProtocolTCP,
 		Direction:        infrav1.SecurityRuleDirectionInbound,
-		Source:           pointer.String("*"),
-		SourcePorts:      pointer.String("*"),
-		Destination:      pointer.String("*"),
-		DestinationPorts: pointer.String("22"),
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("22"),
+		Action:           infrav1.SecurityRuleActionAllow,
 	}
 	securityRule2 = infrav1.SecurityRule{
 		Name:             "other_rule",
@@ -77,10 +78,11 @@ var (
 		Priority:         500,
 		Protocol:         infrav1.SecurityGroupProtocolTCP,
 		Direction:        infrav1.SecurityRuleDirectionInbound,
-		Source:           pointer.String("*"),
-		SourcePorts:      pointer.String("*"),
-		Destination:      pointer.String("*"),
-		DestinationPorts: pointer.String("80"),
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("80"),
+		Action:           infrav1.SecurityRuleActionAllow,
 	}
 	errFake      = errors.New("this is an error")
 	notDoneError = azure.NewOperationNotDoneError(&infrav1.Future{})
@@ -285,43 +287,46 @@ func TestDeleteSecurityGroups(t *testing.T) {
 }
 
 var (
-	ruleA = network.SecurityRule{
-		Name: pointer.String("A"),
-		SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-			Description:              pointer.String("this is rule A"),
-			Protocol:                 network.SecurityRuleProtocolTCP,
-			DestinationPortRange:     pointer.String("*"),
-			SourcePortRange:          pointer.String("*"),
-			DestinationAddressPrefix: pointer.String("*"),
-			SourceAddressPrefix:      pointer.String("*"),
-			Priority:                 pointer.Int32(100),
-			Direction:                network.SecurityRuleDirectionInbound,
+	ruleA = &armnetwork.SecurityRule{
+		Name: ptr.To("A"),
+		Properties: &armnetwork.SecurityRulePropertiesFormat{
+			Description:              ptr.To("this is rule A"),
+			Protocol:                 ptr.To(armnetwork.SecurityRuleProtocolTCP),
+			DestinationPortRange:     ptr.To("*"),
+			SourcePortRange:          ptr.To("*"),
+			DestinationAddressPrefix: ptr.To("*"),
+			SourceAddressPrefix:      ptr.To("*"),
+			Priority:                 ptr.To[int32](100),
+			Direction:                ptr.To(armnetwork.SecurityRuleDirectionInbound),
+			Access:                   ptr.To(armnetwork.SecurityRuleAccessAllow),
 		},
 	}
-	ruleB = network.SecurityRule{
-		Name: pointer.String("B"),
-		SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-			Description:              pointer.String("this is rule B"),
-			Protocol:                 network.SecurityRuleProtocolTCP,
-			DestinationPortRange:     pointer.String("*"),
-			SourcePortRange:          pointer.String("*"),
-			DestinationAddressPrefix: pointer.String("*"),
-			SourceAddressPrefix:      pointer.String("*"),
-			Priority:                 pointer.Int32(100),
-			Direction:                network.SecurityRuleDirectionOutbound,
+	ruleB = &armnetwork.SecurityRule{
+		Name: ptr.To("B"),
+		Properties: &armnetwork.SecurityRulePropertiesFormat{
+			Description:              ptr.To("this is rule B"),
+			Protocol:                 ptr.To(armnetwork.SecurityRuleProtocolTCP),
+			DestinationPortRange:     ptr.To("*"),
+			SourcePortRange:          ptr.To("*"),
+			DestinationAddressPrefix: ptr.To("*"),
+			SourceAddressPrefix:      ptr.To("*"),
+			Priority:                 ptr.To[int32](100),
+			Direction:                ptr.To(armnetwork.SecurityRuleDirectionOutbound),
+			Access:                   ptr.To(armnetwork.SecurityRuleAccessAllow),
 		},
 	}
-	ruleBModified = network.SecurityRule{
-		Name: pointer.String("B"),
-		SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-			Description:              pointer.String("this is rule B"),
-			Protocol:                 network.SecurityRuleProtocolTCP,
-			DestinationPortRange:     pointer.String("80"),
-			SourcePortRange:          pointer.String("*"),
-			DestinationAddressPrefix: pointer.String("*"),
-			SourceAddressPrefix:      pointer.String("*"),
-			Priority:                 pointer.Int32(100),
-			Direction:                network.SecurityRuleDirectionOutbound,
+	ruleBModified = &armnetwork.SecurityRule{
+		Name: ptr.To("B"),
+		Properties: &armnetwork.SecurityRulePropertiesFormat{
+			Description:              ptr.To("this is rule B"),
+			Protocol:                 ptr.To(armnetwork.SecurityRuleProtocolTCP),
+			DestinationPortRange:     ptr.To("80"),
+			SourcePortRange:          ptr.To("*"),
+			DestinationAddressPrefix: ptr.To("*"),
+			SourceAddressPrefix:      ptr.To("*"),
+			Priority:                 ptr.To[int32](100),
+			Direction:                ptr.To(armnetwork.SecurityRuleDirectionOutbound),
+			Access:                   ptr.To(armnetwork.SecurityRuleAccessAllow),
 		},
 	}
 )

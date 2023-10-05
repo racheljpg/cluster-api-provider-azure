@@ -22,6 +22,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/gob"
 	"flag"
 	"os"
@@ -31,10 +32,12 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/klog/v2"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/bootstrap"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func init() {
@@ -50,6 +53,7 @@ func init() {
 }
 
 func TestE2E(t *testing.T) {
+	ctrl.SetLogger(klog.Background())
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "capz-e2e")
 }
@@ -78,12 +82,13 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	var configBuf bytes.Buffer
 	enc := gob.NewEncoder(&configBuf)
 	Expect(enc.Encode(e2eConfig)).To(Succeed())
+	configStr := base64.StdEncoding.EncodeToString(configBuf.Bytes())
 
 	return []byte(
 		strings.Join([]string{
 			artifactFolder,
 			clusterctlConfigPath,
-			configBuf.String(),
+			configStr,
 			bootstrapClusterProxy.GetKubeconfigPath(),
 		}, ","),
 	)
@@ -97,7 +102,9 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	clusterctlConfigPath = parts[1]
 
 	// Decode the e2e config
-	buf := bytes.NewBuffer([]byte(parts[2]))
+	configBytes, err := base64.StdEncoding.DecodeString(parts[2])
+	Expect(err).NotTo(HaveOccurred())
+	buf := bytes.NewBuffer(configBytes)
 	dec := gob.NewDecoder(buf)
 	Expect(dec.Decode(&e2eConfig)).To(Succeed())
 

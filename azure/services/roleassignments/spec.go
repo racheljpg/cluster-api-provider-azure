@@ -19,9 +19,9 @@ package roleassignments
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/profiles/2019-03-01/authorization/mgmt/authorization"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // RoleAssignmentSpec defines the specification for a role assignment.
@@ -54,16 +54,16 @@ func (s *RoleAssignmentSpec) OwnerResourceName() string {
 // Parameters returns the parameters for the RoleAssignmentSpec.
 func (s *RoleAssignmentSpec) Parameters(ctx context.Context, existing interface{}) (interface{}, error) {
 	if existing != nil {
-		if _, ok := existing.(authorization.RoleAssignment); !ok {
-			return nil, errors.Errorf("%T is not a authorization.RoleAssignment", existing)
+		if _, ok := existing.(armauthorization.RoleAssignment); !ok {
+			return nil, errors.Errorf("%T is not an armauthorization.RoleAssignment", existing)
 		}
 		// RoleAssignmentSpec already exists
 		return nil, nil
 	}
-	return authorization.RoleAssignmentCreateParameters{
-		Properties: &authorization.RoleAssignmentProperties{
+	return armauthorization.RoleAssignmentCreateParameters{
+		Properties: &armauthorization.RoleAssignmentProperties{
 			PrincipalID:      s.PrincipalID,
-			RoleDefinitionID: pointer.String(s.RoleDefinitionID),
+			RoleDefinitionID: ptr.To(s.RoleDefinitionID),
 		},
 	}, nil
 }

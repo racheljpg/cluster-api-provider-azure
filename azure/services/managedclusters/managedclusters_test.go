@@ -21,10 +21,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters/mock_managedclusters"
@@ -61,10 +61,19 @@ func TestReconcile(t *testing.T) {
 			expectedError: "",
 			expect: func(m *mock_managedclusters.MockCredentialGetterMockRecorder, s *mock_managedclusters.MockManagedClusterScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.ManagedClusterSpec().Return(fakeManagedClusterSpec)
-				r.CreateOrUpdateResource(gomockinternal.AContext(), fakeManagedClusterSpec, serviceName).Return(containerservice.ManagedCluster{
-					ManagedClusterProperties: &containerservice.ManagedClusterProperties{
-						Fqdn:              pointer.String("my-managedcluster-fqdn"),
-						ProvisioningState: pointer.String("Succeeded"),
+				r.CreateOrUpdateResource(gomockinternal.AContext(), fakeManagedClusterSpec, serviceName).Return(armcontainerservice.ManagedCluster{
+					Properties: &armcontainerservice.ManagedClusterProperties{
+						Fqdn:              ptr.To("my-managedcluster-fqdn"),
+						ProvisioningState: ptr.To("Succeeded"),
+						IdentityProfile: map[string]*armcontainerservice.UserAssignedIdentity{
+							kubeletIdentityKey: {
+								ResourceID: ptr.To("kubelet-id"),
+							},
+						},
+						OidcIssuerProfile: &armcontainerservice.ManagedClusterOIDCIssuerProfile{
+							Enabled:   ptr.To(true),
+							IssuerURL: ptr.To("oidc issuer url"),
+						},
 					},
 				}, nil)
 				s.SetControlPlaneEndpoint(clusterv1.APIEndpoint{
@@ -73,6 +82,11 @@ func TestReconcile(t *testing.T) {
 				})
 				m.GetCredentials(gomockinternal.AContext(), "my-rg", "my-managedcluster").Return([]byte("credentials"), nil)
 				s.SetKubeConfigData([]byte("credentials"))
+				s.SetKubeletIdentity("kubelet-id")
+				s.SetOIDCIssuerProfileStatus(nil)
+				s.SetOIDCIssuerProfileStatus(&infrav1.OIDCIssuerProfileStatus{
+					IssuerURL: ptr.To("oidc issuer url"),
+				})
 				s.UpdatePutStatus(infrav1.ManagedClusterRunningCondition, serviceName, nil)
 			},
 		},
@@ -81,10 +95,10 @@ func TestReconcile(t *testing.T) {
 			expectedError: "failed to get credentials for managed cluster: internal server error",
 			expect: func(m *mock_managedclusters.MockCredentialGetterMockRecorder, s *mock_managedclusters.MockManagedClusterScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.ManagedClusterSpec().Return(fakeManagedClusterSpec)
-				r.CreateOrUpdateResource(gomockinternal.AContext(), fakeManagedClusterSpec, serviceName).Return(containerservice.ManagedCluster{
-					ManagedClusterProperties: &containerservice.ManagedClusterProperties{
-						Fqdn:              pointer.String("my-managedcluster-fqdn"),
-						ProvisioningState: pointer.String("Succeeded"),
+				r.CreateOrUpdateResource(gomockinternal.AContext(), fakeManagedClusterSpec, serviceName).Return(armcontainerservice.ManagedCluster{
+					Properties: &armcontainerservice.ManagedClusterProperties{
+						Fqdn:              ptr.To("my-managedcluster-fqdn"),
+						ProvisioningState: ptr.To("Succeeded"),
 					},
 				}, nil)
 				s.SetControlPlaneEndpoint(clusterv1.APIEndpoint{

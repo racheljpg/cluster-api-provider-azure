@@ -306,6 +306,67 @@ var _ = Describe("Workload cluster creation", func() {
 		})
 	})
 
+	When("Creating a highly available cluster with Azure CNI v1 [REQUIRED]", Label("Azure CNI v1"), func() {
+		It("can create 3 control-plane nodes and 2 Linux worker nodes", func() {
+			clusterName = getClusterName(clusterNamePrefix, "azcni-v1")
+
+			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+				specName,
+				withAzureCNIv1Manifest(e2eConfig.GetVariable(AzureCNIv1Manifest)), // AzureCNIManifest is set
+				withFlavor("azure-cni-v1"),
+				withNamespace(namespace.Name),
+				withClusterName(clusterName),
+				withControlPlaneMachineCount(3),
+				withWorkerMachineCount(2),
+				withControlPlaneInterval(specName, "wait-control-plane-ha"),
+				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+				}),
+				withPostMachinesProvisioned(func() {
+					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
+						return DaemonsetsSpecInput{
+							BootstrapClusterProxy: bootstrapClusterProxy,
+							Namespace:             namespace,
+							ClusterName:           clusterName,
+						}
+					})
+				}),
+			), result)
+
+			By("can expect VM extensions are present on the node", func() {
+				AzureVMExtensionsSpec(ctx, func() AzureVMExtensionsSpecInput {
+					return AzureVMExtensionsSpecInput{
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						Namespace:             namespace,
+						ClusterName:           clusterName,
+					}
+				})
+			})
+
+			By("can validate failure domains", func() {
+				AzureFailureDomainsSpec(ctx, func() AzureFailureDomainsSpecInput {
+					return AzureFailureDomainsSpecInput{
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						Cluster:               result.Cluster,
+						Namespace:             namespace,
+						ClusterName:           clusterName,
+					}
+				})
+			})
+
+			By("can create an accessible load balancer", func() {
+				AzureLBSpec(ctx, func() AzureLBSpecInput {
+					return AzureLBSpecInput{
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						Namespace:             namespace,
+						ClusterName:           clusterName,
+						SkipCleanup:           skipCleanup,
+					}
+				})
+			})
+		})
+	})
+
 	Context("Creating a Flatcar cluster [OPTIONAL]", func() {
 		It("With Flatcar control-plane and worker nodes", func() {
 			clusterName = getClusterName(clusterNamePrefix, "flatcar")
@@ -462,17 +523,16 @@ var _ = Describe("Workload cluster creation", func() {
 				})
 			})
 
-			// TODO: Implement more robust cordon and drain test
-			// By("Cordon and draining a node", func() {
-			// 	AzureMachinePoolDrainSpec(ctx, func() AzureMachinePoolDrainSpecInput {
-			// 		return AzureMachinePoolDrainSpecInput{
-			// 			BootstrapClusterProxy: bootstrapClusterProxy,
-			// 			Namespace:             namespace,
-			// 			ClusterName:           clusterName,
-			// 			SkipCleanup:           skipCleanup,
-			// 		}
-			// 	})
-			// })
+			By("Cordon and draining a node", func() {
+				AzureMachinePoolDrainSpec(ctx, func() AzureMachinePoolDrainSpecInput {
+					return AzureMachinePoolDrainSpecInput{
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						Namespace:             namespace,
+						ClusterName:           clusterName,
+						SkipCleanup:           skipCleanup,
+					}
+				})
+			})
 
 			By("PASSED!")
 		})
@@ -714,6 +774,16 @@ var _ = Describe("Workload cluster creation", func() {
 				// made more distinct from this public IP prefix test.
 				AKSPublicIPPrefixSpec(ctx, func() AKSPublicIPPrefixSpecInput {
 					return AKSPublicIPPrefixSpecInput{
+						Cluster:           result.Cluster,
+						KubernetesVersion: kubernetesVersion,
+						WaitIntervals:     e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+					}
+				})
+			})
+
+			By("creating a machine pool with spot max price and scale down mode", func() {
+				AKSSpotSpec(ctx, func() AKSSpotSpecInput {
+					return AKSSpotSpecInput{
 						Cluster:           result.Cluster,
 						KubernetesVersion: kubernetesVersion,
 						WaitIntervals:     e2eConfig.GetIntervals(specName, "wait-worker-nodes"),

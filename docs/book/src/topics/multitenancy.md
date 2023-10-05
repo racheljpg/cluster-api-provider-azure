@@ -2,13 +2,33 @@
 
 To enable single controller multi-tenancy, a different Identity can be added to the Azure Cluster that will be used as the Azure Identity when creating Azure resources related to that cluster.
 
-This is achieved using the [aad-pod-identity](https://azure.github.io/aad-pod-identity) library.
+This is achieved using [workload identity](https://azure.github.io/azure-workload-identity). Workload identity is the next iteration of the now deprecated [aad-pod-identity](https://azure.github.io/aad-pod-identity).
 
 ## Identity Types
 
-### Service Principal With Client Password
+### Workload Identity (Recommended)
 
-Once a new SP Identity is created in Azure, the corresponding values should be used to create an `AzureClusterIdentity` resource:
+Follow this [link](./workload-identity.md) for a quick start guide on setting up workload identity.
+
+Once you've set up the management cluster with the workload identity (see link above), the corresponding values should be used to create an `AzureClusterIdentity` resource. Create an `azure-cluster-identity.yaml` file with the following content:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureClusterIdentity
+metadata:
+  name: cluster-identity
+spec:
+  type: WorkloadIdentity
+  tenantID: <your-tenant-id>
+  clientID: <your-client-id>
+  allowedNamespaces:
+    list:
+    - <cluster-namespace>
+```
+
+### AAD Pod Identity using Service Principal With Client Password (Deprecated)
+
+Once a new SP Identity is created in Azure, the corresponding values should be used to create an `AzureClusterIdentity` Kubernetes resource. Create an `azure-cluster-identity.yaml` file with the following contents:
 
 ```yaml
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -24,6 +44,11 @@ spec:
   allowedNamespaces: 
     list:
     - <cluster-namespace>
+```
+
+Deploy this resource to your cluster:
+```bash
+kubectl apply -f azure-cluster-identity.yaml
 ```
 
 A Kubernetes Secret should also be created to store the client password:
@@ -44,7 +69,7 @@ data:
   clientSecret: <client-secret-of-SP-identity>
 ```
 
-### Service Principal With Certificate
+### AAD Pod Identity using Service Principal With Certificate (Deprecated)
 
 Once a new SP Identity is created in Azure, the corresponding values should be used to create an `AzureClusterIdentity` resource:
 
@@ -89,7 +114,7 @@ data:
   password: PASSWORD
 ```
 
-### User-Assigned Managed Identity
+### AAD Pod Identity using User-Assigned Managed Identity (Deprecated)
 
 <aside class="note">
 
@@ -101,9 +126,9 @@ This option is only available when the cluster is managed from a Kubernetes clus
 
 #### Prerequisites
 
-1. [Create](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/how-manage-user-assigned-managed-identities?pivots=identity-mi-methods-azp#create-a-user-assigned-managed-identity) a user-assigned managed identity in Azure.
-2. [Create a role assignment](https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/howto-assign-access-portal#use-azure-rbac-to-assign-a-managed-identity-access-to-another-resource) to give the identity Contributor access to the Azure subscription where the workload cluster will be created.
-3. [Configure] the identity on the management cluster nodes by adding it to each worker node VM. If using AKS as the management cluster see [these instructions](https://docs.microsoft.com/en-us/azure/aks/use-managed-identity).
+1. [Create](https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/how-manage-user-assigned-managed-identities?pivots=identity-mi-methods-azp#create-a-user-assigned-managed-identity) a user-assigned managed identity in Azure.
+2. [Create a role assignment](https://learn.microsoft.com/azure/active-directory/managed-identities-azure-resources/howto-assign-access-portal#use-azure-rbac-to-assign-a-managed-identity-access-to-another-resource) to give the identity Contributor access to the Azure subscription where the workload cluster will be created.
+3. [Configure] the identity on the management cluster nodes by adding it to each worker node VM. If using AKS as the management cluster see [these instructions](https://learn.microsoft.com/azure/aks/use-managed-identity).
 
 #### Creating the AzureClusterIdentity
 
@@ -120,7 +145,7 @@ spec:
   tenantID: <azure-tenant-id>
   clientID: <client-id-of-user-assigned-identity>
   resourceID: <resource-id-of-user-assigned-identity>
-  allowedNamespaces: 
+  allowedNamespaces:
     list:
     - <cluster-namespace>
 ```
@@ -184,4 +209,4 @@ spec:
     namespace: <namespace-of-identity>
 ```
 
-For more details on how aad-pod-identity works, please check the guide [here](https://azure.github.io/aad-pod-identity/docs/).
+

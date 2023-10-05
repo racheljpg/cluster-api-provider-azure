@@ -21,13 +21,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
 	azprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
@@ -47,8 +48,8 @@ type (
 
 	// NodeLister is a service interface for returning generic lists.
 	NodeLister interface {
-		ListInstances(context.Context, string, string) ([]compute.VirtualMachineScaleSetVM, error)
-		List(context.Context, string) ([]compute.VirtualMachineScaleSet, error)
+		ListInstances(context.Context, string, string) ([]armcompute.VirtualMachineScaleSetVM, error)
+		List(context.Context, string) ([]armcompute.VirtualMachineScaleSet, error)
 	}
 )
 
@@ -74,20 +75,33 @@ func (a *AgentPoolVMSSNotFoundError) Is(target error) bool {
 
 // newAzureManagedMachinePoolService populates all the services based on input scope.
 func newAzureManagedMachinePoolService(scope *scope.ManagedMachinePoolScope) (*azureManagedMachinePoolService, error) {
-	var authorizer azure.Authorizer = scope
-	if scope.Location() != "" {
-		regionalAuthorizer, err := azure.WithRegionalBaseURI(scope, scope.Location())
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to create a regional authorizer")
-		}
-		authorizer = regionalAuthorizer
+	agentPoolsSvc, err := agentpools.New(scope)
+	if err != nil {
+		return nil, err
 	}
-
+	scaleSetAuthorizer, err := scaleSetAuthorizer(scope)
+	if err != nil {
+		return nil, err
+	}
+	scaleSetsClient, err := scalesets.NewClient(scaleSetAuthorizer)
+	if err != nil {
+		return nil, err
+	}
 	return &azureManagedMachinePoolService{
 		scope:         scope,
-		agentPoolsSvc: agentpools.New(scope),
-		scaleSetsSvc:  scalesets.NewClient(authorizer),
+		agentPoolsSvc: agentPoolsSvc,
+		scaleSetsSvc:  scaleSetsClient,
 	}, nil
+}
+
+// scaleSetAuthorizer takes a scope and determines if a regional authorizer is needed for scale sets
+// see https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/1850 for context on region based authorizer.
+func scaleSetAuthorizer(scope *scope.ManagedMachinePoolScope) (azure.Authorizer, error) {
+	if scope.ControlPlane.Spec.AzureEnvironment == azure.PublicCloudName {
+		return azure.WithRegionalBaseURI(scope, scope.Location()) // public cloud supports regional end points
+	}
+
+	return scope, nil
 }
 
 // Reconcile reconciles all the services in a predetermined order.
@@ -110,7 +124,7 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 		return errors.Wrapf(err, "failed to list vmss in resource group %s", nodeResourceGroup)
 	}
 
-	var match *compute.VirtualMachineScaleSet
+	var match *armcompute.VirtualMachineScaleSet
 	for _, ss := range vmss {
 		ss := ss
 		if ss.Tags["poolName"] != nil && *ss.Tags["poolName"] == agentPoolName {
@@ -136,7 +150,7 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 	var providerIDs = make([]string, len(instances))
 	for i := 0; i < len(instances); i++ {
 		// Transform the VMSS instance resource representation to conform to the cloud-provider-azure representation
-		providerID, err := azprovider.ConvertResourceGroupNameToLower(azure.ProviderIDPrefix + *instances[i].ID)
+		providerID, err := azprovider.ConvertResourceGroupNameToLower(azureutil.ProviderIDPrefix + *instances[i].ID)
 		if err != nil {
 			return errors.Wrapf(err, "failed to parse instance ID %s", *instances[i].ID)
 		}
@@ -148,6 +162,22 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 	s.scope.SetAgentPoolReady(true)
 
 	log.Info("reconciled managed machine pool successfully")
+	return nil
+}
+
+// Pause pauses all components making up the machine pool.
+func (s *azureManagedMachinePoolService) Pause(ctx context.Context) error {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureManagedMachinePoolService.Pause")
+	defer done()
+
+	pauser, ok := s.agentPoolsSvc.(azure.Pauser)
+	if !ok {
+		return nil
+	}
+	if err := pauser.Pause(ctx); err != nil {
+		return errors.Wrapf(err, "failed to pause machine pool %s", s.scope.Name())
+	}
+
 	return nil
 }
 

@@ -19,9 +19,9 @@ package agentpools
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -56,12 +56,16 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope AgentPoolScope) *Service {
-	client := newClient(scope)
-	return &Service{
-		scope:      scope,
-		Reconciler: async.New(scope, client, client),
+func New(scope AgentPoolScope) (*Service, error) {
+	client, err := newClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		scope: scope,
+		Reconciler: async.New[armcontainerservice.AgentPoolsClientCreateOrUpdateResponse,
+			armcontainerservice.AgentPoolsClientDeleteResponse](scope, client, client),
+	}, nil
 }
 
 // Name returns the service name.
@@ -80,14 +84,14 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		if err != nil {
 			resultingErr = err
 		} else {
-			agentPool, ok := result.(containerservice.AgentPool)
+			agentPool, ok := result.(armcontainerservice.AgentPool)
 			if !ok {
-				return errors.Errorf("%T is not a containerservice.AgentPool", result)
+				return errors.Errorf("%T is not an armcontainerservice.AgentPool", result)
 			}
 			// When autoscaling is set, add the annotation to the machine pool and update the replica count.
-			if pointer.BoolDeref(agentPool.EnableAutoScaling, false) {
+			if ptr.Deref(agentPool.Properties.EnableAutoScaling, false) {
 				s.scope.SetCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation, "true")
-				s.scope.SetCAPIMachinePoolReplicas(agentPool.Count)
+				s.scope.SetCAPIMachinePoolReplicas(agentPool.Properties.Count)
 			} else { // Otherwise, remove the annotation.
 				s.scope.RemoveCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation)
 			}

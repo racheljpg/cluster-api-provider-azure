@@ -18,18 +18,22 @@ package scope
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
-	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	mock_scope "sigs.k8s.io/cluster-api-provider-azure/azure/scope/mocks"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesetvms"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomock2 "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -129,6 +133,124 @@ func TestNewMachinePoolMachineScope(t *testing.T) {
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(s).NotTo(BeNil())
+			}
+		})
+	}
+}
+
+func TestMachinePoolMachineScope_ScaleSetVMSpecs(t *testing.T) {
+	tests := []struct {
+		name                    string
+		machinePoolMachineScope MachinePoolMachineScope
+		want                    azure.ResourceSpecGetter
+	}{
+		{
+			name: "return vmss vm spec for uniform vmss",
+			machinePoolMachineScope: MachinePoolMachineScope{
+				MachinePool: &expv1.MachinePool{},
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machinepool-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Template: infrav1exp.AzureMachinePoolMachineTemplate{
+							OSDisk: infrav1.OSDisk{
+								OSType: "Linux",
+							},
+						},
+						OrchestrationMode: infrav1.UniformOrchestrationMode,
+					},
+				},
+				AzureMachinePoolMachine: &infrav1exp.AzureMachinePoolMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machinepoolmachine-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolMachineSpec{
+						ProviderID: "azure:///subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachineScaleSets/machinepool-name/virtualMachines/0",
+						InstanceID: "0",
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
+				},
+				MachinePoolScope: &MachinePoolScope{
+					AzureMachinePool: &infrav1exp.AzureMachinePool{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "machinepool-name",
+						},
+					},
+				},
+			},
+			want: &scalesetvms.ScaleSetVMSpec{
+				Name:          "machinepoolmachine-name",
+				InstanceID:    "0",
+				ResourceGroup: "my-rg",
+				ScaleSetName:  "machinepool-name",
+				ProviderID:    "azure:///subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachineScaleSets/machinepool-name/virtualMachines/0",
+				IsFlex:        false,
+				ResourceID:    "",
+			},
+		},
+		{
+			name: "return vmss vm spec for vmss flex",
+			machinePoolMachineScope: MachinePoolMachineScope{
+				MachinePool: &expv1.MachinePool{},
+				AzureMachinePool: &infrav1exp.AzureMachinePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machinepool-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Template: infrav1exp.AzureMachinePoolMachineTemplate{
+							OSDisk: infrav1.OSDisk{
+								OSType: "Linux",
+							},
+						},
+						OrchestrationMode: infrav1.FlexibleOrchestrationMode,
+					},
+				},
+				AzureMachinePoolMachine: &infrav1exp.AzureMachinePoolMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machinepoolmachine-name",
+					},
+					Spec: infrav1exp.AzureMachinePoolMachineSpec{
+						ProviderID: "azure:///subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachineScaleSets/machinepool-name/virtualMachines/0",
+						InstanceID: "0",
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+						},
+					},
+				},
+				MachinePoolScope: &MachinePoolScope{
+					AzureMachinePool: &infrav1exp.AzureMachinePool{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "machinepool-name",
+						},
+					},
+				},
+			},
+			want: &scalesetvms.ScaleSetVMSpec{
+				Name:          "machinepoolmachine-name",
+				InstanceID:    "0",
+				ResourceGroup: "my-rg",
+				ScaleSetName:  "machinepool-name",
+				ProviderID:    "azure:///subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachineScaleSets/machinepool-name/virtualMachines/0",
+				IsFlex:        true,
+				ResourceID:    "/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachineScaleSets/machinepool-name/virtualMachines/0",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.machinePoolMachineScope.ScaleSetVMSpec(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Diff between expected result and actual result: %+v", cmp.Diff(tt.want, got))
 			}
 		})
 	}
@@ -237,7 +359,7 @@ func TestMachineScope_UpdateNodeStatus(t *testing.T) {
 						Spec: expv1.MachinePoolSpec{
 							Template: clusterv1.MachineTemplateSpec{
 								Spec: clusterv1.MachineSpec{
-									Version: pointer.String("v1.19.11"),
+									Version: ptr.To("v1.19.11"),
 								},
 							},
 						},
@@ -335,7 +457,7 @@ func TestMachinePoolMachineScope_CordonAndDrain(t *testing.T) {
 						Spec: expv1.MachinePoolSpec{
 							Template: clusterv1.MachineTemplateSpec{
 								Spec: clusterv1.MachineSpec{
-									Version: pointer.String("v1.19.11"),
+									Version: ptr.To("v1.19.11"),
 								},
 							},
 						},

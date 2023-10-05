@@ -22,14 +22,15 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments/mock_roleassignments"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets/mock_scalesets"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachines"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
@@ -45,7 +46,7 @@ var (
 		MachineName:   "test-vm",
 		ResourceGroup: "my-rg",
 		ResourceType:  azure.VirtualMachine,
-		PrincipalID:   pointer.String("fake-principal-id"),
+		PrincipalID:   ptr.To("fake-principal-id"),
 	}
 	fakeRoleAssignment2 = RoleAssignmentSpec{
 		MachineName:   "test-vmss",
@@ -55,6 +56,10 @@ var (
 
 	emptyRoleAssignmentSpec = RoleAssignmentSpec{}
 	fakeRoleAssignmentSpecs = []azure.ResourceSpecGetter{&fakeRoleAssignment1, &fakeRoleAssignment2, &emptyRoleAssignmentSpec}
+	fakeVMSSSpec            = scalesets.ScaleSetSpec{
+		Name:          "test-vmss",
+		ResourceGroup: "my-rg",
+	}
 )
 
 func TestReconcileRoleAssignmentsVM(t *testing.T) {
@@ -76,8 +81,8 @@ func TestReconcileRoleAssignmentsVM(t *testing.T) {
 				s.HasSystemAssignedIdentity().Return(true)
 				s.RoleAssignmentResourceType().Return("VirtualMachine")
 				s.RoleAssignmentSpecs(&fakePrincipalID).Return(fakeRoleAssignmentSpecs[:1])
-				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(compute.VirtualMachine{
-					Identity: &compute.VirtualMachineIdentity{
+				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(armcompute.VirtualMachine{
+					Identity: &armcompute.VirtualMachineIdentity{
 						PrincipalID: &fakePrincipalID,
 					},
 				}, nil)
@@ -95,7 +100,7 @@ func TestReconcileRoleAssignmentsVM(t *testing.T) {
 				s.Name().Return(fakeRoleAssignment1.MachineName)
 				s.HasSystemAssignedIdentity().Return(true)
 				s.RoleAssignmentResourceType().Return("VirtualMachine")
-				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(compute.VirtualMachine{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error"))
+				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(armcompute.VirtualMachine{}, autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error"))
 			},
 		},
 		{
@@ -110,8 +115,8 @@ func TestReconcileRoleAssignmentsVM(t *testing.T) {
 				s.RoleAssignmentResourceType().Return("VirtualMachine")
 				s.HasSystemAssignedIdentity().Return(true)
 				s.RoleAssignmentSpecs(&fakePrincipalID).Return(fakeRoleAssignmentSpecs[0:1])
-				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(compute.VirtualMachine{
-					Identity: &compute.VirtualMachineIdentity{
+				m.Get(gomockinternal.AContext(), &fakeVMSpec).Return(armcompute.VirtualMachine{
+					Identity: &armcompute.VirtualMachineIdentity{
 						PrincipalID: &fakePrincipalID,
 					},
 				}, nil)
@@ -169,8 +174,8 @@ func TestReconcileRoleAssignmentsVMSS(t *testing.T) {
 				s.RoleAssignmentResourceType().Return(azure.VirtualMachineScaleSet)
 				s.ResourceGroup().Return("my-rg")
 				s.Name().Return("test-vmss")
-				mvmss.Get(gomockinternal.AContext(), "my-rg", "test-vmss").Return(compute.VirtualMachineScaleSet{
-					Identity: &compute.VirtualMachineScaleSetIdentity{
+				mvmss.Get(gomockinternal.AContext(), &fakeVMSSSpec).Return(armcompute.VirtualMachineScaleSet{
+					Identity: &armcompute.VirtualMachineScaleSetIdentity{
 						PrincipalID: &fakePrincipalID,
 					},
 				}, nil)
@@ -187,7 +192,7 @@ func TestReconcileRoleAssignmentsVMSS(t *testing.T) {
 				s.ResourceGroup().Return("my-rg")
 				s.Name().Return("test-vmss")
 				s.HasSystemAssignedIdentity().Return(true)
-				mvmss.Get(gomockinternal.AContext(), "my-rg", "test-vmss").Return(compute.VirtualMachineScaleSet{},
+				mvmss.Get(gomockinternal.AContext(), &fakeVMSSSpec).Return(armcompute.VirtualMachineScaleSet{},
 					autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error"))
 			},
 		},
@@ -202,8 +207,8 @@ func TestReconcileRoleAssignmentsVMSS(t *testing.T) {
 				s.RoleAssignmentResourceType().Return(azure.VirtualMachineScaleSet)
 				s.ResourceGroup().Return("my-rg")
 				s.Name().Return("test-vmss")
-				mvmss.Get(gomockinternal.AContext(), "my-rg", "test-vmss").Return(compute.VirtualMachineScaleSet{
-					Identity: &compute.VirtualMachineScaleSetIdentity{
+				mvmss.Get(gomockinternal.AContext(), &fakeVMSSSpec).Return(armcompute.VirtualMachineScaleSet{
+					Identity: &armcompute.VirtualMachineScaleSetIdentity{
 						PrincipalID: &fakePrincipalID,
 					},
 				}, nil)
@@ -229,7 +234,7 @@ func TestReconcileRoleAssignmentsVMSS(t *testing.T) {
 			s := &Service{
 				Scope:                        scopeMock,
 				Reconciler:                   asyncMock,
-				virtualMachineScaleSetClient: vmMock,
+				virtualMachineScaleSetGetter: vmMock,
 			}
 
 			err := s.Reconcile(context.TODO())

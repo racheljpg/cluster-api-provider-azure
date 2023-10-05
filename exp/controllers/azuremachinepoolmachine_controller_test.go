@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -104,8 +104,8 @@ func TestAzureMachinePoolMachineReconciler_Reconcile(t *testing.T) {
 
 			c.Setup(cb, reconciler.EXPECT())
 			controller := NewAzureMachinePoolMachineController(cb.Build(), nil, 30*time.Second, "foo")
-			controller.reconcilerFactory = func(_ *scope.MachinePoolMachineScope) azure.Reconciler {
-				return reconciler
+			controller.reconcilerFactory = func(_ *scope.MachinePoolMachineScope) (azure.Reconciler, error) {
+				return reconciler, nil
 			}
 			res, err := controller.Reconcile(context.TODO(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
@@ -172,8 +172,9 @@ func getAReadyMachinePoolMachineCluster() (*clusterv1.Cluster, *infrav1.AzureClu
 
 	ampm := &infrav1exp.AzureMachinePoolMachine{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ampm1",
-			Namespace: "default",
+			Name:       "ampm1",
+			Namespace:  "default",
+			Finalizers: []string{"test"},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					Name:       amp.Name,

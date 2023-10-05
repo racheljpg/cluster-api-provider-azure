@@ -19,12 +19,12 @@ package controllers
 import (
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
@@ -50,8 +50,12 @@ func Test_newAzureMachinePoolService(t *testing.T) {
 	clusterMock.EXPECT().SubscriptionID().AnyTimes()
 	clusterMock.EXPECT().BaseURI().AnyTimes()
 	clusterMock.EXPECT().Authorizer().AnyTimes()
+	clusterMock.EXPECT().CloudEnvironment().AnyTimes()
+	clusterMock.EXPECT().Token().AnyTimes()
 	clusterMock.EXPECT().Location().Return(cluster.Spec.Location)
 	clusterMock.EXPECT().HashKey().Return("fakeCluster")
+	clusterMock.EXPECT().CloudEnvironment().AnyTimes()
+	clusterMock.EXPECT().Token().AnyTimes()
 
 	mps := &scope.MachinePoolScope{
 		ClusterScoper: clusterMock,
@@ -94,7 +98,7 @@ func newMachinePool(clusterName, poolName string) *expv1.MachinePool {
 			Namespace: "default",
 		},
 		Spec: expv1.MachinePoolSpec{
-			Replicas: pointer.Int32(2),
+			Replicas: ptr.To[int32](2),
 		},
 	}
 }

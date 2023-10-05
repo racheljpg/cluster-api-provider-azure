@@ -19,6 +19,7 @@ package disks
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -41,13 +42,17 @@ type Service struct {
 	async.Reconciler
 }
 
-// New creates a new disks service.
-func New(scope DiskScope) *Service {
-	client := newClient(scope)
-	return &Service{
-		Scope:      scope,
-		Reconciler: async.New(scope, nil, client),
+// New creates a disks service.
+func New(scope DiskScope) (*Service, error) {
+	client, err := newClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armcompute.DisksClientCreateOrUpdateResponse,
+			armcompute.DisksClientDeleteResponse](scope, nil, client),
+	}, nil
 }
 
 // Name returns the service name.

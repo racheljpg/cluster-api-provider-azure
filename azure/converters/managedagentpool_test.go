@@ -19,71 +19,72 @@ package converters
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"k8s.io/utils/ptr"
 )
 
 func Test_AgentPoolToManagedClusterAgentPoolProfile(t *testing.T) {
 	cases := []struct {
 		name   string
-		pool   containerservice.AgentPool
-		expect func(*GomegaWithT, containerservice.ManagedClusterAgentPoolProfile)
+		pool   armcontainerservice.AgentPool
+		expect func(*GomegaWithT, armcontainerservice.ManagedClusterAgentPoolProfile)
 	}{
 		{
 			name: "Should set all values correctly",
-			pool: containerservice.AgentPool{
-				Name: pointer.String("agentpool1"),
-				ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-					VMSize:              pointer.String("Standard_D2s_v3"),
-					OsType:              azure.LinuxOS,
-					OsDiskSizeGB:        pointer.Int32(100),
-					Count:               pointer.Int32(2),
-					Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-					OrchestratorVersion: pointer.String("1.22.6"),
-					VnetSubnetID:        pointer.String("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-123/providers/Microsoft.Network/virtualNetworks/vnet-123/subnets/subnet-123"),
-					Mode:                containerservice.AgentPoolModeUser,
-					EnableAutoScaling:   pointer.Bool(true),
-					MaxCount:            pointer.Int32(5),
-					MinCount:            pointer.Int32(2),
-					NodeTaints:          &[]string{"key1=value1:NoSchedule"},
-					AvailabilityZones:   &[]string{"zone1"},
-					MaxPods:             pointer.Int32(60),
-					OsDiskType:          containerservice.OSDiskTypeManaged,
+			pool: armcontainerservice.AgentPool{
+				Name: ptr.To("agentpool1"),
+				Properties: &armcontainerservice.ManagedClusterAgentPoolProfileProperties{
+					VMSize:              ptr.To("Standard_D2s_v3"),
+					OSType:              ptr.To(armcontainerservice.OSTypeLinux),
+					OSDiskSizeGB:        ptr.To[int32](100),
+					Count:               ptr.To[int32](2),
+					Type:                ptr.To(armcontainerservice.AgentPoolTypeVirtualMachineScaleSets),
+					OrchestratorVersion: ptr.To("1.22.6"),
+					VnetSubnetID:        ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-123/providers/Microsoft.Network/virtualNetworks/vnet-123/subnets/subnet-123"),
+					Mode:                ptr.To(armcontainerservice.AgentPoolModeUser),
+					EnableAutoScaling:   ptr.To(true),
+					MaxCount:            ptr.To[int32](5),
+					MinCount:            ptr.To[int32](2),
+					NodeTaints:          []*string{ptr.To("key1=value1:NoSchedule")},
+					AvailabilityZones:   []*string{ptr.To("zone1")},
+					MaxPods:             ptr.To[int32](60),
+					OSDiskType:          ptr.To(armcontainerservice.OSDiskTypeManaged),
 					NodeLabels: map[string]*string{
-						"custom": pointer.String("default"),
+						"custom": ptr.To("default"),
 					},
 					Tags: map[string]*string{
-						"custom": pointer.String("default"),
+						"custom": ptr.To("default"),
 					},
+					EnableFIPS: ptr.To(true),
 				},
 			},
 
-			expect: func(g *GomegaWithT, result containerservice.ManagedClusterAgentPoolProfile) {
-				g.Expect(result).To(Equal(containerservice.ManagedClusterAgentPoolProfile{
-					Name:                pointer.String("agentpool1"),
-					VMSize:              pointer.String("Standard_D2s_v3"),
-					OsType:              azure.LinuxOS,
-					OsDiskSizeGB:        pointer.Int32(100),
-					Count:               pointer.Int32(2),
-					Type:                containerservice.AgentPoolTypeVirtualMachineScaleSets,
-					OrchestratorVersion: pointer.String("1.22.6"),
-					VnetSubnetID:        pointer.String("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-123/providers/Microsoft.Network/virtualNetworks/vnet-123/subnets/subnet-123"),
-					Mode:                containerservice.AgentPoolModeUser,
-					EnableAutoScaling:   pointer.Bool(true),
-					MaxCount:            pointer.Int32(5),
-					MinCount:            pointer.Int32(2),
-					NodeTaints:          &[]string{"key1=value1:NoSchedule"},
-					AvailabilityZones:   &[]string{"zone1"},
-					MaxPods:             pointer.Int32(60),
-					OsDiskType:          containerservice.OSDiskTypeManaged,
+			expect: func(g *GomegaWithT, result armcontainerservice.ManagedClusterAgentPoolProfile) {
+				g.Expect(result).To(Equal(armcontainerservice.ManagedClusterAgentPoolProfile{
+					Name:                ptr.To("agentpool1"),
+					VMSize:              ptr.To("Standard_D2s_v3"),
+					OSType:              ptr.To(armcontainerservice.OSTypeLinux),
+					OSDiskSizeGB:        ptr.To[int32](100),
+					Count:               ptr.To[int32](2),
+					Type:                ptr.To(armcontainerservice.AgentPoolTypeVirtualMachineScaleSets),
+					OrchestratorVersion: ptr.To("1.22.6"),
+					VnetSubnetID:        ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-123/providers/Microsoft.Network/virtualNetworks/vnet-123/subnets/subnet-123"),
+					Mode:                ptr.To(armcontainerservice.AgentPoolModeUser),
+					EnableAutoScaling:   ptr.To(true),
+					MaxCount:            ptr.To[int32](5),
+					MinCount:            ptr.To[int32](2),
+					NodeTaints:          []*string{ptr.To("key1=value1:NoSchedule")},
+					AvailabilityZones:   []*string{ptr.To("zone1")},
+					MaxPods:             ptr.To[int32](60),
+					OSDiskType:          ptr.To(armcontainerservice.OSDiskTypeManaged),
 					NodeLabels: map[string]*string{
-						"custom": pointer.String("default"),
+						"custom": ptr.To("default"),
 					},
 					Tags: map[string]*string{
-						"custom": pointer.String("default"),
+						"custom": ptr.To("default"),
 					},
+					EnableFIPS: ptr.To(true),
 				}))
 			},
 		},

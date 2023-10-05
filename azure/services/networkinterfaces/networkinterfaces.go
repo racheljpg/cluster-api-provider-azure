@@ -19,6 +19,7 @@ package networkinterfaces
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -44,13 +45,17 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope NICScope, skuCache *resourceskus.Cache) *Service {
-	Client := NewClient(scope)
-	return &Service{
-		Scope:            scope,
-		Reconciler:       async.New(scope, Client, Client),
-		resourceSKUCache: skuCache,
+func New(scope NICScope, skuCache *resourceskus.Cache) (*Service, error) {
+	client, err := NewClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armnetwork.InterfacesClientCreateOrUpdateResponse,
+			armnetwork.InterfacesClientDeleteResponse](scope, client, client),
+		resourceSKUCache: skuCache,
+	}, nil
 }
 
 // Name returns the service name.

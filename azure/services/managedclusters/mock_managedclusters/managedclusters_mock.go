@@ -23,8 +23,9 @@ package mock_managedclusters
 import (
 	reflect "reflect"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	autorest "github.com/Azure/go-autorest/autorest"
-	gomock "github.com/golang/mock/gomock"
+	gomock "go.uber.org/mock/gomock"
 	v1 "k8s.io/api/core/v1"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -230,6 +231,18 @@ func (mr *MockManagedClusterScopeMockRecorder) SetKubeConfigData(arg0 interface{
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetKubeConfigData", reflect.TypeOf((*MockManagedClusterScope)(nil).SetKubeConfigData), arg0)
 }
 
+// SetKubeletIdentity mocks base method.
+func (m *MockManagedClusterScope) SetKubeletIdentity(arg0 string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetKubeletIdentity", arg0)
+}
+
+// SetKubeletIdentity indicates an expected call of SetKubeletIdentity.
+func (mr *MockManagedClusterScopeMockRecorder) SetKubeletIdentity(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetKubeletIdentity", reflect.TypeOf((*MockManagedClusterScope)(nil).SetKubeletIdentity), arg0)
+}
+
 // SetLongRunningOperationState mocks base method.
 func (m *MockManagedClusterScope) SetLongRunningOperationState(arg0 *v1beta1.Future) {
 	m.ctrl.T.Helper()
@@ -240,6 +253,18 @@ func (m *MockManagedClusterScope) SetLongRunningOperationState(arg0 *v1beta1.Fut
 func (mr *MockManagedClusterScopeMockRecorder) SetLongRunningOperationState(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetLongRunningOperationState", reflect.TypeOf((*MockManagedClusterScope)(nil).SetLongRunningOperationState), arg0)
+}
+
+// SetOIDCIssuerProfileStatus mocks base method.
+func (m *MockManagedClusterScope) SetOIDCIssuerProfileStatus(arg0 *v1beta1.OIDCIssuerProfileStatus) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetOIDCIssuerProfileStatus", arg0)
+}
+
+// SetOIDCIssuerProfileStatus indicates an expected call of SetOIDCIssuerProfileStatus.
+func (mr *MockManagedClusterScopeMockRecorder) SetOIDCIssuerProfileStatus(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetOIDCIssuerProfileStatus", reflect.TypeOf((*MockManagedClusterScope)(nil).SetOIDCIssuerProfileStatus), arg0)
 }
 
 // SubscriptionID mocks base method.
@@ -268,6 +293,20 @@ func (m *MockManagedClusterScope) TenantID() string {
 func (mr *MockManagedClusterScopeMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockManagedClusterScope)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockManagedClusterScope) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockManagedClusterScopeMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockManagedClusterScope)(nil).Token))
 }
 
 // UpdateDeleteStatus mocks base method.

@@ -16,7 +16,7 @@ limitations under the License.
 
 package azure
 
-import "k8s.io/utils/pointer"
+import "k8s.io/utils/ptr"
 
 // StringSlice returns a string slice value for the passed string slice pointer. It returns a nil
 // slice if the pointer is nil.
@@ -27,6 +27,28 @@ func StringSlice(s *[]string) []string {
 	return nil
 }
 
+// PtrSlice returns a slice of pointers from a pointer to a slice. It returns nil if the
+// pointer is nil or the slice pointed to is empty.
+func PtrSlice[T any](p *[]T) []*T {
+	if p == nil || len(*p) == 0 {
+		return nil
+	}
+	s := make([]*T, 0, len(*p))
+	for _, v := range *p {
+		s = append(s, ptr.To(v))
+	}
+	return s
+}
+
+// AliasOrNil returns a pointer to a string-derived type from a passed string pointer,
+// or nil if the pointer is nil or an empty string.
+func AliasOrNil[T ~string](s *string) *T {
+	if s == nil || *s == "" {
+		return nil
+	}
+	return ptr.To(T(*s))
+}
+
 // StringMapPtr converts a map[string]string into a map[string]*string. It returns nil if the map is nil.
 func StringMapPtr(m map[string]string) map[string]*string {
 	if m == nil {
@@ -34,7 +56,7 @@ func StringMapPtr(m map[string]string) map[string]*string {
 	}
 	msp := make(map[string]*string, len(m))
 	for k, v := range m {
-		msp[k] = pointer.String(v)
+		msp[k] = ptr.To(v)
 	}
 	return msp
 }

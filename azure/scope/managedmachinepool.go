@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
@@ -146,7 +146,7 @@ func (s *ManagedMachinePoolScope) AgentPoolSpec() azure.ResourceSpecGetter {
 
 func getAgentPoolSubnet(controlPlane *infrav1.AzureManagedControlPlane, infraMachinePool *infrav1.AzureManagedMachinePool) *string {
 	if infraMachinePool.Spec.SubnetName == nil {
-		return pointer.String(controlPlane.Spec.VirtualNetwork.Subnet.Name)
+		return ptr.To(controlPlane.Spec.VirtualNetwork.Subnet.Name)
 	}
 	return infraMachinePool.Spec.SubnetName
 }
@@ -167,7 +167,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 	}
 
 	agentPoolSpec := &agentpools.AgentPoolSpec{
-		Name:          pointer.StringDeref(managedMachinePool.Spec.Name, ""),
+		Name:          ptr.Deref(managedMachinePool.Spec.Name, ""),
 		ResourceGroup: managedControlPlane.Spec.ResourceGroupName,
 		Cluster:       managedControlPlane.Name,
 		SKU:           managedMachinePool.Spec.SKU,
@@ -178,7 +178,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 			managedControlPlane.Spec.SubscriptionID,
 			managedControlPlane.Spec.VirtualNetwork.ResourceGroup,
 			managedControlPlane.Spec.VirtualNetwork.Name,
-			pointer.StringDeref(getAgentPoolSubnet(managedControlPlane, managedMachinePool), ""),
+			ptr.Deref(getAgentPoolSubnet(managedControlPlane, managedMachinePool), ""),
 		),
 		Mode:                 managedMachinePool.Spec.Mode,
 		MaxPods:              managedMachinePool.Spec.MaxPods,
@@ -189,9 +189,12 @@ func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 		EnableNodePublicIP:   managedMachinePool.Spec.EnableNodePublicIP,
 		NodePublicIPPrefixID: managedMachinePool.Spec.NodePublicIPPrefixID,
 		ScaleSetPriority:     managedMachinePool.Spec.ScaleSetPriority,
+		ScaleDownMode:        managedMachinePool.Spec.ScaleDownMode,
+		SpotMaxPrice:         managedMachinePool.Spec.SpotMaxPrice,
 		AdditionalTags:       managedMachinePool.Spec.AdditionalTags,
 		KubeletDiskType:      managedMachinePool.Spec.KubeletDiskType,
 		LinuxOSConfig:        managedMachinePool.Spec.LinuxOSConfig,
+		EnableFIPS:           managedMachinePool.Spec.EnableFIPS,
 	}
 
 	if managedMachinePool.Spec.OSDiskSizeGB != nil {
@@ -207,7 +210,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 	}
 
 	if managedMachinePool.Spec.Scaling != nil {
-		agentPoolSpec.EnableAutoScaling = pointer.Bool(true)
+		agentPoolSpec.EnableAutoScaling = true
 		agentPoolSpec.MaxCount = managedMachinePool.Spec.Scaling.MaxSize
 		agentPoolSpec.MinCount = managedMachinePool.Spec.Scaling.MinSize
 	}
@@ -215,7 +218,7 @@ func buildAgentPoolSpec(managedControlPlane *infrav1.AzureManagedControlPlane,
 	if len(managedMachinePool.Spec.NodeLabels) > 0 {
 		agentPoolSpec.NodeLabels = make(map[string]*string, len(managedMachinePool.Spec.NodeLabels))
 		for k, v := range managedMachinePool.Spec.NodeLabels {
-			agentPoolSpec.NodeLabels[k] = pointer.String(v)
+			agentPoolSpec.NodeLabels[k] = ptr.To(v)
 		}
 	}
 

@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
@@ -48,12 +49,15 @@ import (
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/cluster-api/util/patch"
+	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -83,7 +87,7 @@ func AzureClusterToAzureMachinesMapper(ctx context.Context, c client.Client, obj
 		return nil, errors.Wrap(err, "failed to find GVK for AzureMachine")
 	}
 
-	return func(o client.Object) []ctrl.Request {
+	return func(ctx context.Context, o client.Object) []ctrl.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -118,7 +122,7 @@ func AzureClusterToAzureMachinesMapper(ctx context.Context, c client.Client, obj
 		var results []ctrl.Request
 		for _, machine := range machineList.Items {
 			m := machine
-			azureMachines := mapFunc(&m)
+			azureMachines := mapFunc(ctx, &m)
 			results = append(results, azureMachines...)
 		}
 
@@ -472,13 +476,13 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 	old := &corev1.Secret{}
 	err := kubeclient.Get(ctx, key, old)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return errors.Wrap(err, "failed to fetch existing azure json")
+		return errors.Wrap(err, "failed to fetch existing secret")
 	}
 
 	// Create if it wasn't found
 	if apierrors.IsNotFound(err) {
 		if err := kubeclient.Create(ctx, newSecret); err != nil && !apierrors.IsAlreadyExists(err) {
-			return errors.Wrap(err, "failed to create cluster azure json")
+			return errors.Wrap(err, "failed to create secret")
 		}
 		return nil
 	}
@@ -486,7 +490,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 	tag, exists := old.Labels[clusterName]
 
 	if !exists || tag != string(infrav1.ResourceLifecycleOwned) {
-		log.V(2).Info("returning early from json reconcile, user provided secret already exists")
+		log.V(2).Info("returning early from secret reconcile, user provided secret already exists")
 		return nil
 	}
 
@@ -502,7 +506,7 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 	hasData := equality.Semantic.DeepEqual(old.Data, newSecret.Data)
 	if hasData && hasOwner {
 		// no update required
-		log.V(2).Info("returning early from json reconcile, no update needed")
+		log.V(2).Info("returning early from secret reconcile, no update needed")
 		return nil
 	}
 
@@ -514,12 +518,12 @@ func reconcileAzureSecret(ctx context.Context, kubeclient client.Client, owner m
 		old.Data = newSecret.Data
 	}
 
-	log.V(2).Info("updating azure json")
+	log.V(2).Info("updating azure secret")
 	if err := kubeclient.Update(ctx, old); err != nil {
-		return errors.Wrap(err, "failed to update cluster azure json when diff was required")
+		return errors.Wrap(err, "failed to update secret when diff was required")
 	}
 
-	log.V(2).Info("done updating azure json")
+	log.V(2).Info("done updating secret")
 
 	return nil
 }
@@ -602,11 +606,8 @@ func ShouldDeleteIndividualResources(ctx context.Context, clusterScope *scope.Cl
 	if clusterScope.Cluster.DeletionTimestamp.IsZero() {
 		return true
 	}
-	grpSvc := groups.New(clusterScope)
-	managed, err := grpSvc.IsManaged(ctx)
-	// Since this is a best effort attempt to speed up delete, we don't fail the delete if we can't get the RG status.
-	// Instead, take the long way and delete all resources one by one.
-	return err != nil || !managed
+
+	return groups.New(clusterScope).ShouldDeleteIndividualResources(ctx)
 }
 
 // GetClusterIdentityFromRef returns the AzureClusterIdentity referenced by the AzureCluster.
@@ -649,20 +650,24 @@ func EnsureClusterIdentity(ctx context.Context, c client.Client, object conditio
 	if err != nil {
 		return err
 	}
+
 	if !scope.IsClusterNamespaceAllowed(ctx, c, identity.Spec.AllowedNamespaces, namespace) {
 		conditions.MarkFalse(object, infrav1.NetworkInfrastructureReadyCondition, infrav1.NamespaceNotAllowedByIdentity, clusterv1.ConditionSeverityError, "")
 		return errors.New("AzureClusterIdentity list of allowed namespaces doesn't include current cluster namespace")
 	}
-	identityHelper, err := patch.NewHelper(identity, c)
-	if err != nil {
-		return errors.Wrap(err, "failed to init patch helper")
+
+	// Remove deprecated finalizer if it exists, Register the finalizer immediately to avoid orphaning Azure resources on delete.
+	if controllerutil.RemoveFinalizer(identity, deprecatedClusterIdentityFinalizer(finalizerPrefix, namespace, name)) ||
+		controllerutil.AddFinalizer(identity, clusterIdentityFinalizer(finalizerPrefix, namespace, name)) {
+		// finalizers are added/removed then patch the object
+		identityHelper, err := patch.NewHelper(identity, c)
+		if err != nil {
+			return errors.Wrap(err, "failed to init patch helper")
+		}
+		return identityHelper.Patch(ctx, identity)
 	}
-	// Remove deprecated finalizer if it exists.
-	controllerutil.RemoveFinalizer(identity, deprecatedClusterIdentityFinalizer(finalizerPrefix, namespace, name))
-	// If the AzureClusterIdentity doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(identity, clusterIdentityFinalizer(finalizerPrefix, namespace, name))
-	// Register the finalizer immediately to avoid orphaning Azure resources on delete.
-	return identityHelper.Patch(ctx, identity)
+
+	return nil
 }
 
 // RemoveClusterIdentityFinalizer removes the finalizer on an AzureClusterIdentity.
@@ -688,7 +693,7 @@ func RemoveClusterIdentityFinalizer(ctx context.Context, c client.Client, object
 // MachinePoolToInfrastructureMapFunc returns a handler.MapFunc that watches for
 // MachinePool events and returns reconciliation requests for an infrastructure provider object.
 func MachinePoolToInfrastructureMapFunc(gvk schema.GroupVersionKind, log logr.Logger) handler.MapFunc {
-	return func(o client.Object) []reconcile.Request {
+	return func(ctx context.Context, o client.Object) []reconcile.Request {
 		m, ok := o.(*expv1.MachinePool)
 		if !ok {
 			log.V(4).Info("attempt to map incorrect type", "type", fmt.Sprintf("%T", o))
@@ -725,7 +730,7 @@ func AzureManagedClusterToAzureManagedMachinePoolsMapper(ctx context.Context, c 
 		return nil, errors.Wrap(err, "failed to find GVK for AzureManagedMachinePool")
 	}
 
-	return func(o client.Object) []ctrl.Request {
+	return func(ctx context.Context, o client.Object) []ctrl.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -760,7 +765,7 @@ func AzureManagedClusterToAzureManagedMachinePoolsMapper(ctx context.Context, c 
 		var results []ctrl.Request
 		for _, machine := range machineList.Items {
 			m := machine
-			azureMachines := mapFunc(&m)
+			azureMachines := mapFunc(ctx, &m)
 			results = append(results, azureMachines...)
 		}
 
@@ -778,7 +783,7 @@ func AzureManagedControlPlaneToAzureManagedMachinePoolsMapper(ctx context.Contex
 		return nil, errors.Wrap(err, "failed to find GVK for AzureManagedMachinePool")
 	}
 
-	return func(o client.Object) []ctrl.Request {
+	return func(ctx context.Context, o client.Object) []ctrl.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -813,7 +818,7 @@ func AzureManagedControlPlaneToAzureManagedMachinePoolsMapper(ctx context.Contex
 		var results []ctrl.Request
 		for _, machine := range machineList.Items {
 			m := machine
-			azureMachines := mapFunc(&m)
+			azureMachines := mapFunc(ctx, &m)
 			results = append(results, azureMachines...)
 		}
 
@@ -825,7 +830,7 @@ func AzureManagedControlPlaneToAzureManagedMachinePoolsMapper(ctx context.Contex
 // AzureManagedControlPlane. The transform requires AzureManagedCluster to map to the owning Cluster, then from the
 // Cluster, collect the control plane infrastructure reference.
 func AzureManagedClusterToAzureManagedControlPlaneMapper(ctx context.Context, c client.Client, log logr.Logger) (handler.MapFunc, error) {
-	return func(o client.Object) []ctrl.Request {
+	return func(ctx context.Context, o client.Object) []ctrl.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -874,7 +879,7 @@ func AzureManagedClusterToAzureManagedControlPlaneMapper(ctx context.Context, c 
 // AzureManagedControlPlane. The transform requires AzureManagedCluster to map to the owning Cluster, then from the
 // Cluster, collect the control plane infrastructure reference.
 func AzureManagedControlPlaneToAzureManagedClusterMapper(ctx context.Context, c client.Client, log logr.Logger) (handler.MapFunc, error) {
-	return func(o client.Object) []ctrl.Request {
+	return func(ctx context.Context, o client.Object) []ctrl.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -922,7 +927,7 @@ func AzureManagedControlPlaneToAzureManagedClusterMapper(ctx context.Context, c 
 // MachinePoolToAzureManagedControlPlaneMapFunc returns a handler.MapFunc that watches for
 // MachinePool events and returns reconciliation requests for a control plane object.
 func MachinePoolToAzureManagedControlPlaneMapFunc(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, log logr.Logger) handler.MapFunc {
-	return func(o client.Object) []reconcile.Request {
+	return func(ctx context.Context, o client.Object) []reconcile.Request {
 		ctx, cancel := context.WithTimeout(ctx, reconciler.DefaultMappingTimeout)
 		defer cancel()
 
@@ -1018,4 +1023,40 @@ func MachinePoolToAzureManagedControlPlaneMapFunc(ctx context.Context, c client.
 		// By default, return nothing for a machine pool which is not the default pool for a control plane.
 		return nil
 	}
+}
+
+// ClusterUpdatePauseChange returns a predicate that returns true for an update event when a cluster's
+// Spec.Paused changes between any two distinct values.
+func ClusterUpdatePauseChange(logger logr.Logger) predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			log := logger.WithValues("predicate", "ClusterUpdatePauseChange", "eventType", "update")
+
+			oldCluster, ok := e.ObjectOld.(*clusterv1.Cluster)
+			if !ok {
+				log.V(4).Info("Expected Cluster", "type", fmt.Sprintf("%T", e.ObjectOld))
+				return false
+			}
+			log = log.WithValues("Cluster", klog.KObj(oldCluster))
+
+			newCluster := e.ObjectNew.(*clusterv1.Cluster)
+
+			if oldCluster.Spec.Paused != newCluster.Spec.Paused {
+				log.V(4).Info("Cluster paused status changed, allowing further processing")
+				return true
+			}
+
+			log.V(6).Info("Cluster paused status remained the same, blocking further processing")
+			return false
+		},
+		CreateFunc:  func(e event.CreateEvent) bool { return false },
+		DeleteFunc:  func(e event.DeleteEvent) bool { return false },
+		GenericFunc: func(e event.GenericEvent) bool { return false },
+	}
+}
+
+// ClusterPauseChangeAndInfrastructureReady is based on ClusterUnpausedAndInfrastructureReady, but
+// additionally accepts Cluster pause events.
+func ClusterPauseChangeAndInfrastructureReady(log logr.Logger) predicate.Funcs {
+	return predicates.Any(log, predicates.ClusterCreateInfraReady(log), predicates.ClusterUpdateInfraReady(log), ClusterUpdatePauseChange(log))
 }

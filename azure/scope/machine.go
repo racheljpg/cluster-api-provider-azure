@@ -22,11 +22,11 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/availabilitysets"
@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachines"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vmextensions"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -56,6 +57,7 @@ type MachineScopeParams struct {
 	Machine      *clusterv1.Machine
 	AzureMachine *infrav1.AzureMachine
 	Cache        *MachineCache
+	SKUCache     SKUCacher
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
@@ -83,6 +85,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		patchHelper:   helper,
 		ClusterScoper: params.ClusterScope,
 		cache:         params.Cache,
+		skuCache:      params.SKUCache,
 	}, nil
 }
 
@@ -95,6 +98,12 @@ type MachineScope struct {
 	Machine      *clusterv1.Machine
 	AzureMachine *infrav1.AzureMachine
 	cache        *MachineCache
+	skuCache     SKUCacher
+}
+
+// SKUCacher fetches a SKU from its cache.
+type SKUCacher interface {
+	Get(context.Context, string, resourceskus.ResourceType) (resourceskus.SKU, error)
 }
 
 // MachineCache stores common machine information so we don't have to hit the API multiple times within the same reconcile loop.
@@ -124,9 +133,13 @@ func (m *MachineScope) InitMachineCache(ctx context.Context) error {
 			return err
 		}
 
-		skuCache, err := resourceskus.GetCache(m, m.Location())
-		if err != nil {
-			return err
+		skuCache := m.skuCache
+		if skuCache == nil {
+			cache, err := resourceskus.GetCache(m, m.Location())
+			if err != nil {
+				return err
+			}
+			skuCache = cache
 		}
 
 		m.cache.VMSKU, err = skuCache.Get(ctx, m.AzureMachine.Spec.VMSize, resourceskus.VirtualMachines)
@@ -134,9 +147,9 @@ func (m *MachineScope) InitMachineCache(ctx context.Context) error {
 			return errors.Wrapf(err, "failed to get VM SKU %s in compute api", m.AzureMachine.Spec.VMSize)
 		}
 
-		m.cache.availabilitySetSKU, err = skuCache.Get(ctx, string(compute.AvailabilitySetSkuTypesAligned), resourceskus.AvailabilitySets)
+		m.cache.availabilitySetSKU, err = skuCache.Get(ctx, string(armcompute.AvailabilitySetSKUTypesAligned), resourceskus.AvailabilitySets)
 		if err != nil {
-			return errors.Wrapf(err, "failed to get availability set SKU %s in compute api", string(compute.AvailabilitySetSkuTypesAligned))
+			return errors.Wrapf(err, "failed to get availability set SKU %s in compute api", string(armcompute.AvailabilitySetSKUTypesAligned))
 		}
 	}
 
@@ -219,7 +232,7 @@ func (m *MachineScope) InboundNatSpecs() []azure.ResourceSpecGetter {
 		if frontEndIPs := m.APIServerLB().FrontendIPs; len(frontEndIPs) > 0 {
 			ipConfig := frontEndIPs[0].Name
 			id := azure.FrontendIPConfigID(m.SubscriptionID(), m.ResourceGroup(), m.APIServerLBName(), ipConfig)
-			spec.FrontendIPConfigurationID = pointer.String(id)
+			spec.FrontendIPConfigurationID = ptr.To(id)
 		}
 
 		return []azure.ResourceSpecGetter{spec}
@@ -374,7 +387,8 @@ func (m *MachineScope) VMExtensionSpecs() []azure.ResourceSpecGetter {
 		})
 	}
 
-	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachine.Spec.OSDisk.OSType, m.CloudEnvironment(), m.Name())
+	cpuArchitectureType, _ := m.cache.VMSKU.GetCapability(resourceskus.CPUArchitectureType)
+	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachine.Spec.OSDisk.OSType, m.CloudEnvironment(), m.Name(), cpuArchitectureType)
 
 	if bootstrapExtensionSpec != nil {
 		extensionSpecs = append(extensionSpecs, &vmextensions.VMExtensionSpec{
@@ -447,7 +461,7 @@ func (m *MachineScope) Role() string {
 
 // GetVMID returns the AzureMachine instance id by parsing the scope's providerID.
 func (m *MachineScope) GetVMID() string {
-	resourceID, err := azure.ParseResourceID(m.ProviderID())
+	resourceID, err := azureutil.ParseResourceID(m.ProviderID())
 	if err != nil {
 		return ""
 	}
@@ -456,7 +470,7 @@ func (m *MachineScope) GetVMID() string {
 
 // ProviderID returns the AzureMachine providerID from the spec.
 func (m *MachineScope) ProviderID() string {
-	return pointer.StringDeref(m.AzureMachine.Spec.ProviderID, "")
+	return ptr.Deref(m.AzureMachine.Spec.ProviderID, "")
 }
 
 // AvailabilitySetSpec returns the availability set spec for this machine if available.
@@ -541,7 +555,7 @@ func (m *MachineScope) SystemAssignedIdentityDefinitionID() string {
 
 // SetProviderID sets the AzureMachine providerID in spec.
 func (m *MachineScope) SetProviderID(v string) {
-	m.AzureMachine.Spec.ProviderID = pointer.String(v)
+	m.AzureMachine.Spec.ProviderID = ptr.To(v)
 }
 
 // VMState returns the AzureMachine VM state.
@@ -569,7 +583,7 @@ func (m *MachineScope) SetNotReady() {
 
 // SetFailureMessage sets the AzureMachine status failure message.
 func (m *MachineScope) SetFailureMessage(v error) {
-	m.AzureMachine.Status.FailureMessage = pointer.String(v.Error())
+	m.AzureMachine.Status.FailureMessage = ptr.To(v.Error())
 }
 
 // SetFailureReason sets the AzureMachine status failure reason.
@@ -687,17 +701,20 @@ func (m *MachineScope) GetVMImage(ctx context.Context) (*infrav1.Image, error) {
 		return m.AzureMachine.Spec.Image, nil
 	}
 
-	svc := virtualmachineimages.New(m)
+	svc, err := virtualmachineimages.New(m)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create virtualmachineimages service")
+	}
 
 	if m.AzureMachine.Spec.OSDisk.OSType == azure.WindowsOS {
 		runtime := m.AzureMachine.Annotations["runtime"]
 		windowsServerVersion := m.AzureMachine.Annotations["windowsServerVersion"]
 		log.Info("No image specified for machine, using default Windows Image", "machine", m.AzureMachine.GetName(), "runtime", runtime, "windowsServerVersion", windowsServerVersion)
-		return svc.GetDefaultWindowsImage(ctx, m.Location(), pointer.StringDeref(m.Machine.Spec.Version, ""), runtime, windowsServerVersion)
+		return svc.GetDefaultWindowsImage(ctx, m.Location(), ptr.Deref(m.Machine.Spec.Version, ""), runtime, windowsServerVersion)
 	}
 
 	log.Info("No image specified for machine, using default Linux Image", "machine", m.AzureMachine.GetName())
-	return svc.GetDefaultUbuntuImage(ctx, m.Location(), pointer.StringDeref(m.Machine.Spec.Version, ""))
+	return svc.GetDefaultUbuntuImage(ctx, m.Location(), ptr.Deref(m.Machine.Spec.Version, ""))
 }
 
 // SetSubnetName defaults the AzureMachine subnet name to the name of one the subnets with the machine role when there is only one of them.

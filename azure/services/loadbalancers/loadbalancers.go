@@ -19,6 +19,7 @@ package loadbalancers
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -27,10 +28,11 @@ import (
 )
 
 const (
-	serviceName = "loadbalancers"
-	tcpProbe    = "TCPProbe"
-	lbRuleHTTPS = "LBRuleHTTPS"
-	outboundNAT = "OutboundNATAllProtocols"
+	serviceName           = "loadbalancers"
+	httpsProbe            = "HTTPSProbe"
+	httpsProbeRequestPath = "/readyz"
+	lbRuleHTTPS           = "LBRuleHTTPS"
+	outboundNAT           = "OutboundNATAllProtocols"
 )
 
 // LBScope defines the scope interface for a load balancer service.
@@ -47,12 +49,16 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope LBScope) *Service {
-	client := newClient(scope)
-	return &Service{
-		Scope:      scope,
-		Reconciler: async.New(scope, client, client),
+func New(scope LBScope) (*Service, error) {
+	client, err := newClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armnetwork.LoadBalancersClientCreateOrUpdateResponse,
+			armnetwork.LoadBalancersClientDeleteResponse](scope, client, client),
+	}, nil
 }
 
 // Name returns the service name.

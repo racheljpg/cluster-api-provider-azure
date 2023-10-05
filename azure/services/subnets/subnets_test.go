@@ -21,12 +21,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -48,18 +48,18 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeSubnet1 = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-1"),
-		Name: pointer.String("my-subnet-1"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefix: pointer.String("10.0.0.0/16"),
-			RouteTable: &network.RouteTable{
-				ID:   pointer.String("rt-id"),
-				Name: pointer.String("my-subnet_route_table"),
+	fakeSubnet1 = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-1"),
+		Name: ptr.To("my-subnet-1"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefix: ptr.To("10.0.0.0/16"),
+			RouteTable: &armnetwork.RouteTable{
+				ID:   ptr.To("rt-id"),
+				Name: ptr.To("my-subnet_route_table"),
 			},
-			NetworkSecurityGroup: &network.SecurityGroup{
-				ID:   pointer.String("sg-id-1"),
-				Name: pointer.String("my-sg-1"),
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{
+				ID:   ptr.To("sg-id-1"),
+				Name: ptr.To("my-sg-1"),
 			},
 		},
 	}
@@ -77,18 +77,18 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeSubnet2 = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-2"),
-		Name: pointer.String("my-subnet-2"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefix: pointer.String("10.2.0.0/16"),
-			RouteTable: &network.RouteTable{
-				ID:   pointer.String("rt-id"),
-				Name: pointer.String("my-subnet_route_table"),
+	fakeSubnet2 = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-2"),
+		Name: ptr.To("my-subnet-2"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefix: ptr.To("10.2.0.0/16"),
+			RouteTable: &armnetwork.RouteTable{
+				ID:   ptr.To("rt-id"),
+				Name: ptr.To("my-subnet_route_table"),
 			},
-			NetworkSecurityGroup: &network.SecurityGroup{
-				ID:   pointer.String("sg-id-2"),
-				Name: pointer.String("my-sg-2"),
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{
+				ID:   ptr.To("sg-id-2"),
+				Name: ptr.To("my-sg-2"),
 			},
 		},
 	}
@@ -105,18 +105,18 @@ var (
 		SecurityGroupName: "my-sg-1",
 		Role:              infrav1.SubnetNode,
 	}
-	fakeSubnetNotManaged = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-1"),
-		Name: pointer.String("my-subnet-1"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefix: pointer.String("10.0.0.0/16"),
-			RouteTable: &network.RouteTable{
-				ID:   pointer.String("rt-id"),
-				Name: pointer.String("my-subnet_route_table"),
+	fakeSubnetNotManaged = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet-1"),
+		Name: ptr.To("my-subnet-1"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefix: ptr.To("10.0.0.0/16"),
+			RouteTable: &armnetwork.RouteTable{
+				ID:   ptr.To("rt-id"),
+				Name: ptr.To("my-subnet_route_table"),
 			},
-			NetworkSecurityGroup: &network.SecurityGroup{
-				ID:   pointer.String("sg-id-1"),
-				Name: pointer.String("my-sg-1"),
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{
+				ID:   ptr.To("sg-id-1"),
+				Name: ptr.To("my-sg-1"),
 			},
 		},
 	}
@@ -147,17 +147,22 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeIpv6Subnet = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet"),
-		Name: pointer.String("my-ipv6-subnet"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefixes: &[]string{
-				"10.0.0.0/16",
-				"2001:1234:5678:9abd::/64",
+	fakeIpv6Subnet = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet"),
+		Name: ptr.To("my-ipv6-subnet"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefixes: []*string{
+				ptr.To("10.0.0.0/16"),
+				ptr.To("2001:1234:5678:9abd::/64"),
 			},
-			RouteTable:           &network.RouteTable{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
-			NetworkSecurityGroup: &network.SecurityGroup{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
+			RouteTable:           &armnetwork.RouteTable{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
 		},
+	}
+
+	fakeIPv6SubnetPrefixesSlice = []string{
+		"10.0.0.0/16",
+		"2001:1234:5678:9abd::/64",
 	}
 
 	fakeIpv6SubnetSpecCP = SubnetSpec{
@@ -173,21 +178,26 @@ var (
 		Role:              infrav1.SubnetNode,
 	}
 
-	fakeIpv6SubnetCP = network.Subnet{
-		ID:   pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet-cp"),
-		Name: pointer.String("my-ipv6-subnet-cp"),
-		SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-			AddressPrefixes: &[]string{
-				"10.2.0.0/16",
-				"2001:1234:5678:9abc::/64",
+	fakeIpv6SubnetCP = armnetwork.Subnet{
+		ID:   ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-ipv6-subnet-cp"),
+		Name: ptr.To("my-ipv6-subnet-cp"),
+		Properties: &armnetwork.SubnetPropertiesFormat{
+			AddressPrefixes: []*string{
+				ptr.To("10.2.0.0/16"),
+				ptr.To("2001:1234:5678:9abc::/64"),
 			},
-			RouteTable:           &network.RouteTable{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
-			NetworkSecurityGroup: &network.SecurityGroup{ID: pointer.String("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
+			RouteTable:           &armnetwork.RouteTable{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/routeTables/my-subnet_route_table")},
+			NetworkSecurityGroup: &armnetwork.SecurityGroup{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/networkSecurityGroups/my-sg")},
 		},
 	}
 
+	fakeIpv6SubnetCPPrefixesSlice = []string{
+		"10.2.0.0/16",
+		"2001:1234:5678:9abc::/64",
+	}
+
 	notASubnet    = "not a subnet"
-	notASubnetErr = errors.Errorf("%T is not a network.Subnet", notASubnet)
+	notASubnetErr = errors.Errorf("%T is not an armnetwork.Subnet", notASubnet)
 	internalError = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
 )
 
@@ -211,8 +221,8 @@ func TestReconcileSubnets(t *testing.T) {
 				s.SubnetSpecs().Return([]azure.ResourceSpecGetter{&fakeSubnetSpec1})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpec1, serviceName).Return(fakeSubnet1, nil)
-				s.UpdateSubnetID(fakeSubnetSpec1.Name, pointer.StringDeref(fakeSubnet1.ID, ""))
-				s.UpdateSubnetCIDRs(fakeSubnetSpec1.Name, []string{pointer.StringDeref(fakeSubnet1.AddressPrefix, "")})
+				s.UpdateSubnetID(fakeSubnetSpec1.Name, ptr.Deref(fakeSubnet1.ID, ""))
+				s.UpdateSubnetCIDRs(fakeSubnetSpec1.Name, []string{ptr.Deref(fakeSubnet1.Properties.AddressPrefix, "")})
 
 				s.IsVnetManaged().AnyTimes().Return(true)
 				s.UpdatePutStatus(infrav1.SubnetsReadyCondition, serviceName, nil)
@@ -225,12 +235,12 @@ func TestReconcileSubnets(t *testing.T) {
 				s.SubnetSpecs().Return([]azure.ResourceSpecGetter{&fakeSubnetSpec1, &fakeSubnetSpec2})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpec1, serviceName).Return(fakeSubnet1, nil)
-				s.UpdateSubnetID(fakeSubnetSpec1.Name, pointer.StringDeref(fakeSubnet1.ID, ""))
-				s.UpdateSubnetCIDRs(fakeSubnetSpec1.Name, []string{pointer.StringDeref(fakeSubnet1.AddressPrefix, "")})
+				s.UpdateSubnetID(fakeSubnetSpec1.Name, ptr.Deref(fakeSubnet1.ID, ""))
+				s.UpdateSubnetCIDRs(fakeSubnetSpec1.Name, []string{ptr.Deref(fakeSubnet1.Properties.AddressPrefix, "")})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpec2, serviceName).Return(fakeSubnet2, nil)
-				s.UpdateSubnetID(fakeSubnetSpec2.Name, pointer.StringDeref(fakeSubnet2.ID, ""))
-				s.UpdateSubnetCIDRs(fakeSubnetSpec2.Name, []string{pointer.StringDeref(fakeSubnet2.AddressPrefix, "")})
+				s.UpdateSubnetID(fakeSubnetSpec2.Name, ptr.Deref(fakeSubnet2.ID, ""))
+				s.UpdateSubnetCIDRs(fakeSubnetSpec2.Name, []string{ptr.Deref(fakeSubnet2.Properties.AddressPrefix, "")})
 
 				s.IsVnetManaged().AnyTimes().Return(true)
 				s.UpdatePutStatus(infrav1.SubnetsReadyCondition, serviceName, nil)
@@ -243,8 +253,8 @@ func TestReconcileSubnets(t *testing.T) {
 				s.SubnetSpecs().Return([]azure.ResourceSpecGetter{&fakeSubnetSpecNotManaged})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpecNotManaged, serviceName).Return(fakeSubnetNotManaged, nil)
-				s.UpdateSubnetID(fakeSubnetSpecNotManaged.Name, pointer.StringDeref(fakeSubnetNotManaged.ID, ""))
-				s.UpdateSubnetCIDRs(fakeSubnetSpecNotManaged.Name, []string{pointer.StringDeref(fakeSubnetNotManaged.AddressPrefix, "")})
+				s.UpdateSubnetID(fakeSubnetSpecNotManaged.Name, ptr.Deref(fakeSubnetNotManaged.ID, ""))
+				s.UpdateSubnetCIDRs(fakeSubnetSpecNotManaged.Name, []string{ptr.Deref(fakeSubnetNotManaged.Properties.AddressPrefix, "")})
 
 				s.IsVnetManaged().AnyTimes().Return(false)
 			},
@@ -256,8 +266,8 @@ func TestReconcileSubnets(t *testing.T) {
 				s.SubnetSpecs().Return([]azure.ResourceSpecGetter{&fakeIpv6SubnetSpec})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeIpv6SubnetSpec, serviceName).Return(fakeIpv6Subnet, nil)
-				s.UpdateSubnetID(fakeIpv6SubnetSpec.Name, pointer.StringDeref(fakeIpv6Subnet.ID, ""))
-				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpec.Name, azure.StringSlice(fakeIpv6Subnet.AddressPrefixes))
+				s.UpdateSubnetID(fakeIpv6SubnetSpec.Name, ptr.Deref(fakeIpv6Subnet.ID, ""))
+				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpec.Name, fakeIPv6SubnetPrefixesSlice)
 
 				s.IsVnetManaged().AnyTimes().Return(true)
 				s.UpdatePutStatus(infrav1.SubnetsReadyCondition, serviceName, nil)
@@ -270,12 +280,12 @@ func TestReconcileSubnets(t *testing.T) {
 				s.SubnetSpecs().Return([]azure.ResourceSpecGetter{&fakeIpv6SubnetSpec, &fakeIpv6SubnetSpecCP})
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeIpv6SubnetSpec, serviceName).Return(fakeIpv6Subnet, nil)
-				s.UpdateSubnetID(fakeIpv6SubnetSpec.Name, pointer.StringDeref(fakeIpv6Subnet.ID, ""))
-				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpec.Name, azure.StringSlice(fakeIpv6Subnet.AddressPrefixes))
+				s.UpdateSubnetID(fakeIpv6SubnetSpec.Name, ptr.Deref(fakeIpv6Subnet.ID, ""))
+				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpec.Name, fakeIPv6SubnetPrefixesSlice)
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeIpv6SubnetSpecCP, serviceName).Return(fakeIpv6SubnetCP, nil)
-				s.UpdateSubnetID(fakeIpv6SubnetSpecCP.Name, pointer.StringDeref(fakeIpv6SubnetCP.ID, ""))
-				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpecCP.Name, azure.StringSlice(fakeIpv6SubnetCP.AddressPrefixes))
+				s.UpdateSubnetID(fakeIpv6SubnetSpecCP.Name, ptr.Deref(fakeIpv6SubnetCP.ID, ""))
+				s.UpdateSubnetCIDRs(fakeIpv6SubnetSpecCP.Name, fakeIpv6SubnetCPPrefixesSlice)
 
 				s.IsVnetManaged().AnyTimes().Return(true)
 				s.UpdatePutStatus(infrav1.SubnetsReadyCondition, serviceName, nil)
@@ -308,8 +318,8 @@ func TestReconcileSubnets(t *testing.T) {
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpec1, serviceName).Return(nil, internalError)
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeSubnetSpec2, serviceName).Return(fakeSubnet2, nil)
-				s.UpdateSubnetID(fakeSubnetSpec2.Name, pointer.StringDeref(fakeSubnet2.ID, ""))
-				s.UpdateSubnetCIDRs(fakeSubnetSpec2.Name, []string{pointer.StringDeref(fakeSubnet2.AddressPrefix, "")})
+				s.UpdateSubnetID(fakeSubnetSpec2.Name, ptr.Deref(fakeSubnet2.ID, ""))
+				s.UpdateSubnetCIDRs(fakeSubnetSpec2.Name, []string{ptr.Deref(fakeSubnet2.Properties.AddressPrefix, "")})
 
 				s.IsVnetManaged().AnyTimes().Return(true)
 				s.UpdatePutStatus(infrav1.SubnetsReadyCondition, serviceName, internalError)

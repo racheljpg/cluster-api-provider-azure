@@ -43,20 +43,44 @@ type azureManagedControlPlaneService struct {
 }
 
 // newAzureManagedControlPlaneReconciler populates all the services based on input scope.
-func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope) *azureManagedControlPlaneService {
+func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope) (*azureManagedControlPlaneService, error) {
+	managedClustersSvc, err := managedclusters.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	privateEndpointsSvc, err := privateendpoints.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	resourceHealthSvc, err := resourcehealth.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	subnetsSvc, err := subnets.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	tagsSvc, err := tags.New(scope)
+	if err != nil {
+		return nil, err
+	}
+	virtualNetworksSvc, err := virtualnetworks.New(scope)
+	if err != nil {
+		return nil, err
+	}
 	return &azureManagedControlPlaneService{
 		kubeclient: scope.Client,
 		scope:      scope,
 		services: []azure.ServiceReconciler{
 			groups.New(scope),
-			virtualnetworks.New(scope),
-			subnets.New(scope),
-			managedclusters.New(scope),
-			privateendpoints.New(scope),
-			tags.New(scope),
-			resourcehealth.New(scope),
+			virtualNetworksSvc,
+			subnetsSvc,
+			managedClustersSvc,
+			privateEndpointsSvc,
+			tagsSvc,
+			resourceHealthSvc,
 		},
-	}
+	}, nil
 }
 
 // Reconcile reconciles all the services in a predetermined order.
@@ -72,6 +96,24 @@ func (r *azureManagedControlPlaneService) Reconcile(ctx context.Context) error {
 
 	if err := r.reconcileKubeconfig(ctx); err != nil {
 		return errors.Wrap(err, "failed to reconcile kubeconfig secret")
+	}
+
+	return nil
+}
+
+// Pause pauses all components making up the cluster.
+func (r *azureManagedControlPlaneService) Pause(ctx context.Context) error {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureManagedControlPlaneService.Pause")
+	defer done()
+
+	for _, service := range r.services {
+		pauser, ok := service.(azure.Pauser)
+		if !ok {
+			continue
+		}
+		if err := pauser.Pause(ctx); err != nil {
+			return errors.Wrapf(err, "failed to pause AzureManagedControlPlane service %s", service.Name())
+		}
 	}
 
 	return nil

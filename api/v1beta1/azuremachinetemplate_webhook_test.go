@@ -20,11 +20,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -102,7 +102,10 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 		{
 			name: "azuremachinetemplate with list of user-assigned identities",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithUserAssignedIdentities([]UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
+				createMachineWithUserAssignedIdentities([]UserAssignedIdentity{
+					{ProviderID: "azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-09091-control-plane-f1b2c"},
+					{ProviderID: "azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-09091-control-plane-9a8b7"},
+				}),
 			),
 			wantErr: false,
 		},
@@ -116,7 +119,7 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 		{
 			name: "azuremachinetemplate with valid osDisk cache type",
 			machineTemplate: createAzureMachineTemplateFromMachine(
-				createMachineWithOsDiskCacheType(string(compute.PossibleCachingTypesValues()[1])),
+				createMachineWithOsDiskCacheType(string(armcompute.PossibleCachingTypesValues()[1])),
 			),
 			wantErr: false,
 		},
@@ -128,6 +131,16 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:            "azuremachinetemplate with SystemAssignedIdentityRoleName",
+			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithSystemAssignedIdentityRoleName()),
+			wantErr:         true,
+		},
+		{
+			name:            "azuremachinetemplate without SystemAssignedIdentityRoleName",
+			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithoutSystemAssignedIdentityRoleName()),
+			wantErr:         false,
+		},
+		{
 			name:            "azuremachinetemplate with RoleAssignmentName",
 			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithRoleAssignmentName()),
 			wantErr:         true,
@@ -137,6 +150,90 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 			machineTemplate: createAzureMachineTemplateFromMachine(createMachineWithoutRoleAssignmentName()),
 			wantErr:         false,
 		},
+		{
+			name: "azuremachinetemplate with network interfaces > 0 and subnet name",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"test-subnet",
+					nil,
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 1},
+						{SubnetName: "subnet2", PrivateIPConfigs: 1},
+					},
+				),
+			),
+			wantErr: true,
+		},
+		{
+			name: "azuremachinetemplate with network interfaces > 0 and no subnet name",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"",
+					nil,
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 1},
+						{SubnetName: "subnet2", PrivateIPConfigs: 1},
+					},
+				),
+			),
+			wantErr: false,
+		},
+		{
+			name: "azuremachinetemplate with network interfaces > 0 and AcceleratedNetworking not nil",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"",
+					ptr.To(true),
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 1},
+						{SubnetName: "subnet2", PrivateIPConfigs: 1},
+					},
+				),
+			),
+			wantErr: true,
+		},
+		{
+			name: "azuremachinetemplate with network interfaces > 0 and AcceleratedNetworking nil",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"",
+					nil,
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 1},
+						{SubnetName: "subnet2", PrivateIPConfigs: 1},
+					},
+				),
+			),
+			wantErr: false,
+		},
+		{
+			name: "azuremachinetemplate with network interfaces and PrivateIPConfigs < 1",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"",
+					nil,
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 0},
+						{SubnetName: "subnet2", PrivateIPConfigs: -1},
+					},
+				),
+			),
+			wantErr: true,
+		},
+		{
+			name: "azuremachinetemplate with network interfaces and PrivateIPConfigs >= 1",
+			machineTemplate: createAzureMachineTemplateFromMachine(
+				createMachineWithNetworkConfig(
+					"",
+					nil,
+					[]NetworkInterface{
+						{SubnetName: "subnet1", PrivateIPConfigs: 1},
+						{SubnetName: "subnet2", PrivateIPConfigs: 2},
+					},
+				),
+			),
+			wantErr: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -144,7 +241,7 @@ func TestAzureMachineTemplate_ValidateCreate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			ctx := context.Background()
-			err := test.machineTemplate.ValidateCreate(ctx, test.machineTemplate)
+			_, err := test.machineTemplate.ValidateCreate(ctx, test.machineTemplate)
 			if test.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -174,7 +271,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:     "type",
-								DiskSizeGB: pointer.Int32(11),
+								DiskSizeGB: ptr.To[int32](11),
 							},
 							DataDisks:    []DataDisk{},
 							SSHPublicKey: "",
@@ -190,7 +287,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:     "type",
-								DiskSizeGB: pointer.Int32(11),
+								DiskSizeGB: ptr.To[int32](11),
 							},
 							DataDisks:    []DataDisk{},
 							SSHPublicKey: "fake ssh key",
@@ -210,7 +307,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:     "type",
-								DiskSizeGB: pointer.Int32(11),
+								DiskSizeGB: ptr.To[int32](11),
 							},
 							DataDisks:    []DataDisk{},
 							SSHPublicKey: "fake ssh key",
@@ -229,7 +326,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:     "type",
-								DiskSizeGB: pointer.Int32(11),
+								DiskSizeGB: ptr.To[int32](11),
 							},
 							DataDisks:    []DataDisk{},
 							SSHPublicKey: "fake ssh key",
@@ -252,7 +349,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "",
 							},
 							DataDisks:    []DataDisk{},
@@ -272,7 +369,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:    []DataDisk{},
@@ -299,7 +396,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:    []DataDisk{},
@@ -319,7 +416,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:    []DataDisk{},
@@ -343,13 +440,13 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:             []DataDisk{},
 							SSHPublicKey:          "fake ssh key",
 							SubnetName:            "subnet1",
-							AcceleratedNetworking: pointer.Bool(true),
+							AcceleratedNetworking: ptr.To(true),
 						},
 					},
 				},
@@ -362,7 +459,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:             []DataDisk{},
@@ -372,7 +469,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							NetworkInterfaces: []NetworkInterface{
 								{
 									SubnetName:            "subnet1",
-									AcceleratedNetworking: pointer.Bool(true),
+									AcceleratedNetworking: ptr.To(true),
 									PrivateIPConfigs:      1,
 								},
 							},
@@ -392,13 +489,13 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:             []DataDisk{},
 							SSHPublicKey:          "fake ssh key",
 							SubnetName:            "",
-							AcceleratedNetworking: pointer.Bool(true),
+							AcceleratedNetworking: ptr.To(true),
 							NetworkInterfaces:     []NetworkInterface{},
 						},
 					},
@@ -412,7 +509,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:             []DataDisk{},
@@ -422,7 +519,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							NetworkInterfaces: []NetworkInterface{
 								{
 									SubnetName:            "",
-									AcceleratedNetworking: pointer.Bool(true),
+									AcceleratedNetworking: ptr.To(true),
 									PrivateIPConfigs:      1,
 								},
 							},
@@ -442,7 +539,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:    []DataDisk{},
@@ -450,7 +547,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							NetworkInterfaces: []NetworkInterface{
 								{
 									SubnetName:            "subnet1",
-									AcceleratedNetworking: pointer.Bool(true),
+									AcceleratedNetworking: ptr.To(true),
 									PrivateIPConfigs:      1,
 								},
 							},
@@ -466,7 +563,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							FailureDomain: &failureDomain,
 							OSDisk: OSDisk{
 								OSType:      "type",
-								DiskSizeGB:  pointer.Int32(11),
+								DiskSizeGB:  ptr.To[int32](11),
 								CachingType: "None",
 							},
 							DataDisks:    []DataDisk{},
@@ -474,7 +571,7 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 							NetworkInterfaces: []NetworkInterface{
 								{
 									SubnetName:            "subnet2",
-									AcceleratedNetworking: pointer.Bool(true),
+									AcceleratedNetworking: ptr.To(true),
 									PrivateIPConfigs:      1,
 								},
 							},
@@ -490,8 +587,8 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 	for _, amt := range tests {
 		amt := amt
 		t.Run(amt.name, func(t *testing.T) {
-			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: pointer.Bool(true)}})
-			err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: ptr.To(true)}})
+			_, err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
 			if amt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -504,8 +601,8 @@ func TestAzureMachineTemplate_ValidateUpdate(t *testing.T) {
 		amt := amt
 		t.Run(amt.name, func(t *testing.T) {
 			t.Parallel()
-			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: pointer.Bool(false)}})
-			err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
+			ctx := admission.NewContextWithRequest(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{DryRun: ptr.To(false)}})
+			_, err := amt.template.ValidateUpdate(ctx, amt.oldTemplate, amt.template)
 			if amt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

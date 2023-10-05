@@ -20,9 +20,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"k8s.io/utils/pointer"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -30,17 +30,17 @@ func TestExtendedLocationToNetworkSDK(t *testing.T) {
 	tests := []struct {
 		name string
 		args *infrav1.ExtendedLocationSpec
-		want *network.ExtendedLocation
+		want *armnetwork.ExtendedLocation
 	}{
 		{
 			name: "normal extendedLocation instance",
 			args: &infrav1.ExtendedLocationSpec{
 				Name: "value",
-				Type: "Edge",
+				Type: "EdgeZone",
 			},
-			want: &network.ExtendedLocation{
-				Name: pointer.String("value"),
-				Type: network.ExtendedLocationTypes("Edge"),
+			want: &armnetwork.ExtendedLocation{
+				Name: ptr.To("value"),
+				Type: ptr.To(armnetwork.ExtendedLocationTypesEdgeZone),
 			},
 		},
 		{
@@ -62,7 +62,7 @@ func TestExtendedLocationToComputeSDK(t *testing.T) {
 	tests := []struct {
 		name string
 		args *infrav1.ExtendedLocationSpec
-		want *compute.ExtendedLocation
+		want *armcompute.ExtendedLocation
 	}{
 		{
 			name: "normal extendedLocation instance",
@@ -70,9 +70,9 @@ func TestExtendedLocationToComputeSDK(t *testing.T) {
 				Name: "value",
 				Type: "Edge",
 			},
-			want: &compute.ExtendedLocation{
-				Name: pointer.String("value"),
-				Type: compute.ExtendedLocationTypes("Edge"),
+			want: &armcompute.ExtendedLocation{
+				Name: ptr.To("value"),
+				Type: ptr.To(armcompute.ExtendedLocationTypes("Edge")),
 			},
 		},
 		{

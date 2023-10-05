@@ -23,8 +23,9 @@ package mock_natgateways
 import (
 	reflect "reflect"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	autorest "github.com/Azure/go-autorest/autorest"
-	gomock "github.com/golang/mock/gomock"
+	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
 	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -304,10 +305,10 @@ func (mr *MockNatGatewayScopeMockRecorder) ExtendedLocationType() *gomock.Call {
 }
 
 // FailureDomains mocks base method.
-func (m *MockNatGatewayScope) FailureDomains() []string {
+func (m *MockNatGatewayScope) FailureDomains() []*string {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FailureDomains")
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].([]*string)
 	return ret0
 }
 
@@ -575,6 +576,20 @@ func (m *MockNatGatewayScope) TenantID() string {
 func (mr *MockNatGatewayScopeMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockNatGatewayScope)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockNatGatewayScope) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockNatGatewayScopeMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockNatGatewayScope)(nil).Token))
 }
 
 // UpdateDeleteStatus mocks base method.

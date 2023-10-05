@@ -19,45 +19,42 @@ package virtualmachineimages
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	"github.com/pkg/errors"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
 
 // Client is an interface for listing VM images.
 type Client interface {
-	List(ctx context.Context, location, publisher, offer, sku string) (compute.ListVirtualMachineImageResource, error)
+	List(ctx context.Context, location, publisher, offer, sku string) (armcompute.VirtualMachineImagesClientListResponse, error)
 }
 
 // AzureClient contains the Azure go-sdk Client.
 type AzureClient struct {
-	images compute.VirtualMachineImagesClient
+	images *armcompute.VirtualMachineImagesClient
 }
 
 var _ Client = (*AzureClient)(nil)
 
-// NewClient creates a new VM images client from auth info.
-func NewClient(auth azure.Authorizer) *AzureClient {
-	return &AzureClient{
-		images: newVirtualMachineImagesClient(auth.SubscriptionID(), auth.BaseURI(), auth.Authorizer()),
+// NewClient creates an AzureClient from an Authorizer.
+func NewClient(auth azure.Authorizer) (*AzureClient, error) {
+	opts, err := azure.ARMClientOptions(auth.CloudEnvironment())
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create virtualmachineimages client options")
 	}
+	computeClientFactory, err := armcompute.NewClientFactory(auth.SubscriptionID(), auth.Token(), opts)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create armcompute client factory")
+	}
+	return &AzureClient{computeClientFactory.NewVirtualMachineImagesClient()}, nil
 }
 
-// newVirtualMachineImagesClient creates a new VM images client from subscription ID, base URI and authorizer.
-func newVirtualMachineImagesClient(subscriptionID, baseURI string, authorizer autorest.Authorizer) compute.VirtualMachineImagesClient {
-	c := compute.NewVirtualMachineImagesClientWithBaseURI(baseURI, subscriptionID)
-	azure.SetAutoRestClientDefaults(&c.Client, authorizer)
-	return c
-}
-
-// List returns a VM image list resource.
-func (ac *AzureClient) List(ctx context.Context, location, publisher, offer, sku string) (compute.ListVirtualMachineImageResource, error) {
+// List returns a VM image list response.
+func (ac *AzureClient) List(ctx context.Context, location, publisher, offer, sku string) (armcompute.VirtualMachineImagesClientListResponse, error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "virtualmachineimages.AzureClient.List")
 	defer done()
 
-	// See https://docs.microsoft.com/en-us/odata/concepts/queryoptions-overview for how to use these query options.
-	expand, orderby := "", ""
-	var top *int32
-	return ac.images.List(ctx, location, publisher, offer, sku, expand, top, orderby)
+	opts := &armcompute.VirtualMachineImagesClientListOptions{}
+	return ac.images.List(ctx, location, publisher, offer, sku, opts)
 }

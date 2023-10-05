@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-12-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -90,8 +90,11 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "azuremachine with list of user-assigned identities",
-			machine: createMachineWithUserAssignedIdentities([]UserAssignedIdentity{{ProviderID: "azure:///123"}, {ProviderID: "azure:///456"}}),
+			name: "azuremachine with list of user-assigned identities",
+			machine: createMachineWithUserAssignedIdentities([]UserAssignedIdentity{
+				{ProviderID: "azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-12345-control-plane-9d5x5"},
+				{ProviderID: "azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/my-resource-group/providers/Microsoft.Compute/virtualMachines/default-12345-control-plane-a1b2c"},
+			}),
 			wantErr: false,
 		},
 		{
@@ -101,7 +104,7 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 		},
 		{
 			name:    "azuremachine with valid osDisk cache type",
-			machine: createMachineWithOsDiskCacheType(string(compute.PossibleCachingTypesValues()[1])),
+			machine: createMachineWithOsDiskCacheType(string(armcompute.PossibleCachingTypesValues()[1])),
 			wantErr: false,
 		},
 		{
@@ -149,11 +152,76 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 			machine: createMachineWithNetworkConfig("", nil, []NetworkInterface{{SubnetName: "subnet", PrivateIPConfigs: 1}}),
 			wantErr: false,
 		},
+		{
+			name:    "azuremachine without confidential compute properties and encryption at host enabled",
+			machine: createMachineWithConfidentialCompute("", "", true, false, false),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption and encryption at host enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, SecurityTypesConfidentialVM, true, false, false),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption and encryption at host enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, SecurityTypesConfidentialVM, true, true, true),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption, vTPM and SecureBoot enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, SecurityTypesConfidentialVM, false, true, true),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption enabled, vTPM enabled and SecureBoot disabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, SecurityTypesConfidentialVM, false, true, false),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption enabled, vTPM disabled and SecureBoot enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, SecurityTypesConfidentialVM, false, false, true),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption enabled, vTPM enabled, SecureBoot disabled and SecurityType empty",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, "", false, true, false),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute VMGuestStateOnly encryption enabled, vTPM and SecureBoot empty",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeVMGuestStateOnly, SecurityTypesConfidentialVM, false, false, false),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption, vTPM and SecureBoot enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, SecurityTypesConfidentialVM, false, true, true),
+			wantErr: false,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption enabled, vTPM enabled and SecureBoot disabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, SecurityTypesConfidentialVM, false, true, false),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption enabled, vTPM disabled and SecureBoot enabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, SecurityTypesConfidentialVM, false, false, true),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption enabled, vTPM disabled and SecureBoot disabled",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, SecurityTypesConfidentialVM, false, false, false),
+			wantErr: true,
+		},
+		{
+			name:    "azuremachine with confidential compute DiskWithVMGuestState encryption enabled, vTPM enabled, SecureBoot disabled and SecurityType empty",
+			machine: createMachineWithConfidentialCompute(SecurityEncryptionTypeDiskWithVMGuestState, "", false, true, false),
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mw := &azureMachineWebhook{}
-			err := mw.ValidateCreate(context.Background(), tc.machine)
+			_, err := mw.ValidateCreate(context.Background(), tc.machine)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -177,14 +245,14 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					Image: &Image{
-						ID: pointer.String("imageID-1"),
+						ID: ptr.To("imageID-1"),
 					},
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					Image: &Image{
-						ID: pointer.String("imageID-2"),
+						ID: ptr.To("imageID-2"),
 					},
 				},
 			},
@@ -195,14 +263,14 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					Image: &Image{
-						ID: pointer.String("imageID-1"),
+						ID: ptr.To("imageID-1"),
 					},
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
 					Image: &Image{
-						ID: pointer.String("imageID-1"),
+						ID: ptr.To("imageID-1"),
 					},
 				},
 			},
@@ -512,12 +580,12 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "invalidTest: azuremachine.spec.AcceleratedNetworking is immutable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(true),
+					AcceleratedNetworking: ptr.To(true),
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(false),
+					AcceleratedNetworking: ptr.To(false),
 				},
 			},
 			wantErr: true,
@@ -526,12 +594,12 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "validTest: azuremachine.spec.AcceleratedNetworking is immutable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(true),
+					AcceleratedNetworking: ptr.To(true),
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(true),
+					AcceleratedNetworking: ptr.To(true),
 				},
 			},
 			wantErr: false,
@@ -540,7 +608,7 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "validTest: azuremachine.spec.AcceleratedNetworking transition(from true) to nil is acceptable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(true),
+					AcceleratedNetworking: ptr.To(true),
 				},
 			},
 			newMachine: &AzureMachine{
@@ -554,7 +622,7 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "validTest: azuremachine.spec.AcceleratedNetworking transition(from false) to nil is acceptable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					AcceleratedNetworking: pointer.Bool(false),
+					AcceleratedNetworking: ptr.To(false),
 				},
 			},
 			newMachine: &AzureMachine{
@@ -604,12 +672,12 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "invalidTest: azuremachine.spec.SecurityProfile is immutable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					SecurityProfile: &SecurityProfile{EncryptionAtHost: pointer.Bool(true)},
+					SecurityProfile: &SecurityProfile{EncryptionAtHost: ptr.To(true)},
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					SecurityProfile: &SecurityProfile{EncryptionAtHost: pointer.Bool(false)},
+					SecurityProfile: &SecurityProfile{EncryptionAtHost: ptr.To(false)},
 				},
 			},
 			wantErr: true,
@@ -618,12 +686,12 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			name: "validTest: azuremachine.spec.SecurityProfile is immutable",
 			oldMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					SecurityProfile: &SecurityProfile{EncryptionAtHost: pointer.Bool(true)},
+					SecurityProfile: &SecurityProfile{EncryptionAtHost: ptr.To(true)},
 				},
 			},
 			newMachine: &AzureMachine{
 				Spec: AzureMachineSpec{
-					SecurityProfile: &SecurityProfile{EncryptionAtHost: pointer.Bool(true)},
+					SecurityProfile: &SecurityProfile{EncryptionAtHost: ptr.To(true)},
 				},
 			},
 			wantErr: false,
@@ -730,7 +798,7 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			mw := &azureMachineWebhook{}
-			err := mw.ValidateUpdate(context.Background(), tc.oldMachine, tc.newMachine)
+			_, err := mw.ValidateUpdate(context.Background(), tc.oldMachine, tc.newMachine)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -795,7 +863,7 @@ func TestAzureMachine_Default(t *testing.T) {
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(cacheTypeNotSpecifiedTest.machine.Spec.OSDisk.CachingType).To(Equal("None"))
 
-	for _, possibleCachingType := range compute.PossibleCachingTypesValues() {
+	for _, possibleCachingType := range armcompute.PossibleCachingTypesValues() {
 		cacheTypeSpecifiedTest := test{machine: &AzureMachine{ObjectMeta: testObjectMeta, Spec: AzureMachineSpec{OSDisk: OSDisk{CachingType: string(possibleCachingType)}}}}
 		err = mw.Default(context.Background(), cacheTypeSpecifiedTest.machine)
 		g.Expect(err).NotTo(HaveOccurred())
@@ -881,7 +949,7 @@ func createMachineWithOsDiskCacheType(cacheType string) *AzureMachine {
 	return machine
 }
 
-func createMachineWithRoleAssignmentName() *AzureMachine {
+func createMachineWithSystemAssignedIdentityRoleName() *AzureMachine {
 	machine := &AzureMachine{
 		Spec: AzureMachineSpec{
 			SSHPublicKey: validSSHPublicKey,
@@ -897,7 +965,7 @@ func createMachineWithRoleAssignmentName() *AzureMachine {
 	return machine
 }
 
-func createMachineWithoutRoleAssignmentName() *AzureMachine {
+func createMachineWithoutSystemAssignedIdentityRoleName() *AzureMachine {
 	machine := &AzureMachine{
 		Spec: AzureMachineSpec{
 			SSHPublicKey: validSSHPublicKey,
@@ -907,6 +975,27 @@ func createMachineWithoutRoleAssignmentName() *AzureMachine {
 				Scope:        "test-scope",
 				DefinitionID: "test-definition-id",
 			},
+		},
+	}
+	return machine
+}
+
+func createMachineWithoutRoleAssignmentName() *AzureMachine {
+	machine := &AzureMachine{
+		Spec: AzureMachineSpec{
+			SSHPublicKey: validSSHPublicKey,
+			OSDisk:       validOSDisk,
+		},
+	}
+	return machine
+}
+
+func createMachineWithRoleAssignmentName() *AzureMachine {
+	machine := &AzureMachine{
+		Spec: AzureMachineSpec{
+			SSHPublicKey:       validSSHPublicKey,
+			OSDisk:             validOSDisk,
+			RoleAssignmentName: "test-role-assignment",
 		},
 	}
 	return machine
@@ -932,6 +1021,37 @@ func createMachineWithDiagnostics(diagnosticsType BootDiagnosticsStorageAccountT
 			SSHPublicKey: validSSHPublicKey,
 			OSDisk:       validOSDisk,
 			Diagnostics:  diagnostics,
+		},
+	}
+}
+
+func createMachineWithConfidentialCompute(securityEncryptionType SecurityEncryptionType, securityType SecurityTypes, encryptionAtHost, vTpmEnabled, secureBootEnabled bool) *AzureMachine {
+	securityProfile := &SecurityProfile{
+		EncryptionAtHost: &encryptionAtHost,
+		SecurityType:     securityType,
+		UefiSettings: &UefiSettings{
+			VTpmEnabled:       &vTpmEnabled,
+			SecureBootEnabled: &secureBootEnabled,
+		},
+	}
+
+	osDisk := OSDisk{
+		DiskSizeGB: ptr.To[int32](30),
+		OSType:     LinuxOS,
+		ManagedDisk: &ManagedDiskParameters{
+			StorageAccountType: "Premium_LRS",
+			SecurityProfile: &VMDiskSecurityProfile{
+				SecurityEncryptionType: securityEncryptionType,
+			},
+		},
+		CachingType: string(armcompute.PossibleCachingTypesValues()[0]),
+	}
+
+	return &AzureMachine{
+		Spec: AzureMachineSpec{
+			SSHPublicKey:    validSSHPublicKey,
+			OSDisk:          osDisk,
+			SecurityProfile: securityProfile,
 		},
 	}
 }

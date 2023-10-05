@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -28,11 +29,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 	kubedrain "k8s.io/kubectl/pkg/drain"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesetvms"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -149,6 +152,24 @@ func NewMachinePoolMachineScope(params MachinePoolMachineScopeParams) (*MachineP
 	}, nil
 }
 
+// ScaleSetVMSpec returns the VMSS VM spec.
+func (s *MachinePoolMachineScope) ScaleSetVMSpec() azure.ResourceSpecGetter {
+	spec := &scalesetvms.ScaleSetVMSpec{
+		Name:          s.Name(),
+		InstanceID:    s.InstanceID(),
+		ResourceGroup: s.ResourceGroup(),
+		ScaleSetName:  s.ScaleSetName(),
+		ProviderID:    s.ProviderID(),
+		IsFlex:        s.OrchestrationMode() == infrav1.FlexibleOrchestrationMode,
+	}
+
+	if spec.IsFlex {
+		spec.ResourceID = strings.TrimPrefix(spec.ProviderID, azureutil.ProviderIDPrefix)
+	}
+
+	return spec
+}
+
 // Name is the name of the Machine Pool Machine.
 func (s *MachinePoolMachineScope) Name() string {
 	return s.AzureMachinePoolMachine.Name
@@ -226,6 +247,13 @@ func (s *MachinePoolMachineScope) SetVMSSVM(instance *azure.VMSSVM) {
 	s.instance = instance
 }
 
+// SetVMSSVMState update the scope with the current provisioning state of the VMSS VM.
+func (s *MachinePoolMachineScope) SetVMSSVMState(state infrav1.ProvisioningState) {
+	if s.instance != nil {
+		s.instance.State = state
+	}
+}
+
 // ProvisioningState returns the AzureMachinePoolMachine provisioning state.
 func (s *MachinePoolMachineScope) ProvisioningState() infrav1.ProvisioningState {
 	if s.AzureMachinePoolMachine.Status.ProvisioningState != nil {
@@ -242,7 +270,7 @@ func (s *MachinePoolMachineScope) IsReady() bool {
 
 // SetFailureMessage sets the AzureMachinePoolMachine status failure message.
 func (s *MachinePoolMachineScope) SetFailureMessage(v error) {
-	s.AzureMachinePoolMachine.Status.FailureMessage = pointer.String(v.Error())
+	s.AzureMachinePoolMachine.Status.FailureMessage = ptr.To(v.Error())
 }
 
 // SetFailureReason sets the AzureMachinePoolMachine status failure reason.

@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/privatedns/mgmt/2018-09-01/privatedns"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
@@ -67,16 +67,16 @@ func TestLinkSpec_Parameters(t *testing.T) {
 			expectedError: "",
 			spec:          linkSpec,
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(Equal(privatedns.VirtualNetworkLink{
-					VirtualNetworkLinkProperties: &privatedns.VirtualNetworkLinkProperties{
-						VirtualNetwork: &privatedns.SubResource{
-							ID: pointer.String("/subscriptions/123/resourceGroups/my-vnet-rg/providers/Microsoft.Network/virtualNetworks/my-vnet"),
+				g.Expect(result).To(Equal(armprivatedns.VirtualNetworkLink{
+					Properties: &armprivatedns.VirtualNetworkLinkProperties{
+						VirtualNetwork: &armprivatedns.SubResource{
+							ID: ptr.To("/subscriptions/123/resourceGroups/my-vnet-rg/providers/Microsoft.Network/virtualNetworks/my-vnet"),
 						},
-						RegistrationEnabled: pointer.Bool(false),
+						RegistrationEnabled: ptr.To(false),
 					},
-					Location: pointer.String(azure.Global),
+					Location: ptr.To(azure.Global),
 					Tags: map[string]*string{
-						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 					},
 				}))
 			},
@@ -85,8 +85,8 @@ func TestLinkSpec_Parameters(t *testing.T) {
 			name:          "existing managed private virtual network link",
 			expectedError: "",
 			spec:          linkSpec,
-			existing: privatedns.VirtualNetworkLink{Tags: map[string]*string{
-				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
+			existing: armprivatedns.VirtualNetworkLink{Tags: map[string]*string{
+				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			}},
 			expect: func(g *WithT, result interface{}) {
 				g.Expect(result).To(BeNil())
@@ -96,16 +96,16 @@ func TestLinkSpec_Parameters(t *testing.T) {
 			name:          "existing unmanaged private dns zone",
 			expectedError: "",
 			spec:          linkSpec,
-			existing:      privatedns.VirtualNetworkLink{},
+			existing:      armprivatedns.VirtualNetworkLink{},
 			expect: func(g *WithT, result interface{}) {
 				g.Expect(result).To(BeNil())
 			},
 		},
 		{
 			name:          "type cast error",
-			expectedError: "string is not a privatedns.VirtualNetworkLink",
+			expectedError: "string is not an armprivatedns.VirtualNetworkLink",
 			spec:          linkSpec,
-			existing:      "I'm not privatedns.VirtualNetworkLink",
+			existing:      "I'm not armprivatedns.VirtualNetworkLink",
 		},
 	}
 

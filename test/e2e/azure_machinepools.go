@@ -23,17 +23,17 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/util/azure"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
@@ -86,13 +86,13 @@ func AzureMachinePoolsSpec(ctx context.Context, inputGetter func() AzureMachineP
 		Expect(amp.Status.Replicas).To(BeNumerically("==", len(amp.Spec.ProviderIDList)))
 		for _, providerID := range amp.Spec.ProviderIDList {
 			switch amp.Spec.OrchestrationMode {
-			case infrav1.OrchestrationModeType(compute.OrchestrationModeFlexible):
+			case infrav1.OrchestrationModeType(armcompute.OrchestrationModeFlexible):
 				Expect(providerID).To(MatchRegexp(regexpFlexibleVM))
 			default:
 				Expect(providerID).To(MatchRegexp(regexpUniformInstance))
 			}
 		}
-		mp, err := azure.FindParentMachinePool(amp.Name, bootstrapClusterProxy.GetClient())
+		mp, err := azureutil.FindParentMachinePool(amp.Name, bootstrapClusterProxy.GetClient())
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mp).NotTo(BeNil())
 		machinepools = append(machinepools, mp)
@@ -100,7 +100,7 @@ func AzureMachinePoolsSpec(ctx context.Context, inputGetter func() AzureMachineP
 
 	var wg sync.WaitGroup
 	for _, mp := range machinepools {
-		goalReplicas := pointer.Int32Deref(mp.Spec.Replicas, 0) + 1
+		goalReplicas := ptr.Deref[int32](mp.Spec.Replicas, 0) + 1
 		Byf("Scaling machine pool %s out from %d to %d", mp.Name, *mp.Spec.Replicas, goalReplicas)
 		wg.Add(1)
 		go func(mp *expv1.MachinePool) {
@@ -118,7 +118,7 @@ func AzureMachinePoolsSpec(ctx context.Context, inputGetter func() AzureMachineP
 	wg.Wait()
 
 	for _, mp := range machinepools {
-		goalReplicas := pointer.Int32Deref(mp.Spec.Replicas, 0) - 1
+		goalReplicas := ptr.Deref[int32](mp.Spec.Replicas, 0) - 1
 		Byf("Scaling machine pool %s in from %d to %d", mp.Name, *mp.Spec.Replicas, goalReplicas)
 		wg.Add(1)
 		go func(mp *expv1.MachinePool) {

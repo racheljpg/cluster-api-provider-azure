@@ -19,9 +19,11 @@ package azure
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/go-autorest/autorest"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	"sigs.k8s.io/cluster-api-provider-azure/version"
@@ -34,6 +36,10 @@ const (
 	DefaultAKSUserName = "azureuser"
 	// PublicCloudName is the name of the Azure public cloud.
 	PublicCloudName = "AzurePublicCloud"
+	// ChinaCloudName is the name of the Azure China cloud.
+	ChinaCloudName = "AzureChinaCloud"
+	// USGovernmentCloudName is the name of the Azure US Government cloud.
+	USGovernmentCloudName = "AzureUSGovernmentCloud"
 )
 
 const (
@@ -91,12 +97,6 @@ const (
 	// bootstrapSentinelFile is the file written by bootstrap provider on machines to indicate successful bootstrapping,
 	// as defined by the Cluster API Bootstrap Provider contract (https://cluster-api.sigs.k8s.io/developer/providers/bootstrap.html).
 	bootstrapSentinelFile = "/run/cluster-api/bootstrap-success.complete"
-)
-
-const (
-	// ProviderIDPrefix will be appended to the beginning of Azure resource IDs to form the Kubernetes Provider ID.
-	// NOTE: this format matches the 2 slashes format used in cloud-provider and cluster-autoscaler.
-	ProviderIDPrefix = "azure://"
 )
 
 const (
@@ -293,18 +293,26 @@ func ManagedClusterID(subscriptionID, resourceGroup, managedClusterName string) 
 
 // GetBootstrappingVMExtension returns the CAPZ Bootstrapping VM extension.
 // The CAPZ Bootstrapping extension is a simple clone of https://github.com/Azure/custom-script-extension-linux for Linux or
-// https://docs.microsoft.com/en-us/azure/virtual-machines/extensions/custom-script-windows for Windows.
+// https://learn.microsoft.com/azure/virtual-machines/extensions/custom-script-windows for Windows.
 // This extension allows running arbitrary scripts on the VM.
 // Its role is to detect and report Kubernetes bootstrap failure or success.
-func GetBootstrappingVMExtension(osType string, cloud string, vmName string) *ExtensionSpec {
+func GetBootstrappingVMExtension(osType string, cloud string, vmName string, cpuArchitectureType string) *ExtensionSpec {
 	// currently, the bootstrap extension is only available in AzurePublicCloud.
 	if osType == LinuxOS && cloud == PublicCloudName {
 		// The command checks for the existence of the bootstrapSentinelFile on the machine, with retries and sleep between retries.
+		// We set the version to 1.1 (will target 1.1.1) for arm64 machines and 1.0 for x64. This is due to a known issue with newer versions of
+		// Go on Ubuntu 20.04. The issue is being tracked here: https://github.com/golang/go/issues/58550
+		// TODO: Remove this once the issue is fixed, or when Ubuntu 20.04 is no longer supported.
+		// We are using 1.1 instead of 1.1.1 for Arm64 as AzureAPI do not allow us to specify the full version.
+		extensionVersion := "1.0"
+		if cpuArchitectureType == string(armcompute.ArchitectureTypesArm64) {
+			extensionVersion = "1.1"
+		}
 		return &ExtensionSpec{
 			Name:      BootstrappingExtensionLinux,
 			VMName:    vmName,
 			Publisher: "Microsoft.Azure.ContainerUpstream",
-			Version:   "1.0",
+			Version:   extensionVersion,
 			ProtectedSettings: map[string]string{
 				"commandToExecute": LinuxBootstrapExtensionCommand,
 			},
@@ -329,6 +337,71 @@ func GetBootstrappingVMExtension(osType string, cloud string, vmName string) *Ex
 // UserAgent specifies a string to append to the agent identifier.
 func UserAgent() string {
 	return fmt.Sprintf("cluster-api-provider-azure/%s", version.Get().String())
+}
+
+// ARMClientOptions returns default ARM client options for CAPZ SDK v2 requests.
+func ARMClientOptions(azureEnvironment string, extraPolicies ...policy.Policy) (*arm.ClientOptions, error) {
+	opts := &arm.ClientOptions{}
+
+	switch azureEnvironment {
+	case PublicCloudName:
+		opts.Cloud = cloud.AzurePublic
+	case ChinaCloudName:
+		opts.Cloud = cloud.AzureChina
+	case USGovernmentCloudName:
+		opts.Cloud = cloud.AzureGovernment
+	case "":
+		// No cloud name provided, so leave at defaults.
+	default:
+		return nil, fmt.Errorf("invalid cloud name %q", azureEnvironment)
+	}
+	opts.PerCallPolicies = []policy.Policy{
+		correlationIDPolicy{},
+		userAgentPolicy{},
+	}
+	opts.PerCallPolicies = append(opts.PerCallPolicies, extraPolicies...)
+	opts.Retry.MaxRetries = -1 // Less than zero means one try and no retries.
+
+	return opts, nil
+}
+
+// correlationIDPolicy adds the "x-ms-correlation-request-id" header to requests.
+// It implements the policy.Policy interface.
+type correlationIDPolicy struct{}
+
+// Do adds the "x-ms-correlation-request-id" header if a request has a correlation ID in its context.
+func (p correlationIDPolicy) Do(req *policy.Request) (*http.Response, error) {
+	if corrID, ok := tele.CorrIDFromCtx(req.Raw().Context()); ok {
+		req.Raw().Header.Set(string(tele.CorrIDKeyVal), string(corrID))
+	}
+	return req.Next()
+}
+
+// userAgentPolicy extends the "User-Agent" header on requests.
+// It implements the policy.Policy interface.
+type userAgentPolicy struct{}
+
+// Do extends the "User-Agent" header of a request by appending CAPZ's user agent.
+func (p userAgentPolicy) Do(req *policy.Request) (*http.Response, error) {
+	req.Raw().Header.Set("User-Agent", req.Raw().UserAgent()+" "+UserAgent())
+	return req.Next()
+}
+
+// CustomPutPatchHeaderPolicy adds custom headers to a PUT or PATCH request.
+// It implements the policy.Policy interface.
+type CustomPutPatchHeaderPolicy struct {
+	Headers map[string]string
+}
+
+// Do adds any custom headers to a PUT or PATCH request.
+func (p CustomPutPatchHeaderPolicy) Do(req *policy.Request) (*http.Response, error) {
+	if req.Raw().Method == http.MethodPut || req.Raw().Method == http.MethodPatch {
+		for key, element := range p.Headers {
+			req.Raw().Header.Set(key, element)
+		}
+	}
+
+	return req.Next()
 }
 
 // SetAutoRestClientDefaults set authorizer and user agent for autorest client.
@@ -362,9 +435,4 @@ func msCorrelationIDSendDecorator(snd autorest.Sender) autorest.Sender {
 		}
 		return snd.Do(r)
 	})
-}
-
-// ParseResourceID parses a string to an *arm.ResourceID, first removing any "azure://" prefix.
-func ParseResourceID(id string) (*arm.ResourceID, error) {
-	return arm.ParseResourceID(strings.TrimPrefix(id, ProviderIDPrefix))
 }

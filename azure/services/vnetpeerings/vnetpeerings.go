@@ -19,6 +19,7 @@ package vnetpeerings
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -43,12 +44,16 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope VnetPeeringScope) *Service {
-	Client := NewClient(scope)
-	return &Service{
-		Scope:      scope,
-		Reconciler: async.New(scope, Client, Client),
+func New(scope VnetPeeringScope) (*Service, error) {
+	Client, err := NewClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armnetwork.VirtualNetworkPeeringsClientCreateOrUpdateResponse,
+			armnetwork.VirtualNetworkPeeringsClientDeleteResponse](scope, Client, Client),
+	}, nil
 }
 
 // Name returns the service name.

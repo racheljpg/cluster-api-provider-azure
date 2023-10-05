@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
@@ -91,15 +92,15 @@ func (ammpr *AzureManagedMachinePoolReconciler) SetupWithManager(ctx context.Con
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options.Options).
 		For(azManagedMachinePool).
-		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(log, ammpr.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceHasFilterLabel(log, ammpr.WatchFilterValue)).
 		// watch for changes in CAPI MachinePool resources
 		Watches(
-			&source.Kind{Type: &expv1.MachinePool{}},
+			&expv1.MachinePool{},
 			handler.EnqueueRequestsFromMapFunc(MachinePoolToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("AzureManagedMachinePool"), log)),
 		).
 		// watch for changes in AzureManagedControlPlanes
 		Watches(
-			&source.Kind{Type: &infrav1.AzureManagedControlPlane{}},
+			&infrav1.AzureManagedControlPlane{},
 			handler.EnqueueRequestsFromMapFunc(azureManagedControlPlaneMapper),
 		).
 		Build(r)
@@ -107,12 +108,17 @@ func (ammpr *AzureManagedMachinePoolReconciler) SetupWithManager(ctx context.Con
 		return errors.Wrap(err, "error creating controller")
 	}
 
-	// Add a watch on clusterv1.Cluster object for unpause & ready notifications.
+	azureManagedMachinePoolMapper, err := util.ClusterToTypedObjectsMapper(ammpr.Client, &infrav1.AzureManagedMachinePoolList{}, mgr.GetScheme())
+	if err != nil {
+		return errors.Wrap(err, "failed to create mapper for Cluster to AzureManagedMachinePools")
+	}
+
+	// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
 	if err = c.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
-		handler.EnqueueRequestsFromMapFunc(util.ClusterToInfrastructureMapFunc(ctx, infrav1.GroupVersion.WithKind("AzureManagedMachinePool"), mgr.GetClient(), &infrav1.AzureManagedMachinePool{})),
-		predicates.ClusterUnpausedAndInfrastructureReady(log),
-		predicates.ResourceNotPausedAndHasFilterLabel(log, ammpr.WatchFilterValue),
+		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
+		handler.EnqueueRequestsFromMapFunc(azureManagedMachinePoolMapper),
+		ClusterPauseChangeAndInfrastructureReady(log),
+		predicates.ResourceHasFilterLabel(log, ammpr.WatchFilterValue),
 	); err != nil {
 		return errors.Wrap(err, "failed adding a watch for ready clusters")
 	}
@@ -169,12 +175,6 @@ func (ammpr *AzureManagedMachinePoolReconciler) Reconcile(ctx context.Context, r
 
 	log = log.WithValues("ownerCluster", ownerCluster.Name)
 
-	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(ownerCluster, infraPool) {
-		log.Info("AzureManagedMachinePool or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch the corresponding control plane which has all the interesting data.
 	controlPlane := &infrav1.AzureManagedControlPlane{}
 	controlPlaneName := client.ObjectKey{
@@ -228,6 +228,12 @@ func (ammpr *AzureManagedMachinePoolReconciler) Reconcile(ctx context.Context, r
 		}
 	}()
 
+	// Return early if the object or Cluster is paused.
+	if annotations.IsPaused(ownerCluster, infraPool) {
+		log.Info("AzureManagedMachinePool or linked Cluster is marked as paused. Won't reconcile normally")
+		return ammpr.reconcilePause(ctx, mcpScope)
+	}
+
 	// Handle deleted clusters
 	if !infraPool.DeletionTimestamp.IsZero() {
 		return ammpr.reconcileDelete(ctx, mcpScope)
@@ -244,10 +250,11 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileNormal(ctx context.Cont
 	log.Info("Reconciling AzureManagedMachinePool")
 
 	// If the AzureManagedMachinePool doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(scope.InfraMachinePool, infrav1.ClusterFinalizer)
-	// Register the finalizer immediately to avoid orphaning Azure resources on delete
-	if err := scope.PatchObject(ctx); err != nil {
-		return reconcile.Result{}, err
+	if controllerutil.AddFinalizer(scope.InfraMachinePool, infrav1.ClusterFinalizer) {
+		// Register the finalizer immediately to avoid orphaning Azure resources on delete
+		if err := scope.PatchObject(ctx); err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	svc, err := ammpr.createAzureManagedMachinePoolService(scope)
@@ -273,7 +280,7 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileNormal(ctx context.Cont
 			}
 
 			if reconcileError.IsTransient() {
-				log.V(4).Info("requeuing due to transient transient failure", "error", err)
+				log.V(4).Info("requeuing due to transient failure", "error", err)
 				return reconcile.Result{RequeueAfter: reconcileError.RequeueAfter()}, nil
 			}
 
@@ -285,6 +292,24 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileNormal(ctx context.Cont
 
 	// No errors, so mark us ready so the Cluster API Cluster Controller can pull it
 	scope.SetAgentPoolReady(true)
+	return reconcile.Result{}, nil
+}
+
+func (ammpr *AzureManagedMachinePoolReconciler) reconcilePause(ctx context.Context, scope *scope.ManagedMachinePoolScope) (reconcile.Result, error) {
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureManagedMachinePool.reconcilePause")
+	defer done()
+
+	log.Info("Reconciling AzureManagedMachinePool pause")
+
+	svc, err := ammpr.createAzureManagedMachinePoolService(scope)
+	if err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to create an AzureManageMachinePoolService")
+	}
+
+	if err := svc.Pause(ctx); err != nil {
+		return reconcile.Result{}, errors.Wrapf(err, "error pausing AzureManagedMachinePool %s/%s", scope.InfraMachinePool.Namespace, scope.InfraMachinePool.Name)
+	}
+
 	return reconcile.Result{}, nil
 }
 
@@ -305,6 +330,16 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileDelete(ctx context.Cont
 		}
 
 		if err := svc.Delete(ctx); err != nil {
+			// Handle transient errors
+			var reconcileError azure.ReconcileError
+			if errors.As(err, &reconcileError) && reconcileError.IsTransient() {
+				if azure.IsOperationNotDoneError(reconcileError) {
+					log.V(2).Info(fmt.Sprintf("AzureManagedMachinePool delete not done: %s", reconcileError.Error()))
+				} else {
+					log.V(2).Info("transient failure to delete AzureManagedMachinePool, retrying")
+				}
+				return reconcile.Result{RequeueAfter: reconcileError.RequeueAfter()}, nil
+			}
 			return reconcile.Result{}, errors.Wrapf(err, "error deleting AzureManagedMachinePool %s/%s", scope.InfraMachinePool.Namespace, scope.InfraMachinePool.Name)
 		}
 		// Machine pool successfully deleted, remove the finalizer.

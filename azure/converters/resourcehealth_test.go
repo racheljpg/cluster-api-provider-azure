@@ -19,31 +19,31 @@ package converters
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/resourcehealth/mgmt/2020-05-01/resourcehealth"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcehealth/armresourcehealth"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 func TestAzureAvailabilityStatusToCondition(t *testing.T) {
 	tests := []struct {
 		name     string
-		avail    resourcehealth.AvailabilityStatus
+		avail    armresourcehealth.AvailabilityStatus
 		expected *clusterv1.Condition
 	}{
 		{
 			name:  "empty",
-			avail: resourcehealth.AvailabilityStatus{},
+			avail: armresourcehealth.AvailabilityStatus{},
 			expected: &clusterv1.Condition{
 				Status: corev1.ConditionFalse,
 			},
 		},
 		{
 			name: "available",
-			avail: resourcehealth.AvailabilityStatus{
-				Properties: &resourcehealth.AvailabilityStatusProperties{
-					AvailabilityState: resourcehealth.AvailabilityStateValuesAvailable,
+			avail: armresourcehealth.AvailabilityStatus{
+				Properties: &armresourcehealth.AvailabilityStatusProperties{
+					AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesAvailable),
 				},
 			},
 			expected: &clusterv1.Condition{
@@ -52,11 +52,11 @@ func TestAzureAvailabilityStatusToCondition(t *testing.T) {
 		},
 		{
 			name: "unavailable",
-			avail: resourcehealth.AvailabilityStatus{
-				Properties: &resourcehealth.AvailabilityStatusProperties{
-					AvailabilityState: resourcehealth.AvailabilityStateValuesUnavailable,
-					ReasonType:        pointer.String("this Is  a reason "),
-					Summary:           pointer.String("The Summary"),
+			avail: armresourcehealth.AvailabilityStatus{
+				Properties: &armresourcehealth.AvailabilityStatusProperties{
+					AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesUnavailable),
+					ReasonType:        ptr.To("this Is  a reason "),
+					Summary:           ptr.To("The Summary"),
 				},
 			},
 			expected: &clusterv1.Condition{
@@ -68,11 +68,11 @@ func TestAzureAvailabilityStatusToCondition(t *testing.T) {
 		},
 		{
 			name: "degraded",
-			avail: resourcehealth.AvailabilityStatus{
-				Properties: &resourcehealth.AvailabilityStatusProperties{
-					AvailabilityState: resourcehealth.AvailabilityStateValuesDegraded,
-					ReasonType:        pointer.String("TheReason"),
-					Summary:           pointer.String("The Summary"),
+			avail: armresourcehealth.AvailabilityStatus{
+				Properties: &armresourcehealth.AvailabilityStatusProperties{
+					AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesDegraded),
+					ReasonType:        ptr.To("TheReason"),
+					Summary:           ptr.To("The Summary"),
 				},
 			},
 			expected: &clusterv1.Condition{

@@ -24,8 +24,10 @@ import (
 	context "context"
 	reflect "reflect"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	genruntime "github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	autorest "github.com/Azure/go-autorest/autorest"
-	gomock "github.com/golang/mock/gomock"
+	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
@@ -79,6 +81,43 @@ func (m *MockReconciler) Reconcile(ctx context.Context) error {
 func (mr *MockReconcilerMockRecorder) Reconcile(ctx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Reconcile", reflect.TypeOf((*MockReconciler)(nil).Reconcile), ctx)
+}
+
+// MockPauser is a mock of Pauser interface.
+type MockPauser struct {
+	ctrl     *gomock.Controller
+	recorder *MockPauserMockRecorder
+}
+
+// MockPauserMockRecorder is the mock recorder for MockPauser.
+type MockPauserMockRecorder struct {
+	mock *MockPauser
+}
+
+// NewMockPauser creates a new mock instance.
+func NewMockPauser(ctrl *gomock.Controller) *MockPauser {
+	mock := &MockPauser{ctrl: ctrl}
+	mock.recorder = &MockPauserMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPauser) EXPECT() *MockPauserMockRecorder {
+	return m.recorder
+}
+
+// Pause mocks base method.
+func (m *MockPauser) Pause(arg0 context.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Pause", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Pause indicates an expected call of Pause.
+func (mr *MockPauserMockRecorder) Pause(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pause", reflect.TypeOf((*MockPauser)(nil).Pause), arg0)
 }
 
 // MockServiceReconciler is a mock of ServiceReconciler interface.
@@ -294,6 +333,20 @@ func (m *MockAuthorizer) TenantID() string {
 func (mr *MockAuthorizerMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockAuthorizer)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockAuthorizer) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockAuthorizerMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockAuthorizer)(nil).Token))
 }
 
 // MockNetworkDescriber is a mock of NetworkDescriber interface.
@@ -733,10 +786,10 @@ func (mr *MockClusterDescriberMockRecorder) ExtendedLocationType() *gomock.Call 
 }
 
 // FailureDomains mocks base method.
-func (m *MockClusterDescriber) FailureDomains() []string {
+func (m *MockClusterDescriber) FailureDomains() []*string {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FailureDomains")
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].([]*string)
 	return ret0
 }
 
@@ -814,6 +867,20 @@ func (m *MockClusterDescriber) TenantID() string {
 func (mr *MockClusterDescriberMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockClusterDescriber)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockClusterDescriber) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockClusterDescriberMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockClusterDescriber)(nil).Token))
 }
 
 // MockAsyncStatusUpdater is a mock of AsyncStatusUpdater interface.
@@ -1175,10 +1242,10 @@ func (mr *MockClusterScoperMockRecorder) ExtendedLocationType() *gomock.Call {
 }
 
 // FailureDomains mocks base method.
-func (m *MockClusterScoper) FailureDomains() []string {
+func (m *MockClusterScoper) FailureDomains() []*string {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FailureDomains")
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].([]*string)
 	return ret0
 }
 
@@ -1396,6 +1463,20 @@ func (mr *MockClusterScoperMockRecorder) TenantID() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockClusterScoper)(nil).TenantID))
 }
 
+// Token mocks base method.
+func (m *MockClusterScoper) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockClusterScoperMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockClusterScoper)(nil).Token))
+}
+
 // Vnet mocks base method.
 func (m *MockClusterScoper) Vnet() *v1beta1.VnetSpec {
 	m.ctrl.T.Helper()
@@ -1602,10 +1683,10 @@ func (mr *MockManagedClusterScoperMockRecorder) ExtendedLocationType() *gomock.C
 }
 
 // FailureDomains mocks base method.
-func (m *MockManagedClusterScoper) FailureDomains() []string {
+func (m *MockManagedClusterScoper) FailureDomains() []*string {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FailureDomains")
-	ret0, _ := ret[0].([]string)
+	ret0, _ := ret[0].([]*string)
 	return ret0
 }
 
@@ -1697,6 +1778,20 @@ func (m *MockManagedClusterScoper) TenantID() string {
 func (mr *MockManagedClusterScoperMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockManagedClusterScoper)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockManagedClusterScoper) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockManagedClusterScoperMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockManagedClusterScoper)(nil).Token))
 }
 
 // MockResourceSpecGetter is a mock of ResourceSpecGetter interface.
@@ -1871,4 +1966,70 @@ func (m *MockResourceSpecGetterWithHeaders) ResourceName() string {
 func (mr *MockResourceSpecGetterWithHeadersMockRecorder) ResourceName() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResourceName", reflect.TypeOf((*MockResourceSpecGetterWithHeaders)(nil).ResourceName))
+}
+
+// MockASOResourceSpecGetter is a mock of ASOResourceSpecGetter interface.
+type MockASOResourceSpecGetter struct {
+	ctrl     *gomock.Controller
+	recorder *MockASOResourceSpecGetterMockRecorder
+}
+
+// MockASOResourceSpecGetterMockRecorder is the mock recorder for MockASOResourceSpecGetter.
+type MockASOResourceSpecGetterMockRecorder struct {
+	mock *MockASOResourceSpecGetter
+}
+
+// NewMockASOResourceSpecGetter creates a new mock instance.
+func NewMockASOResourceSpecGetter(ctrl *gomock.Controller) *MockASOResourceSpecGetter {
+	mock := &MockASOResourceSpecGetter{ctrl: ctrl}
+	mock.recorder = &MockASOResourceSpecGetterMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockASOResourceSpecGetter) EXPECT() *MockASOResourceSpecGetterMockRecorder {
+	return m.recorder
+}
+
+// Parameters mocks base method.
+func (m *MockASOResourceSpecGetter) Parameters(ctx context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Parameters", ctx, object)
+	ret0, _ := ret[0].(genruntime.MetaObject)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Parameters indicates an expected call of Parameters.
+func (mr *MockASOResourceSpecGetterMockRecorder) Parameters(ctx, object interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Parameters", reflect.TypeOf((*MockASOResourceSpecGetter)(nil).Parameters), ctx, object)
+}
+
+// ResourceRef mocks base method.
+func (m *MockASOResourceSpecGetter) ResourceRef() genruntime.MetaObject {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ResourceRef")
+	ret0, _ := ret[0].(genruntime.MetaObject)
+	return ret0
+}
+
+// ResourceRef indicates an expected call of ResourceRef.
+func (mr *MockASOResourceSpecGetterMockRecorder) ResourceRef() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResourceRef", reflect.TypeOf((*MockASOResourceSpecGetter)(nil).ResourceRef))
+}
+
+// WasManaged mocks base method.
+func (m *MockASOResourceSpecGetter) WasManaged(arg0 genruntime.MetaObject) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "WasManaged", arg0)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// WasManaged indicates an expected call of WasManaged.
+func (mr *MockASOResourceSpecGetterMockRecorder) WasManaged(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WasManaged", reflect.TypeOf((*MockASOResourceSpecGetter)(nil).WasManaged), arg0)
 }

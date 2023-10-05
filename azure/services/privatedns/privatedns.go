@@ -19,6 +19,7 @@ package privatedns
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -49,18 +50,33 @@ type Service struct {
 }
 
 // New creates a new private dns service.
-func New(scope Scope) *Service {
-	zoneClient := newPrivateZonesClient(scope)
-	vnetLinkClient := newVirtualNetworkLinksClient(scope)
-	recordSetsClient := newRecordSetsClient(scope)
-	tagsClient := tags.NewClient(scope)
-	return &Service{
-		Scope:              scope,
-		TagsGetter:         tagsClient,
-		zoneReconciler:     async.New(scope, zoneClient, zoneClient),
-		vnetLinkReconciler: async.New(scope, vnetLinkClient, vnetLinkClient),
-		recordReconciler:   async.New(scope, recordSetsClient, recordSetsClient),
+func New(scope Scope) (*Service, error) {
+	zoneClient, err := newPrivateZonesClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	vnetLinkClient, err := newVirtualNetworkLinksClient(scope)
+	if err != nil {
+		return nil, err
+	}
+	recordSetsClient, err := newRecordSetsClient(scope)
+	if err != nil {
+		return nil, err
+	}
+	tagsClient, err := tags.NewClient(scope)
+	if err != nil {
+		return nil, err
+	}
+	return &Service{
+		Scope:      scope,
+		TagsGetter: tagsClient,
+		zoneReconciler: async.New[armprivatedns.PrivateZonesClientCreateOrUpdateResponse,
+			armprivatedns.PrivateZonesClientDeleteResponse](scope, zoneClient, zoneClient),
+		vnetLinkReconciler: async.New[armprivatedns.VirtualNetworkLinksClientCreateOrUpdateResponse,
+			armprivatedns.VirtualNetworkLinksClientDeleteResponse](scope, vnetLinkClient, vnetLinkClient),
+		recordReconciler: async.New[armprivatedns.RecordSetsClientCreateOrUpdateResponse,
+			armprivatedns.RecordSetsClientDeleteResponse](scope, recordSetsClient, recordSetsClient),
+	}, nil
 }
 
 // Name returns the service name.

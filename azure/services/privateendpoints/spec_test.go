@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2022-05-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -79,31 +79,71 @@ func TestParameters(t *testing.T) {
 				SubnetID: "test-subnet",
 			},
 			// See https://learn.microsoft.com/en-us/rest/api/virtualnetwork/private-endpoints/get?tabs=Go for more options
-			existing: network.PrivateEndpoint{
-				Name: pointer.String("test-private-endpoint1"),
-				PrivateEndpointProperties: &network.PrivateEndpointProperties{
-					Subnet: &network.Subnet{
-						ID: pointer.String("test-subnet"),
-						SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-							PrivateEndpointNetworkPolicies:    network.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled,
-							PrivateLinkServiceNetworkPolicies: network.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled,
-						},
+			existing: armnetwork.PrivateEndpoint{
+				Name: ptr.To("test-private-endpoint1"),
+				Properties: &armnetwork.PrivateEndpointProperties{
+					Subnet: &armnetwork.Subnet{
+						ID: ptr.To("test-subnet"),
 					},
-					ApplicationSecurityGroups: &[]network.ApplicationSecurityGroup{{
-						ID: pointer.String("asg1"),
+					ApplicationSecurityGroups: []*armnetwork.ApplicationSecurityGroup{{
+						ID: ptr.To("asg1"),
 					}},
-					PrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{{
-						Name: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
-						PrivateLinkServiceConnectionProperties: &network.PrivateLinkServiceConnectionProperties{
-							PrivateLinkServiceID: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
-							GroupIds:             nil,
-							RequestMessage:       pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
+					CustomNetworkInterfaceName: ptr.To(""),
+					IPConfigurations:           []*armnetwork.PrivateEndpointIPConfiguration{},
+					PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+						Name: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
+						Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+							PrivateLinkServiceID: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+							GroupIDs:             nil,
+							RequestMessage:       ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
 						},
 					}},
-					ManualPrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{},
-					ProvisioningState:                   "Succeeded",
+					ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+					ProvisioningState:                   ptr.To(armnetwork.ProvisioningStateSucceeded),
 				},
-				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"), "Name": pointer.String("test-private-endpoint1")},
+				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint1")},
+			},
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeNil())
+			},
+		},
+		{
+			name: "PrivateEndpoint without AppplicationSecurityGroups already exists with the same config",
+			spec: &PrivateEndpointSpec{
+				Name:                      privateEndpoint1.Name,
+				ResourceGroup:             "test-group",
+				ClusterName:               "my-cluster",
+				ApplicationSecurityGroups: nil,
+				PrivateLinkServiceConnections: []PrivateLinkServiceConnection{{
+					Name:                 privateEndpoint1.PrivateLinkServiceConnections[0].Name,
+					GroupIDs:             privateEndpoint1.PrivateLinkServiceConnections[0].GroupIDs,
+					PrivateLinkServiceID: privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID,
+					RequestMessage:       privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage,
+				}},
+				SubnetID: "test-subnet",
+			},
+			// See https://learn.microsoft.com/en-us/rest/api/virtualnetwork/private-endpoints/get?tabs=Go for more options
+			existing: armnetwork.PrivateEndpoint{
+				Name: ptr.To("test-private-endpoint1"),
+				Properties: &armnetwork.PrivateEndpointProperties{
+					Subnet: &armnetwork.Subnet{
+						ID: ptr.To("test-subnet"),
+					},
+					ApplicationSecurityGroups:  nil,
+					CustomNetworkInterfaceName: ptr.To(""),
+					IPConfigurations:           []*armnetwork.PrivateEndpointIPConfiguration{},
+					PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+						Name: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
+						Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+							PrivateLinkServiceID: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+							GroupIDs:             nil,
+							RequestMessage:       ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
+						},
+					}},
+					ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+					ProvisioningState:                   ptr.To(armnetwork.ProvisioningStateSucceeded),
+				},
+				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint1")},
 			},
 			expect: func(g *WithT, result interface{}) {
 				g.Expect(result).To(BeNil())
@@ -126,31 +166,29 @@ func TestParameters(t *testing.T) {
 				ManualApproval: privateEndpoint1Manual.ManualApproval,
 			},
 			// See https://learn.microsoft.com/en-us/rest/api/virtualnetwork/private-endpoints/get?tabs=Go for more options
-			existing: network.PrivateEndpoint{
-				Name: pointer.String("test-private-endpoint-manual"),
-				PrivateEndpointProperties: &network.PrivateEndpointProperties{
-					Subnet: &network.Subnet{
-						ID: pointer.String("test-subnet"),
-						SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-							PrivateEndpointNetworkPolicies:    network.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled,
-							PrivateLinkServiceNetworkPolicies: network.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled,
-						},
+			existing: armnetwork.PrivateEndpoint{
+				Name: ptr.To("test-private-endpoint-manual"),
+				Properties: &armnetwork.PrivateEndpointProperties{
+					Subnet: &armnetwork.Subnet{
+						ID: ptr.To("test-subnet"),
 					},
-					ApplicationSecurityGroups: &[]network.ApplicationSecurityGroup{{
-						ID: pointer.String("asg1"),
+					ApplicationSecurityGroups: []*armnetwork.ApplicationSecurityGroup{{
+						ID: ptr.To("asg1"),
 					}},
-					ManualPrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{{
-						Name: pointer.String(privateEndpoint1Manual.PrivateLinkServiceConnections[0].Name),
-						PrivateLinkServiceConnectionProperties: &network.PrivateLinkServiceConnectionProperties{
-							PrivateLinkServiceID: pointer.String(privateEndpoint1Manual.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
-							GroupIds:             &[]string{"aa", "bb"},
-							RequestMessage:       pointer.String(privateEndpoint1Manual.PrivateLinkServiceConnections[0].RequestMessage),
+					CustomNetworkInterfaceName: ptr.To(""),
+					IPConfigurations:           []*armnetwork.PrivateEndpointIPConfiguration{},
+					ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+						Name: ptr.To(privateEndpoint1Manual.PrivateLinkServiceConnections[0].Name),
+						Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+							PrivateLinkServiceID: ptr.To(privateEndpoint1Manual.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+							GroupIDs:             []*string{ptr.To("aa"), ptr.To("bb")},
+							RequestMessage:       ptr.To(privateEndpoint1Manual.PrivateLinkServiceConnections[0].RequestMessage),
 						},
 					}},
-					PrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{},
-					ProvisioningState:             "Succeeded",
+					PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+					ProvisioningState:             ptr.To(armnetwork.ProvisioningStateSucceeded),
 				},
-				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"), "Name": pointer.String("test-private-endpoint-manual")},
+				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint-manual")},
 			},
 			expect: func(g *WithT, result interface{}) {
 				g.Expect(result).To(BeNil())
@@ -174,81 +212,77 @@ func TestParameters(t *testing.T) {
 				PrivateIPAddresses:         privateEndpoint2.PrivateIPAddresses,
 				CustomNetworkInterfaceName: "test-if-name",
 			},
-			existing: network.PrivateEndpoint{
-				Name:     pointer.String("test-private-endpoint2"),
-				Location: pointer.String("test-location"),
-				PrivateEndpointProperties: &network.PrivateEndpointProperties{
-					Subnet: &network.Subnet{
-						ID: pointer.String("test-subnet"),
-						SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-							PrivateEndpointNetworkPolicies:    network.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled,
-							PrivateLinkServiceNetworkPolicies: network.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled,
-						},
+			existing: armnetwork.PrivateEndpoint{
+				Name:     ptr.To("test-private-endpoint2"),
+				Location: ptr.To("test-location"),
+				Properties: &armnetwork.PrivateEndpointProperties{
+					Subnet: &armnetwork.Subnet{
+						ID: ptr.To("test-subnet"),
 					},
-					ApplicationSecurityGroups: &[]network.ApplicationSecurityGroup{{
-						ID: pointer.String("asg1"),
+					ApplicationSecurityGroups: []*armnetwork.ApplicationSecurityGroup{{
+						ID: ptr.To("asg1"),
 					}},
-					PrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{{
-						Name: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
-						PrivateLinkServiceConnectionProperties: &network.PrivateLinkServiceConnectionProperties{
-							PrivateLinkServiceID: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
-							GroupIds:             &[]string{"aa", "bb"},
-							RequestMessage:       pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
+					PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+						Name: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
+						Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+							PrivateLinkServiceID: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+							GroupIDs:             []*string{ptr.To("aa"), ptr.To("bb")},
+							RequestMessage:       ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
 						},
 					}},
-					ManualPrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{},
-					ProvisioningState:                   "Succeeded",
-					IPConfigurations: &[]network.PrivateEndpointIPConfiguration{
+					ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+					ProvisioningState:                   ptr.To(armnetwork.ProvisioningStateSucceeded),
+					IPConfigurations: []*armnetwork.PrivateEndpointIPConfiguration{
 						{
-							PrivateEndpointIPConfigurationProperties: &network.PrivateEndpointIPConfigurationProperties{
-								PrivateIPAddress: pointer.String("10.0.0.1"),
+							Properties: &armnetwork.PrivateEndpointIPConfigurationProperties{
+								PrivateIPAddress: ptr.To("10.0.0.1"),
 							},
 						},
 					},
-					CustomNetworkInterfaceName: pointer.String("test-if-name"),
+					CustomNetworkInterfaceName: ptr.To("test-if-name"),
 				},
-				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"), "Name": pointer.String("test-private-endpoint2")},
+				Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint2")},
 			},
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(BeAssignableToTypeOf(network.PrivateEndpoint{}))
-				g.Expect(result).To(Equal(network.PrivateEndpoint{
-					Name:     pointer.String("test-private-endpoint2"),
-					Location: pointer.String("test-location"),
-					PrivateEndpointProperties: &network.PrivateEndpointProperties{
-						Subnet: &network.Subnet{
-							ID: pointer.String("test-subnet"),
-							SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-								PrivateEndpointNetworkPolicies:    network.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled,
-								PrivateLinkServiceNetworkPolicies: network.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled,
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.PrivateEndpoint{}))
+				g.Expect(result).To(Equal(armnetwork.PrivateEndpoint{
+					Name:     ptr.To("test-private-endpoint2"),
+					Location: ptr.To("test-location"),
+					Properties: &armnetwork.PrivateEndpointProperties{
+						Subnet: &armnetwork.Subnet{
+							ID: ptr.To("test-subnet"),
+							Properties: &armnetwork.SubnetPropertiesFormat{
+								PrivateEndpointNetworkPolicies:    ptr.To(armnetwork.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled),
+								PrivateLinkServiceNetworkPolicies: ptr.To(armnetwork.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled),
 							},
 						},
-						ApplicationSecurityGroups: &[]network.ApplicationSecurityGroup{{
-							ID: pointer.String("asg1"),
+						ApplicationSecurityGroups: []*armnetwork.ApplicationSecurityGroup{{
+							ID: ptr.To("asg1"),
 						}},
-						PrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{{
-							Name: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
-							PrivateLinkServiceConnectionProperties: &network.PrivateLinkServiceConnectionProperties{
-								PrivateLinkServiceID: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
-								GroupIds:             &[]string{"aa", "bb"},
-								RequestMessage:       pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
+						PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+							Name: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
+							Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+								PrivateLinkServiceID: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+								GroupIDs:             []*string{ptr.To("aa"), ptr.To("bb")},
+								RequestMessage:       ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
 							},
 						}},
-						ManualPrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{},
-						IPConfigurations: &[]network.PrivateEndpointIPConfiguration{
+						ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+						IPConfigurations: []*armnetwork.PrivateEndpointIPConfiguration{
 							{
-								PrivateEndpointIPConfigurationProperties: &network.PrivateEndpointIPConfigurationProperties{
-									PrivateIPAddress: pointer.String("10.0.0.1"),
+								Properties: &armnetwork.PrivateEndpointIPConfigurationProperties{
+									PrivateIPAddress: ptr.To("10.0.0.1"),
 								},
 							},
 							{
-								PrivateEndpointIPConfigurationProperties: &network.PrivateEndpointIPConfigurationProperties{
-									PrivateIPAddress: pointer.String("10.0.0.2"),
+								Properties: &armnetwork.PrivateEndpointIPConfigurationProperties{
+									PrivateIPAddress: ptr.To("10.0.0.2"),
 								},
 							},
 						},
-						CustomNetworkInterfaceName: pointer.String("test-if-name"),
+						CustomNetworkInterfaceName: ptr.To("test-if-name"),
 					},
-					Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"), "Name": pointer.String("test-private-endpoint2")},
+					Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint2")},
 				}))
 			},
 		},
@@ -272,45 +306,45 @@ func TestParameters(t *testing.T) {
 			},
 			existing: nil,
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(BeAssignableToTypeOf(network.PrivateEndpoint{}))
-				g.Expect(result).To(Equal(network.PrivateEndpoint{
-					Name:     pointer.String("test-private-endpoint2"),
-					Location: pointer.String("test-location"),
-					PrivateEndpointProperties: &network.PrivateEndpointProperties{
-						Subnet: &network.Subnet{
-							ID: pointer.String("test-subnet"),
-							SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-								PrivateEndpointNetworkPolicies:    network.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled,
-								PrivateLinkServiceNetworkPolicies: network.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled,
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.PrivateEndpoint{}))
+				g.Expect(result).To(Equal(armnetwork.PrivateEndpoint{
+					Name:     ptr.To("test-private-endpoint2"),
+					Location: ptr.To("test-location"),
+					Properties: &armnetwork.PrivateEndpointProperties{
+						Subnet: &armnetwork.Subnet{
+							ID: ptr.To("test-subnet"),
+							Properties: &armnetwork.SubnetPropertiesFormat{
+								PrivateEndpointNetworkPolicies:    ptr.To(armnetwork.VirtualNetworkPrivateEndpointNetworkPoliciesDisabled),
+								PrivateLinkServiceNetworkPolicies: ptr.To(armnetwork.VirtualNetworkPrivateLinkServiceNetworkPoliciesEnabled),
 							},
 						},
-						ApplicationSecurityGroups: &[]network.ApplicationSecurityGroup{{
-							ID: pointer.String("asg1"),
+						ApplicationSecurityGroups: []*armnetwork.ApplicationSecurityGroup{{
+							ID: ptr.To("asg1"),
 						}},
-						PrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{{
-							Name: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
-							PrivateLinkServiceConnectionProperties: &network.PrivateLinkServiceConnectionProperties{
-								PrivateLinkServiceID: pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
-								GroupIds:             &[]string{"aa", "bb"},
-								RequestMessage:       pointer.String(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
+						PrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{{
+							Name: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].Name),
+							Properties: &armnetwork.PrivateLinkServiceConnectionProperties{
+								PrivateLinkServiceID: ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].PrivateLinkServiceID),
+								GroupIDs:             []*string{ptr.To("aa"), ptr.To("bb")},
+								RequestMessage:       ptr.To(privateEndpoint1.PrivateLinkServiceConnections[0].RequestMessage),
 							},
 						}},
-						ManualPrivateLinkServiceConnections: &[]network.PrivateLinkServiceConnection{},
-						IPConfigurations: &[]network.PrivateEndpointIPConfiguration{
+						ManualPrivateLinkServiceConnections: []*armnetwork.PrivateLinkServiceConnection{},
+						IPConfigurations: []*armnetwork.PrivateEndpointIPConfiguration{
 							{
-								PrivateEndpointIPConfigurationProperties: &network.PrivateEndpointIPConfigurationProperties{
-									PrivateIPAddress: pointer.String("10.0.0.1"),
+								Properties: &armnetwork.PrivateEndpointIPConfigurationProperties{
+									PrivateIPAddress: ptr.To("10.0.0.1"),
 								},
 							},
 							{
-								PrivateEndpointIPConfigurationProperties: &network.PrivateEndpointIPConfigurationProperties{
-									PrivateIPAddress: pointer.String("10.0.0.2"),
+								Properties: &armnetwork.PrivateEndpointIPConfigurationProperties{
+									PrivateIPAddress: ptr.To("10.0.0.2"),
 								},
 							},
 						},
-						CustomNetworkInterfaceName: pointer.String("test-if-name"),
+						CustomNetworkInterfaceName: ptr.To("test-if-name"),
 					},
-					Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"), "Name": pointer.String("test-private-endpoint2")},
+					Tags: map[string]*string{"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"), "Name": ptr.To("test-private-endpoint2")},
 				}))
 			},
 		},

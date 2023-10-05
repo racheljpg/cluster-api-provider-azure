@@ -19,9 +19,9 @@ package inboundnatrules
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // InboundNatSpec defines the specification for an inbound NAT rule.
@@ -51,10 +51,10 @@ func (s *InboundNatSpec) OwnerResourceName() string {
 // Parameters returns the parameters for the inbound NAT rule.
 func (s *InboundNatSpec) Parameters(ctx context.Context, existing interface{}) (parameters interface{}, err error) {
 	if existing != nil {
-		if _, ok := existing.(network.InboundNatRule); !ok {
-			return nil, errors.Errorf("%T is not a network.InboundNatRule", existing)
+		if _, ok := existing.(armnetwork.InboundNatRule); !ok {
+			return nil, errors.Errorf("%T is not an armnetwork.InboundNatRule", existing)
 		}
-
+		// Skip updating the existing inbound NAT rule
 		return nil, nil
 	}
 
@@ -62,16 +62,16 @@ func (s *InboundNatSpec) Parameters(ctx context.Context, existing interface{}) (
 		return nil, errors.Errorf("FrontendIPConfigurationID is not set")
 	}
 
-	rule := network.InboundNatRule{
-		Name: pointer.String(s.ResourceName()),
-		InboundNatRulePropertiesFormat: &network.InboundNatRulePropertiesFormat{
-			BackendPort:          pointer.Int32(22),
-			EnableFloatingIP:     pointer.Bool(false),
-			IdleTimeoutInMinutes: pointer.Int32(4),
-			FrontendIPConfiguration: &network.SubResource{
+	rule := armnetwork.InboundNatRule{
+		Name: ptr.To(s.ResourceName()),
+		Properties: &armnetwork.InboundNatRulePropertiesFormat{
+			BackendPort:          ptr.To[int32](22),
+			EnableFloatingIP:     ptr.To(false),
+			IdleTimeoutInMinutes: ptr.To[int32](4),
+			FrontendIPConfiguration: &armnetwork.SubResource{
 				ID: s.FrontendIPConfigurationID,
 			},
-			Protocol:     network.TransportProtocolTCP,
+			Protocol:     ptr.To(armnetwork.TransportProtocolTCP),
 			FrontendPort: s.SSHFrontendPort,
 		},
 	}

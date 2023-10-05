@@ -21,12 +21,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-10-01/resources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -47,7 +47,7 @@ var (
 		IsIPv6:         false,
 		ClusterName:    "my-cluster",
 		Location:       "centralIndia",
-		FailureDomains: []string{"failure-domain-id-1", "failure-domain-id-2", "failure-domain-id-3"},
+		FailureDomains: []*string{ptr.To("failure-domain-id-1"), ptr.To("failure-domain-id-2"), ptr.To("failure-domain-id-3")},
 		AdditionalTags: infrav1.Tags{
 			"Name": "my-publicip-ipv6",
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": "owned",
@@ -60,7 +60,7 @@ var (
 		IsIPv6:         false,
 		ClusterName:    "my-cluster",
 		Location:       "centralIndia",
-		FailureDomains: []string{"failure-domain-id-1", "failure-domain-id-2", "failure-domain-id-3"},
+		FailureDomains: []*string{ptr.To("failure-domain-id-1"), ptr.To("failure-domain-id-2"), ptr.To("failure-domain-id-3")},
 		AdditionalTags: infrav1.Tags{
 			"Name": "my-publicip-ipv6",
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": "owned",
@@ -73,7 +73,7 @@ var (
 		IsIPv6:         false,
 		ClusterName:    "my-cluster",
 		Location:       "centralIndia",
-		FailureDomains: []string{"failure-domain-id-1", "failure-domain-id-2", "failure-domain-id-3"},
+		FailureDomains: []*string{ptr.To("failure-domain-id-1"), ptr.To("failure-domain-id-2"), ptr.To("failure-domain-id-3")},
 		AdditionalTags: infrav1.Tags{
 			"Name": "my-publicip-ipv6",
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": "owned",
@@ -86,7 +86,7 @@ var (
 		IsIPv6:         true,
 		ClusterName:    "my-cluster",
 		Location:       "centralIndia",
-		FailureDomains: []string{"failure-domain-id-1", "failure-domain-id-2", "failure-domain-id-3"},
+		FailureDomains: []*string{ptr.To("failure-domain-id-1"), ptr.To("failure-domain-id-2"), ptr.To("failure-domain-id-3")},
 		AdditionalTags: infrav1.Tags{
 			"Name": "my-publicip-ipv6",
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": "owned",
@@ -94,20 +94,20 @@ var (
 		},
 	}
 
-	managedTags = resources.TagsResource{
-		Properties: &resources.Tags{
+	managedTags = armresources.TagsResource{
+		Properties: &armresources.Tags{
 			Tags: map[string]*string{
-				"foo": pointer.String("bar"),
-				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
+				"foo": ptr.To("bar"),
+				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			},
 		},
 	}
 
-	unmanagedTags = resources.TagsResource{
-		Properties: &resources.Tags{
+	unmanagedTags = armresources.TagsResource{
+		Properties: &armresources.Tags{
 			Tags: map[string]*string{
-				"foo":       pointer.String("bar"),
-				"something": pointer.String("else"),
+				"foo":       ptr.To("bar"),
+				"something": ptr.To("else"),
 			},
 		},
 	}
