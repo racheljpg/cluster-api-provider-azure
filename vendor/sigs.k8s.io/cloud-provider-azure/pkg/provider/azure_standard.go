@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -39,7 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog/v2"
-	utilnet "k8s.io/utils/net"
 	"k8s.io/utils/pointer"
 
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
@@ -54,6 +54,14 @@ var (
 	nicIDRE            = regexp.MustCompile(`(?i)/subscriptions/(?:.*)/resourceGroups/(.+)/providers/Microsoft.Network/networkInterfaces/(.+)/ipConfigurations/(?:.*)`)
 	vmIDRE             = regexp.MustCompile(`(?i)/subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/virtualMachines/(.+)`)
 	vmasIDRE           = regexp.MustCompile(`/subscriptions/(?:.*)/resourceGroups/(?:.*)/providers/Microsoft.Compute/availabilitySets/(.+)`)
+)
+
+const (
+	v6Suffix = "IPv6"
+)
+
+var (
+	v6SuffixLower = strings.ToLower(v6Suffix)
 )
 
 // returns the full identifier of an availabilitySet
@@ -263,44 +271,53 @@ func isInternalLoadBalancer(lb *network.LoadBalancer) bool {
 // This means:
 // clusters moving from IPv4 to dualstack will require no changes
 // clusters moving from IPv6 to dualstack will require no changes as the IPv4 backend pool will created with <clusterName>
-func getBackendPoolName(clusterName string, service *v1.Service) string {
-	IPv6 := utilnet.IsIPv6String(service.Spec.ClusterIP)
-	if IPv6 {
-		return fmt.Sprintf("%v-IPv6", clusterName)
+func getBackendPoolName(clusterName string, isIPv6 bool) string {
+	if isIPv6 {
+		return fmt.Sprintf("%s-%s", clusterName, v6Suffix)
 	}
 
 	return clusterName
 }
 
-func (az *Cloud) getLoadBalancerRuleName(service *v1.Service, protocol v1.Protocol, port int32) string {
+// ifBackendPoolIPv6 checks if a backend pool is of IPv6 according to name/ID.
+func isBackendPoolIPv6(name string) bool {
+	return strings.HasSuffix(strings.ToLower(name), fmt.Sprintf("-%s", v6SuffixLower))
+}
+
+func (az *Cloud) getLoadBalancerRuleName(service *v1.Service, protocol v1.Protocol, port int32, isIPv6 bool) string {
 	prefix := az.getRulePrefix(service)
 	ruleName := fmt.Sprintf("%s-%s-%d", prefix, protocol, port)
 	subnet := subnet(service)
 	if subnet == nil {
+		// TODO: Use getResourceByIPFamily()
 		return ruleName
 	}
 
 	// Load balancer rule name must be less or equal to 80 characters, so excluding the hyphen two segments cannot exceed 79
 	subnetSegment := *subnet
-	if len(ruleName)+len(subnetSegment)+1 > consts.LoadBalancerRuleNameMaxLength {
-		subnetSegment = subnetSegment[:consts.LoadBalancerRuleNameMaxLength-len(ruleName)-1]
+	maxLength := consts.LoadBalancerRuleNameMaxLength - consts.IPFamilySuffixLength
+	if len(ruleName)+len(subnetSegment)+1 > maxLength {
+		subnetSegment = subnetSegment[:maxLength-len(ruleName)-1]
 	}
 
+	// TODO: Use getResourceByIPFamily()
 	return fmt.Sprintf("%s-%s-%s-%d", prefix, subnetSegment, protocol, port)
 }
 
-func (az *Cloud) getloadbalancerHAmodeRuleName(service *v1.Service) string {
-	return az.getLoadBalancerRuleName(service, service.Spec.Ports[0].Protocol, service.Spec.Ports[0].Port)
+func (az *Cloud) getloadbalancerHAmodeRuleName(service *v1.Service, isIPv6 bool) string {
+	return az.getLoadBalancerRuleName(service, service.Spec.Ports[0].Protocol, service.Spec.Ports[0].Port, isIPv6)
 }
 
-func (az *Cloud) getSecurityRuleName(service *v1.Service, port v1.ServicePort, sourceAddrPrefix string) string {
+func (az *Cloud) getSecurityRuleName(service *v1.Service, port v1.ServicePort, sourceAddrPrefix string, isIPv6 bool) string {
 	safePrefix := strings.Replace(sourceAddrPrefix, "/", "_", -1)
 	safePrefix = strings.Replace(safePrefix, ":", ".", -1) // Consider IPv6 address
 	if useSharedSecurityRule(service) {
 		return fmt.Sprintf("shared-%s-%d-%s", port.Protocol, port.Port, safePrefix)
 	}
 	rulePrefix := az.getRulePrefix(service)
-	return fmt.Sprintf("%s-%s-%d-%s", rulePrefix, port.Protocol, port.Port, safePrefix)
+	name := fmt.Sprintf("%s-%s-%d-%s", rulePrefix, port.Protocol, port.Port, safePrefix)
+	// TODO: Use getResourceByIPFamily
+	return name
 }
 
 // This returns a human-readable version of the Service used to tag some resources.
@@ -314,21 +331,38 @@ func (az *Cloud) getRulePrefix(service *v1.Service) string {
 	return az.GetLoadBalancerName(context.TODO(), "", service)
 }
 
-func (az *Cloud) getPublicIPName(clusterName string, service *v1.Service) string {
+func (az *Cloud) getPublicIPName(clusterName string, service *v1.Service, isIPv6 bool) (string, error) {
+	isDualStack := isServiceDualStack(service)
 	pipName := fmt.Sprintf("%s-%s", clusterName, az.GetLoadBalancerName(context.TODO(), clusterName, service))
-	if prefixID, ok := service.Annotations[consts.ServiceAnnotationPIPPrefixID]; ok && prefixID != "" {
-		prefixName, err := getLastSegment(prefixID, "/")
-		if err != nil {
-			return pipName
+	if id := getServicePIPPrefixID(service, isIPv6); id != "" {
+		id, err := getLastSegment(id, "/")
+		if err == nil {
+			pipName = fmt.Sprintf("%s-%s", pipName, id)
 		}
-		pipName = fmt.Sprintf("%s-%s", pipName, prefixName)
 	}
-	return pipName
+	return getResourceByIPFamily(pipName, isDualStack, isIPv6), nil
 }
 
+// TODO: UT
 func (az *Cloud) serviceOwnsRule(service *v1.Service, rule string) bool {
 	prefix := az.getRulePrefix(service)
 	return strings.HasPrefix(strings.ToUpper(rule), strings.ToUpper(prefix))
+}
+
+func publicIPOwnsFrontendIP(service *v1.Service, fip *network.FrontendIPConfiguration, pip *network.PublicIPAddress) bool {
+	if pip != nil &&
+		pip.ID != nil &&
+		pip.PublicIPAddressPropertiesFormat != nil &&
+		pip.PublicIPAddressPropertiesFormat.IPAddress != nil &&
+		fip != nil &&
+		fip.FrontendIPConfigurationPropertiesFormat != nil &&
+		fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress != nil {
+		if strings.EqualFold(pointer.StringDeref(pip.ID, ""), pointer.StringDeref(fip.PublicIPAddress.ID, "")) {
+			klog.V(6).Infof("publicIPOwnsFrontendIP:found secondary service %s of the frontend IP config %s", service.Name, *fip.Name)
+			return true
+		}
+	}
+	return false
 }
 
 // There are two cases when a service owns the frontend IP config:
@@ -336,7 +370,7 @@ func (az *Cloud) serviceOwnsRule(service *v1.Service, rule string) bool {
 // This means the name of the config can be tracked by the service UID.
 // 2. The secondary services must have their loadBalancer IP set if they want to share the same config as the primary
 // service. Hence, it can be tracked by the loadBalancer IP.
-func (az *Cloud) serviceOwnsFrontendIP(fip network.FrontendIPConfiguration, service *v1.Service, pips *[]network.PublicIPAddress) (bool, bool, error) {
+func (az *Cloud) serviceOwnsFrontendIP(fip network.FrontendIPConfiguration, service *v1.Service) (bool, bool, error) {
 	var isPrimaryService bool
 	baseName := az.GetLoadBalancerName(context.TODO(), "", service)
 	if strings.HasPrefix(pointer.StringDeref(fip.Name, ""), baseName) {
@@ -345,33 +379,43 @@ func (az *Cloud) serviceOwnsFrontendIP(fip network.FrontendIPConfiguration, serv
 		return true, isPrimaryService, nil
 	}
 
-	loadBalancerIP := getServiceLoadBalancerIP(service)
-	if loadBalancerIP == "" {
-		// it is a must that the secondary services set the loadBalancer IP
+	loadBalancerIPs := getServiceLoadBalancerIPs(service)
+	pipResourceGroup := az.getPublicIPAddressResourceGroup(service)
+	var pipNames []string
+	if len(loadBalancerIPs) == 0 {
+		if !requiresInternalLoadBalancer(service) {
+			pipNames = getServicePIPNames(service)
+			for _, pipName := range pipNames {
+				if pipName != "" {
+					pip, err := az.findMatchedPIP("", pipName, pipResourceGroup)
+					if err != nil {
+						klog.Warningf("serviceOwnsFrontendIP: unexpected error when finding match public IP of the service %s with name %s: %v", service.Name, pipName, err)
+						return false, isPrimaryService, nil
+					}
+					if publicIPOwnsFrontendIP(service, &fip, pip) {
+						return true, isPrimaryService, nil
+					}
+				}
+			}
+		}
+		// it is a must that the secondary services set the loadBalancer IP or pip name
 		return false, isPrimaryService, nil
 	}
 
 	// for external secondary service the public IP address should be checked
 	if !requiresInternalLoadBalancer(service) {
-		pipResourceGroup := az.getPublicIPAddressResourceGroup(service)
-		pip, err := az.findMatchedPIPByLoadBalancerIP(service, loadBalancerIP, pipResourceGroup, pips)
-		if err != nil {
-			klog.Warningf("serviceOwnsFrontendIP: unexpected error when finding match public IP of the service %s with loadBalancerLP %s: %v", service.Name, loadBalancerIP, err)
-			return false, isPrimaryService, nil
-		}
+		for _, loadBalancerIP := range loadBalancerIPs {
+			pip, err := az.findMatchedPIP(loadBalancerIP, "", pipResourceGroup)
+			if err != nil {
+				klog.Warningf("serviceOwnsFrontendIP: unexpected error when finding match public IP of the service %s with loadBalancerIP %s: %v", service.Name, loadBalancerIP, err)
+				return false, isPrimaryService, nil
+			}
 
-		if pip != nil &&
-			pip.ID != nil &&
-			pip.PublicIPAddressPropertiesFormat != nil &&
-			pip.IPAddress != nil &&
-			fip.FrontendIPConfigurationPropertiesFormat != nil &&
-			fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress != nil {
-			if strings.EqualFold(pointer.StringDeref(pip.ID, ""), pointer.StringDeref(fip.PublicIPAddress.ID, "")) {
-				klog.V(4).Infof("serviceOwnsFrontendIP: found secondary service %s of the frontend IP config %s", service.Name, *fip.Name)
-
+			if publicIPOwnsFrontendIP(service, &fip, pip) {
 				return true, isPrimaryService, nil
 			}
-			klog.V(4).Infof("serviceOwnsFrontendIP: the public IP with ID %s is being referenced by other service with public IP address %s", *pip.ID, *pip.IPAddress)
+			klog.Infof("serviceOwnsFrontendIP: the public IP with ID %s is being referenced by other service with public IP address %s "+
+				"OR it is of incorrect IP version", *pip.ID, *pip.IPAddress)
 		}
 
 		return false, isPrimaryService, nil
@@ -382,7 +426,14 @@ func (az *Cloud) serviceOwnsFrontendIP(fip network.FrontendIPConfiguration, serv
 		return false, isPrimaryService, nil
 	}
 
-	return strings.EqualFold(*fip.PrivateIPAddress, loadBalancerIP), isPrimaryService, nil
+	privateIPEquals := false
+	for _, loadBalancerIP := range loadBalancerIPs {
+		if strings.EqualFold(*fip.PrivateIPAddress, loadBalancerIP) {
+			privateIPEquals = true
+			break
+		}
+	}
+	return privateIPEquals, isPrimaryService, nil
 }
 
 func (az *Cloud) getDefaultFrontendIPConfigName(service *v1.Service) string {
@@ -392,8 +443,9 @@ func (az *Cloud) getDefaultFrontendIPConfigName(service *v1.Service) string {
 		ipcName := fmt.Sprintf("%s-%s", baseName, *subnetName)
 
 		// Azure lb front end configuration name must not exceed 80 characters
-		if len(ipcName) > consts.FrontendIPConfigNameMaxLength {
-			ipcName = ipcName[:consts.FrontendIPConfigNameMaxLength]
+		maxLength := consts.FrontendIPConfigNameMaxLength - consts.IPFamilySuffixLength
+		if len(ipcName) > maxLength {
+			ipcName = ipcName[:maxLength]
 			// Cutting the string may result in char like "-" as the string end.
 			// If the last char is not a letter or '_', replace it with "_".
 			if !unicode.IsLetter(rune(ipcName[len(ipcName)-1:][0])) && ipcName[len(ipcName)-1:] != "_" {
@@ -931,7 +983,7 @@ func (as *availabilitySet) EnsureHostInPool(service *v1.Service, nodeName types.
 	}
 
 	var primaryIPConfig *network.InterfaceIPConfiguration
-	ipv6 := utilnet.IsIPv6String(service.Spec.ClusterIP)
+	ipv6 := isBackendPoolIPv6(backendPoolID)
 	if !as.Cloud.ipv6DualStackEnabled && !ipv6 {
 		primaryIPConfig, err = getPrimaryIPConfig(nic)
 		if err != nil {
@@ -1041,7 +1093,8 @@ func (as *availabilitySet) EnsureHostsInPool(service *v1.Service, nodes []*v1.No
 }
 
 // EnsureBackendPoolDeleted ensures the loadBalancer backendAddressPools deleted from the specified nodes.
-func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backendPoolID, vmSetName string, backendAddressPools *[]network.BackendAddressPool, deleteFromVMSet bool) (bool, error) {
+// backendPoolIDs are the IDs of the backendpools to be deleted.
+func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backendPoolIDs []string, vmSetName string, backendAddressPools *[]network.BackendAddressPool, deleteFromVMSet bool) (bool, error) {
 	// Returns nil if backend address pools already deleted.
 	if backendAddressPools == nil {
 		return false, nil
@@ -1055,23 +1108,32 @@ func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backend
 
 	ipConfigurationIDs := []string{}
 	for _, backendPool := range *backendAddressPools {
-		if strings.EqualFold(pointer.StringDeref(backendPool.ID, ""), backendPoolID) &&
-			backendPool.BackendAddressPoolPropertiesFormat != nil &&
-			backendPool.BackendIPConfigurations != nil {
-			for _, ipConf := range *backendPool.BackendIPConfigurations {
-				if ipConf.ID == nil {
-					continue
-				}
+		for _, backendPoolID := range backendPoolIDs {
+			if strings.EqualFold(pointer.StringDeref(backendPool.ID, ""), backendPoolID) {
+				if backendPool.BackendAddressPoolPropertiesFormat != nil &&
+					backendPool.BackendIPConfigurations != nil {
+					for _, ipConf := range *backendPool.BackendIPConfigurations {
+						if ipConf.ID == nil {
+							continue
+						}
 
-				ipConfigurationIDs = append(ipConfigurationIDs, *ipConf.ID)
+						ipConfigurationIDs = append(ipConfigurationIDs, *ipConf.ID)
+					}
+				}
 			}
 		}
+
 	}
 	nicUpdaters := make([]func() error, 0)
 	allErrs := make([]error, 0)
-	var nicUpdated bool
+
+	ipconfigPrefixToNicMap := map[string]network.Interface{} // ipconfig prefix -> nic
 	for i := range ipConfigurationIDs {
 		ipConfigurationID := ipConfigurationIDs[i]
+		ipConfigIDPrefix := getResourceIDPrefix(ipConfigurationID)
+		if _, ok := ipconfigPrefixToNicMap[ipConfigIDPrefix]; ok {
+			continue
+		}
 		nodeName, _, err := as.GetNodeNameByIPConfigurationID(ipConfigurationID)
 		if err != nil && !errors.Is(err, cloudprovider.InstanceNotFound) {
 			klog.Errorf("Failed to GetNodeNameByIPConfigurationID(%s): %v", ipConfigurationID, err)
@@ -1098,7 +1160,8 @@ func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backend
 			return false, fmt.Errorf("EnsureBackendPoolDeleted: failed to parse the VMAS ID %s: %w", vmasID, err)
 		}
 		// Only remove nodes belonging to specified vmSet to basic LB backends.
-		if !strings.EqualFold(vmasName, vmSetName) {
+		// If vmasID is empty, then it is standalone VM.
+		if vmasID != "" && !strings.EqualFold(vmasName, vmSetName) {
 			klog.V(2).Infof("EnsureBackendPoolDeleted: skipping the node %s belonging to another vm set %s", nodeName, vmasName)
 			continue
 		}
@@ -1109,50 +1172,61 @@ func (as *availabilitySet) EnsureBackendPoolDeleted(service *v1.Service, backend
 		}
 
 		if nic.InterfacePropertiesFormat != nil && nic.InterfacePropertiesFormat.IPConfigurations != nil {
-			newIPConfigs := *nic.IPConfigurations
-			for j, ipConf := range newIPConfigs {
-				if !pointer.BoolDeref(ipConf.Primary, false) {
-					continue
-				}
-				// found primary ip configuration
-				if ipConf.LoadBalancerBackendAddressPools != nil {
-					newLBAddressPools := *ipConf.LoadBalancerBackendAddressPools
-					for k := len(newLBAddressPools) - 1; k >= 0; k-- {
-						pool := newLBAddressPools[k]
+			ipconfigPrefixToNicMap[ipConfigIDPrefix] = nic
+		}
+	}
+	v4Enabled, v6Enabled := getIPFamiliesEnabled(service)
+	isServiceIPv4 := v4Enabled && !v6Enabled
+	var nicUpdated atomic.Bool
+	for k := range ipconfigPrefixToNicMap {
+		nic := ipconfigPrefixToNicMap[k]
+		newIPConfigs := *nic.IPConfigurations
+		for j, ipConf := range newIPConfigs {
+			if isServiceIPv4 && !pointer.BoolDeref(ipConf.Primary, false) {
+				continue
+			}
+			// To support IPv6 only and dual-stack clusters, all IP configurations
+			// should be checked regardless of primary or not because IPv6 IP configurations
+			// are not marked as primary.
+			if ipConf.LoadBalancerBackendAddressPools != nil {
+				newLBAddressPools := *ipConf.LoadBalancerBackendAddressPools
+				for k := len(newLBAddressPools) - 1; k >= 0; k-- {
+					pool := newLBAddressPools[k]
+					for _, backendPoolID := range backendPoolIDs {
 						if strings.EqualFold(pointer.StringDeref(pool.ID, ""), backendPoolID) {
 							newLBAddressPools = append(newLBAddressPools[:k], newLBAddressPools[k+1:]...)
 							break
 						}
 					}
-					newIPConfigs[j].LoadBalancerBackendAddressPools = &newLBAddressPools
 				}
+				newIPConfigs[j].LoadBalancerBackendAddressPools = &newLBAddressPools
 			}
-			nic.IPConfigurations = &newIPConfigs
-			nicUpdaters = append(nicUpdaters, func() error {
-				ctx, cancel := getContextWithCancel()
-				defer cancel()
-				klog.V(2).Infof("EnsureBackendPoolDeleted begins to CreateOrUpdate for NIC(%s, %s) with backendPoolID %s", as.resourceGroup, pointer.StringDeref(nic.Name, ""), backendPoolID)
-				rerr := as.InterfacesClient.CreateOrUpdate(ctx, as.ResourceGroup, pointer.StringDeref(nic.Name, ""), nic)
-				if rerr != nil {
-					klog.Errorf("EnsureBackendPoolDeleted CreateOrUpdate for NIC(%s, %s) failed with error %v", as.resourceGroup, pointer.StringDeref(nic.Name, ""), rerr.Error())
-					return rerr.Error()
-				}
-				nicUpdated = true
-				return nil
-			})
 		}
+		nic.IPConfigurations = &newIPConfigs
+		nicUpdaters = append(nicUpdaters, func() error {
+			ctx, cancel := getContextWithCancel()
+			defer cancel()
+			klog.V(2).Infof("EnsureBackendPoolDeleted begins to CreateOrUpdate for NIC(%s, %s) with backendPoolIDs %q", as.ResourceGroup, pointer.StringDeref(nic.Name, ""), backendPoolIDs)
+			rerr := as.InterfacesClient.CreateOrUpdate(ctx, as.ResourceGroup, pointer.StringDeref(nic.Name, ""), nic)
+			if rerr != nil {
+				klog.Errorf("EnsureBackendPoolDeleted CreateOrUpdate for NIC(%s, %s) failed with error %v", as.ResourceGroup, pointer.StringDeref(nic.Name, ""), rerr.Error())
+				return rerr.Error()
+			}
+			nicUpdated.Store(true)
+			return nil
+		})
 	}
 	errs := utilerrors.AggregateGoroutines(nicUpdaters...)
 	if errs != nil {
-		return nicUpdated, utilerrors.Flatten(errs)
+		return nicUpdated.Load(), utilerrors.Flatten(errs)
 	}
 	// Fail if there are other errors.
 	if len(allErrs) > 0 {
-		return nicUpdated, utilerrors.Flatten(utilerrors.NewAggregate(allErrs))
+		return nicUpdated.Load(), utilerrors.Flatten(utilerrors.NewAggregate(allErrs))
 	}
 
 	isOperationSucceeded = true
-	return nicUpdated, nil
+	return nicUpdated.Load(), nil
 }
 
 func getAvailabilitySetNameByID(asID string) (string, error) {
@@ -1312,7 +1386,7 @@ func (as *availabilitySet) GetNodeCIDRMasksByProviderID(providerID string) (int,
 }
 
 // EnsureBackendPoolDeletedFromVMSets ensures the loadBalancer backendAddressPools deleted from the specified VMAS
-func (as *availabilitySet) EnsureBackendPoolDeletedFromVMSets(vmasNamesMap map[string]bool, backendPoolID string) error {
+func (as *availabilitySet) EnsureBackendPoolDeletedFromVMSets(vmasNamesMap map[string]bool, backendPoolIDs []string) error {
 	return nil
 }
 

@@ -27,9 +27,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -59,7 +59,7 @@ func (r *AzureJSONTemplateReconciler) SetupWithManager(ctx context.Context, mgr 
 	)
 	defer done()
 
-	azureMachineTemplateMapper, err := util.ClusterToObjectsMapper(r.Client, &infrav1.AzureMachineTemplateList{}, mgr.GetScheme())
+	azureMachineTemplateMapper, err := util.ClusterToTypedObjectsMapper(r.Client, &infrav1.AzureMachineTemplateList{}, mgr.GetScheme())
 	if err != nil {
 		return errors.Wrap(err, "failed to create mapper for Cluster to AzureMachineTemplates")
 	}
@@ -78,7 +78,7 @@ func (r *AzureJSONTemplateReconciler) SetupWithManager(ctx context.Context, mgr 
 	// Add a watch on Clusters to requeue when the infraRef is set. This is needed because the infraRef is not initially
 	// set in Clusters created from a ClusterClass.
 	if err := c.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
+		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
 		handler.EnqueueRequestsFromMapFunc(azureMachineTemplateMapper),
 		predicates.ClusterUnpausedAndInfrastructureReady(log),
 		predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue),
@@ -168,18 +168,13 @@ func (r *AzureJSONTemplateReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		Kind:       kind,
 		Name:       azureMachineTemplate.GetName(),
 		UID:        azureMachineTemplate.GetUID(),
+		Controller: ptr.To(true),
 	}
 
 	// Construct secret for this machine template
 	userAssignedIdentityIfExists := ""
 	if len(azureMachineTemplate.Spec.Template.Spec.UserAssignedIdentities) > 0 {
-		// TODO: remove this ClientID lookup code when the fixed cloud-provider-azure is default
-		idsClient := identities.NewClient(clusterScope)
-		userAssignedIdentityIfExists, err = idsClient.GetClientID(
-			ctx, azureMachineTemplate.Spec.Template.Spec.UserAssignedIdentities[0].ProviderID)
-		if err != nil {
-			return reconcile.Result{}, errors.Wrap(err, "failed to get user-assigned identity ClientID")
-		}
+		userAssignedIdentityIfExists = azureMachineTemplate.Spec.Template.Spec.UserAssignedIdentities[0].ProviderID
 	}
 
 	if azureMachineTemplate.Spec.Template.Spec.Identity == infrav1.VMIdentityNone {

@@ -19,12 +19,13 @@ package natgateways
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 )
 
 // NatGatewaySpec defines the specification for a NAT gateway.
@@ -56,9 +57,9 @@ func (s *NatGatewaySpec) OwnerResourceName() string {
 // Parameters returns the parameters for the NAT gateway.
 func (s *NatGatewaySpec) Parameters(ctx context.Context, existing interface{}) (params interface{}, err error) {
 	if existing != nil {
-		existingNatGateway, ok := existing.(network.NatGateway)
+		existingNatGateway, ok := existing.(armnetwork.NatGateway)
 		if !ok {
-			return nil, errors.Errorf("%T is not a network.NatGateway", existing)
+			return nil, errors.Errorf("%T is not an armnetwork.NatGateway", existing)
 		}
 
 		if hasPublicIP(existingNatGateway, s.NatGatewayIP.Name) {
@@ -67,21 +68,21 @@ func (s *NatGatewaySpec) Parameters(ctx context.Context, existing interface{}) (
 		}
 	}
 
-	natGatewayToCreate := network.NatGateway{
-		Name:     pointer.String(s.Name),
-		Location: pointer.String(s.Location),
-		Sku:      &network.NatGatewaySku{Name: network.NatGatewaySkuNameStandard},
-		NatGatewayPropertiesFormat: &network.NatGatewayPropertiesFormat{
-			PublicIPAddresses: &[]network.SubResource{
+	natGatewayToCreate := armnetwork.NatGateway{
+		Name:     ptr.To(s.Name),
+		Location: ptr.To(s.Location),
+		SKU:      &armnetwork.NatGatewaySKU{Name: ptr.To(armnetwork.NatGatewaySKUNameStandard)},
+		Properties: &armnetwork.NatGatewayPropertiesFormat{
+			PublicIPAddresses: []*armnetwork.SubResource{
 				{
-					ID: pointer.String(azure.PublicIPID(s.SubscriptionID, s.ResourceGroupName(), s.NatGatewayIP.Name)),
+					ID: ptr.To(azure.PublicIPID(s.SubscriptionID, s.ResourceGroupName(), s.NatGatewayIP.Name)),
 				},
 			},
 		},
 		Tags: converters.TagsToMap(infrav1.Build(infrav1.BuildParams{
 			ClusterName: s.ClusterName,
 			Lifecycle:   infrav1.ResourceLifecycleOwned,
-			Name:        pointer.String(s.Name),
+			Name:        ptr.To(s.Name),
 			Additional:  s.AdditionalTags,
 		})),
 	}
@@ -89,19 +90,16 @@ func (s *NatGatewaySpec) Parameters(ctx context.Context, existing interface{}) (
 	return natGatewayToCreate, nil
 }
 
-func hasPublicIP(natGateway network.NatGateway, publicIPName string) bool {
-	// We must have a non-nil, non-"empty" PublicIPAddresses
-	if !(natGateway.PublicIPAddresses != nil && len(*natGateway.PublicIPAddresses) > 0) {
-		return false
-	}
-
-	for _, publicIP := range *natGateway.PublicIPAddresses {
-		resource, err := azure.ParseResourceID(*publicIP.ID)
-		if err != nil {
-			continue
-		}
-		if resource.Name == publicIPName {
-			return true
+func hasPublicIP(natGateway armnetwork.NatGateway, publicIPName string) bool {
+	for _, publicIP := range natGateway.Properties.PublicIPAddresses {
+		if publicIP != nil && publicIP.ID != nil {
+			resource, err := azureutil.ParseResourceID(*publicIP.ID)
+			if err != nil {
+				continue
+			}
+			if resource.Name == publicIPName {
+				return true
+			}
 		}
 	}
 	return false

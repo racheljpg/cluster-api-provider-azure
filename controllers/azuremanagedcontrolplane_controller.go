@@ -79,15 +79,15 @@ func (amcpr *AzureManagedControlPlaneReconciler) SetupWithManager(ctx context.Co
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options.Options).
 		For(azManagedControlPlane).
-		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(log, amcpr.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceHasFilterLabel(log, amcpr.WatchFilterValue)).
 		// watch AzureManagedCluster resources
 		Watches(
-			&source.Kind{Type: &infrav1.AzureManagedCluster{}},
+			&infrav1.AzureManagedCluster{},
 			handler.EnqueueRequestsFromMapFunc(azureManagedClusterMapper),
 		).
 		// watch MachinePool resources
 		Watches(
-			&source.Kind{Type: &expv1.MachinePool{}},
+			&expv1.MachinePool{},
 			handler.EnqueueRequestsFromMapFunc(azureManagedMachinePoolMapper),
 		).
 		Build(r)
@@ -95,12 +95,12 @@ func (amcpr *AzureManagedControlPlaneReconciler) SetupWithManager(ctx context.Co
 		return errors.Wrap(err, "error creating controller")
 	}
 
-	// Add a watch on clusterv1.Cluster object for unpause & ready notifications.
+	// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
 	if err = c.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
+		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
 		handler.EnqueueRequestsFromMapFunc(amcpr.ClusterToAzureManagedControlPlane),
-		predicates.ClusterUnpausedAndInfrastructureReady(log),
-		predicates.ResourceNotPausedAndHasFilterLabel(log, amcpr.WatchFilterValue),
+		ClusterPauseChangeAndInfrastructureReady(log),
+		predicates.ResourceHasFilterLabel(log, amcpr.WatchFilterValue),
 	); err != nil {
 		return errors.Wrap(err, "failed adding a watch for ready clusters")
 	}
@@ -111,6 +111,8 @@ func (amcpr *AzureManagedControlPlaneReconciler) SetupWithManager(ctx context.Co
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedcontrolplanes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedcontrolplanes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cluster.x-k8s.io,resources=clusters;clusters/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=resources.azure.com,resources=resourcegroups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=resources.azure.com,resources=resourcegroups/status,verbs=get;list;watch
 
 // Reconcile idempotently gets, creates, and updates a managed control plane.
 func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, reterr error) {
@@ -146,12 +148,6 @@ func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, 
 
 	log = log.WithValues("cluster", cluster.Name)
 
-	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, azureControlPlane) {
-		log.Info("AzureManagedControlPlane or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch all the ManagedMachinePools owned by this Cluster.
 	opt1 := client.InNamespace(azureControlPlane.Namespace)
 	opt2 := client.MatchingLabels(map[string]string{
@@ -177,20 +173,6 @@ func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, 
 		}
 	}
 
-	// check if the control plane's namespace is allowed for this identity and update owner references for the identity.
-	if azureControlPlane.Spec.IdentityRef != nil {
-		err := EnsureClusterIdentity(ctx, amcpr.Client, azureControlPlane, azureControlPlane.Spec.IdentityRef, infrav1.ManagedClusterFinalizer)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-	} else {
-		warningMessage := ("You're using deprecated functionality: ")
-		warningMessage += ("Using Azure credentials from the manager environment is deprecated and will be removed in future releases. ")
-		warningMessage += ("Please specify an AzureClusterIdentity for the AzureManagedControlPlane instead, see: https://capz.sigs.k8s.io/topics/multitenancy.html ")
-		log.Info(fmt.Sprintf("WARNING, %s", warningMessage))
-		amcpr.Recorder.Eventf(azureControlPlane, corev1.EventTypeWarning, "AzureClusterIdentity", warningMessage)
-	}
-
 	// Create the scope.
 	mcpScope, err := scope.NewManagedControlPlaneScope(ctx, scope.ManagedControlPlaneScopeParams{
 		Client:              amcpr.Client,
@@ -209,6 +191,26 @@ func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, 
 		}
 	}()
 
+	// Return early if the object or Cluster is paused.
+	if annotations.IsPaused(cluster, azureControlPlane) {
+		log.Info("AzureManagedControlPlane or linked Cluster is marked as paused. Won't reconcile normally")
+		return amcpr.reconcilePause(ctx, mcpScope)
+	}
+
+	// check if the control plane's namespace is allowed for this identity and update owner references for the identity.
+	if azureControlPlane.Spec.IdentityRef != nil {
+		err := EnsureClusterIdentity(ctx, amcpr.Client, azureControlPlane, azureControlPlane.Spec.IdentityRef, infrav1.ManagedClusterFinalizer)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	} else {
+		warningMessage := "You're using deprecated functionality: " +
+			"Using Azure credentials from the manager environment is deprecated and will be removed in future releases. " +
+			"Please specify an AzureClusterIdentity for the AzureManagedControlPlane instead, see: https://capz.sigs.k8s.io/topics/multitenancy.html "
+		log.Info(fmt.Sprintf("WARNING, %s", warningMessage))
+		amcpr.Recorder.Eventf(azureControlPlane, corev1.EventTypeWarning, "AzureClusterIdentity", warningMessage)
+	}
+
 	// Handle deleted clusters
 	if !azureControlPlane.DeletionTimestamp.IsZero() {
 		return amcpr.reconcileDelete(ctx, mcpScope)
@@ -223,17 +225,21 @@ func (amcpr *AzureManagedControlPlaneReconciler) reconcileNormal(ctx context.Con
 
 	log.Info("Reconciling AzureManagedControlPlane")
 
-	// Remove deprecated Cluster finalizer if it exists.
-	controllerutil.RemoveFinalizer(scope.ControlPlane, infrav1.ClusterFinalizer)
-	// If the AzureManagedControlPlane doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(scope.ControlPlane, infrav1.ManagedClusterFinalizer)
-	// Register the finalizer immediately to avoid orphaning Azure resources on delete
-	if err := scope.PatchObject(ctx); err != nil {
-		amcpr.Recorder.Eventf(scope.ControlPlane, corev1.EventTypeWarning, "AzureManagedControlPlane unavailable", "failed to patch resource: %s", err)
-		return reconcile.Result{}, err
+	// Remove deprecated Cluster finalizer if it exists, if the AzureManagedControlPlane doesn't have our finalizer, add it.
+	if controllerutil.RemoveFinalizer(scope.ControlPlane, infrav1.ClusterFinalizer) ||
+		controllerutil.AddFinalizer(scope.ControlPlane, infrav1.ManagedClusterFinalizer) {
+		// Register the finalizer immediately to avoid orphaning Azure resources on delete
+		if err := scope.PatchObject(ctx); err != nil {
+			amcpr.Recorder.Eventf(scope.ControlPlane, corev1.EventTypeWarning, "AzureManagedControlPlane unavailable", "failed to patch resource: %s", err)
+			return reconcile.Result{}, err
+		}
 	}
 
-	if err := newAzureManagedControlPlaneReconciler(scope).Reconcile(ctx); err != nil {
+	svc, err := newAzureManagedControlPlaneReconciler(scope)
+	if err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to create azureManagedControlPlane service")
+	}
+	if err := svc.Reconcile(ctx); err != nil {
 		// Handle transient and terminal errors
 		log := log.WithValues("name", scope.ControlPlane.Name, "namespace", scope.ControlPlane.Namespace)
 		var reconcileError azure.ReconcileError
@@ -244,7 +250,7 @@ func (amcpr *AzureManagedControlPlaneReconciler) reconcileNormal(ctx context.Con
 			}
 
 			if reconcileError.IsTransient() {
-				log.V(4).Info("requeuing due to transient transient failure", "error", err)
+				log.V(4).Info("requeuing due to transient failure", "error", err)
 				return reconcile.Result{RequeueAfter: reconcileError.RequeueAfter()}, nil
 			}
 
@@ -263,13 +269,34 @@ func (amcpr *AzureManagedControlPlaneReconciler) reconcileNormal(ctx context.Con
 	return reconcile.Result{}, nil
 }
 
+func (amcpr *AzureManagedControlPlaneReconciler) reconcilePause(ctx context.Context, scope *scope.ManagedControlPlaneScope) (reconcile.Result, error) {
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureManagedControlPlane.reconcilePause")
+	defer done()
+
+	log.Info("Reconciling AzureManagedControlPlane pause")
+
+	svc, err := newAzureManagedControlPlaneReconciler(scope)
+	if err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to create azureManagedControlPlane service")
+	}
+	if err := svc.Pause(ctx); err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to pause control plane services")
+	}
+
+	return reconcile.Result{}, nil
+}
+
 func (amcpr *AzureManagedControlPlaneReconciler) reconcileDelete(ctx context.Context, scope *scope.ManagedControlPlaneScope) (reconcile.Result, error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureManagedControlPlaneReconciler.reconcileDelete")
 	defer done()
 
 	log.Info("Reconciling AzureManagedControlPlane delete")
 
-	if err := newAzureManagedControlPlaneReconciler(scope).Delete(ctx); err != nil {
+	svc, err := newAzureManagedControlPlaneReconciler(scope)
+	if err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to create azureManagedControlPlane service")
+	}
+	if err := svc.Delete(ctx); err != nil {
 		// Handle transient errors
 		var reconcileError azure.ReconcileError
 		if errors.As(err, &reconcileError) && reconcileError.IsTransient() {
@@ -298,7 +325,7 @@ func (amcpr *AzureManagedControlPlaneReconciler) reconcileDelete(ctx context.Con
 
 // ClusterToAzureManagedControlPlane is a handler.ToRequestsFunc to be used to enqueue requests for
 // reconciliation for AzureManagedControlPlane based on updates to a Cluster.
-func (amcpr *AzureManagedControlPlaneReconciler) ClusterToAzureManagedControlPlane(o client.Object) []ctrl.Request {
+func (amcpr *AzureManagedControlPlaneReconciler) ClusterToAzureManagedControlPlane(_ context.Context, o client.Object) []ctrl.Request {
 	c, ok := o.(*clusterv1.Cluster)
 	if !ok {
 		panic(fmt.Sprintf("Expected a Cluster but got a %T", o))

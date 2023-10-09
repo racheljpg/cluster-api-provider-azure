@@ -19,9 +19,9 @@ package converters
 import (
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/google/go-cmp/cmp"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -29,7 +29,7 @@ func TestGetDiagnosticsProfile(t *testing.T) {
 	tests := []struct {
 		name        string
 		diagnostics *infrav1.Diagnostics
-		want        *compute.DiagnosticsProfile
+		want        *armcompute.DiagnosticsProfile
 	}{
 		{
 			name: "managed diagnostics",
@@ -38,9 +38,9 @@ func TestGetDiagnosticsProfile(t *testing.T) {
 					StorageAccountType: infrav1.ManagedDiagnosticsStorage,
 				},
 			},
-			want: &compute.DiagnosticsProfile{
-				BootDiagnostics: &compute.BootDiagnostics{
-					Enabled: pointer.Bool(true),
+			want: &armcompute.DiagnosticsProfile{
+				BootDiagnostics: &armcompute.BootDiagnostics{
+					Enabled: ptr.To(true),
 				},
 			},
 		},
@@ -54,10 +54,10 @@ func TestGetDiagnosticsProfile(t *testing.T) {
 					},
 				},
 			},
-			want: &compute.DiagnosticsProfile{
-				BootDiagnostics: &compute.BootDiagnostics{
-					Enabled:    pointer.Bool(true),
-					StorageURI: pointer.String("https://fake"),
+			want: &armcompute.DiagnosticsProfile{
+				BootDiagnostics: &armcompute.BootDiagnostics{
+					Enabled:    ptr.To(true),
+					StorageURI: ptr.To("https://fake"),
 				},
 			},
 		},
@@ -68,9 +68,9 @@ func TestGetDiagnosticsProfile(t *testing.T) {
 					StorageAccountType: infrav1.DisabledDiagnosticsStorage,
 				},
 			},
-			want: &compute.DiagnosticsProfile{
-				BootDiagnostics: &compute.BootDiagnostics{
-					Enabled: pointer.Bool(false),
+			want: &armcompute.DiagnosticsProfile{
+				BootDiagnostics: &armcompute.BootDiagnostics{
+					Enabled: ptr.To(false),
 				},
 			},
 		},

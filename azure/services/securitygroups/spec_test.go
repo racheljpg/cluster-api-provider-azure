@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 )
@@ -34,10 +34,11 @@ var (
 		Priority:         2200,
 		Protocol:         infrav1.SecurityGroupProtocolTCP,
 		Direction:        infrav1.SecurityRuleDirectionInbound,
-		Source:           pointer.String("*"),
-		SourcePorts:      pointer.String("*"),
-		Destination:      pointer.String("*"),
-		DestinationPorts: pointer.String("22"),
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("22"),
+		Action:           infrav1.SecurityRuleActionAllow,
 	}
 	otherRule = infrav1.SecurityRule{
 		Name:             "other_rule",
@@ -45,10 +46,11 @@ var (
 		Priority:         500,
 		Protocol:         infrav1.SecurityGroupProtocolTCP,
 		Direction:        infrav1.SecurityRuleDirectionInbound,
-		Source:           pointer.String("*"),
-		SourcePorts:      pointer.String("*"),
-		Destination:      pointer.String("*"),
-		DestinationPorts: pointer.String("80"),
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("80"),
+		Action:           infrav1.SecurityRuleActionAllow,
 	}
 	customRule = infrav1.SecurityRule{
 		Name:             "custom_rule",
@@ -56,10 +58,23 @@ var (
 		Priority:         501,
 		Protocol:         infrav1.SecurityGroupProtocolTCP,
 		Direction:        infrav1.SecurityRuleDirectionOutbound,
-		Source:           pointer.String("*"),
-		SourcePorts:      pointer.String("*"),
-		Destination:      pointer.String("*"),
-		DestinationPorts: pointer.String("80"),
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("80"),
+		Action:           infrav1.SecurityRuleActionAllow,
+	}
+	denyRule = infrav1.SecurityRule{
+		Name:             "deny_rule",
+		Description:      "Deny Rule",
+		Priority:         510,
+		Protocol:         infrav1.SecurityGroupProtocolTCP,
+		Direction:        infrav1.SecurityRuleDirectionOutbound,
+		Source:           ptr.To("*"),
+		SourcePorts:      ptr.To("*"),
+		Destination:      ptr.To("*"),
+		DestinationPorts: ptr.To("80"),
+		Action:           infrav1.SecurityRuleActionDeny,
 	}
 )
 
@@ -83,10 +98,10 @@ func TestParameters(t *testing.T) {
 				ResourceGroup: "test-group",
 				ClusterName:   "my-cluster",
 			},
-			existing: network.SecurityGroup{
-				Name: pointer.String("test-nsg"),
-				SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-					SecurityRules: &[]network.SecurityRule{
+			existing: armnetwork.SecurityGroup{
+				Name: ptr.To("test-nsg"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
 						converters.SecurityRuleToSDK(sshRule),
 						converters.SecurityRuleToSDK(otherRule),
 					},
@@ -108,32 +123,74 @@ func TestParameters(t *testing.T) {
 				ResourceGroup: "test-group",
 				ClusterName:   "my-cluster",
 			},
-			existing: network.SecurityGroup{
-				Name:     pointer.String("test-nsg"),
-				Location: pointer.String("test-location"),
-				Etag:     pointer.String("fake-etag"),
-				SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-					SecurityRules: &[]network.SecurityRule{
+			existing: armnetwork.SecurityGroup{
+				Name:     ptr.To("test-nsg"),
+				Location: ptr.To("test-location"),
+				Etag:     ptr.To("fake-etag"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
 						converters.SecurityRuleToSDK(sshRule),
 						converters.SecurityRuleToSDK(customRule),
 					},
 				},
 			},
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(BeAssignableToTypeOf(network.SecurityGroup{}))
-				g.Expect(result).To(Equal(network.SecurityGroup{
-					Location: pointer.String("test-location"),
-					Etag:     pointer.String("fake-etag"),
-					SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-						SecurityRules: &[]network.SecurityRule{
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
+				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
+					Location: ptr.To("test-location"),
+					Etag:     ptr.To("fake-etag"),
+					Properties: &armnetwork.SecurityGroupPropertiesFormat{
+						SecurityRules: []*armnetwork.SecurityRule{
 							converters.SecurityRuleToSDK(otherRule),
 							converters.SecurityRuleToSDK(sshRule),
 							converters.SecurityRuleToSDK(customRule),
 						},
 					},
 					Tags: map[string]*string{
-						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
-						"Name": pointer.String("test-nsg"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+						"Name": ptr.To("test-nsg"),
+					},
+				}))
+			},
+		},
+		{
+			name: "NSG already exists but missing a rule",
+			spec: &NSGSpec{
+				Name:     "test-nsg",
+				Location: "test-location",
+				SecurityRules: infrav1.SecurityRules{
+					sshRule,
+					otherRule,
+				},
+				ResourceGroup: "test-group",
+				ClusterName:   "my-cluster",
+			},
+			existing: armnetwork.SecurityGroup{
+				Name:     ptr.To("test-nsg"),
+				Location: ptr.To("test-location"),
+				Etag:     ptr.To("fake-etag"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
+						converters.SecurityRuleToSDK(sshRule),
+						converters.SecurityRuleToSDK(denyRule),
+					},
+				},
+			},
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
+				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
+					Location: ptr.To("test-location"),
+					Etag:     ptr.To("fake-etag"),
+					Properties: &armnetwork.SecurityGroupPropertiesFormat{
+						SecurityRules: []*armnetwork.SecurityRule{
+							converters.SecurityRuleToSDK(otherRule),
+							converters.SecurityRuleToSDK(sshRule),
+							converters.SecurityRuleToSDK(denyRule),
+						},
+					},
+					Tags: map[string]*string{
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+						"Name": ptr.To("test-nsg"),
 					},
 				}))
 			},
@@ -155,12 +212,12 @@ func TestParameters(t *testing.T) {
 					"other_rule":  otherRule,
 				},
 			},
-			existing: network.SecurityGroup{
-				Name:     pointer.String("test-nsg"),
-				Location: pointer.String("test-location"),
-				Etag:     pointer.String("fake-etag"),
-				SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-					SecurityRules: &[]network.SecurityRule{
+			existing: armnetwork.SecurityGroup{
+				Name:     ptr.To("test-nsg"),
+				Location: ptr.To("test-location"),
+				Etag:     ptr.To("fake-etag"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
 						converters.SecurityRuleToSDK(sshRule),
 						converters.SecurityRuleToSDK(customRule),
 						converters.SecurityRuleToSDK(otherRule),
@@ -168,19 +225,66 @@ func TestParameters(t *testing.T) {
 				},
 			},
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(BeAssignableToTypeOf(network.SecurityGroup{}))
-				g.Expect(result).To(Equal(network.SecurityGroup{
-					Location: pointer.String("test-location"),
-					Etag:     pointer.String("fake-etag"),
-					SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-						SecurityRules: &[]network.SecurityRule{
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
+				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
+					Location: ptr.To("test-location"),
+					Etag:     ptr.To("fake-etag"),
+					Properties: &armnetwork.SecurityGroupPropertiesFormat{
+						SecurityRules: []*armnetwork.SecurityRule{
 							converters.SecurityRuleToSDK(sshRule),
 							converters.SecurityRuleToSDK(customRule),
 						},
 					},
 					Tags: map[string]*string{
-						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
-						"Name": pointer.String("test-nsg"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+						"Name": ptr.To("test-nsg"),
+					},
+				}))
+			},
+		},
+		{
+			name: "NSG already exists and a deny rule is deleted",
+			spec: &NSGSpec{
+				Name:     "test-nsg",
+				Location: "test-location",
+				SecurityRules: infrav1.SecurityRules{
+					sshRule,
+					customRule,
+				},
+				ResourceGroup: "test-group",
+				ClusterName:   "my-cluster",
+				LastAppliedSecurityRules: map[string]interface{}{
+					"allow_ssh":   sshRule,
+					"custom_rule": customRule,
+					"deny_rule":   denyRule,
+				},
+			},
+			existing: armnetwork.SecurityGroup{
+				Name:     ptr.To("test-nsg"),
+				Location: ptr.To("test-location"),
+				Etag:     ptr.To("fake-etag"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
+						converters.SecurityRuleToSDK(sshRule),
+						converters.SecurityRuleToSDK(customRule),
+						converters.SecurityRuleToSDK(denyRule),
+					},
+				},
+			},
+			expect: func(g *WithT, result interface{}) {
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
+				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
+					Location: ptr.To("test-location"),
+					Etag:     ptr.To("fake-etag"),
+					Properties: &armnetwork.SecurityGroupPropertiesFormat{
+						SecurityRules: []*armnetwork.SecurityRule{
+							converters.SecurityRuleToSDK(sshRule),
+							converters.SecurityRuleToSDK(customRule),
+						},
+					},
+					Tags: map[string]*string{
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+						"Name": ptr.To("test-nsg"),
 					},
 				}))
 			},
@@ -201,12 +305,12 @@ func TestParameters(t *testing.T) {
 					"custom_rule": customRule,
 				},
 			},
-			existing: network.SecurityGroup{
-				Name:     pointer.String("test-nsg"),
-				Location: pointer.String("test-location"),
-				Etag:     pointer.String("fake-etag"),
-				SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-					SecurityRules: &[]network.SecurityRule{
+			existing: armnetwork.SecurityGroup{
+				Name:     ptr.To("test-nsg"),
+				Location: ptr.To("test-location"),
+				Etag:     ptr.To("fake-etag"),
+				Properties: &armnetwork.SecurityGroupPropertiesFormat{
+					SecurityRules: []*armnetwork.SecurityRule{
 						converters.SecurityRuleToSDK(sshRule),
 						converters.SecurityRuleToSDK(customRule),
 						converters.SecurityRuleToSDK(otherRule),
@@ -231,18 +335,18 @@ func TestParameters(t *testing.T) {
 			},
 			existing: nil,
 			expect: func(g *WithT, result interface{}) {
-				g.Expect(result).To(BeAssignableToTypeOf(network.SecurityGroup{}))
-				g.Expect(result).To(Equal(network.SecurityGroup{
-					SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-						SecurityRules: &[]network.SecurityRule{
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
+				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
+					Properties: &armnetwork.SecurityGroupPropertiesFormat{
+						SecurityRules: []*armnetwork.SecurityRule{
 							converters.SecurityRuleToSDK(sshRule),
 							converters.SecurityRuleToSDK(otherRule),
 						},
 					},
-					Location: pointer.String("test-location"),
+					Location: ptr.To("test-location"),
 					Tags: map[string]*string{
-						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": pointer.String("owned"),
-						"Name": pointer.String("test-nsg"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+						"Name": ptr.To("test-nsg"),
 					},
 				}))
 			},
@@ -270,25 +374,25 @@ func TestParameters(t *testing.T) {
 func TestRuleExists(t *testing.T) {
 	testcases := []struct {
 		name     string
-		rules    []network.SecurityRule
-		rule     network.SecurityRule
+		rules    []*armnetwork.SecurityRule
+		rule     *armnetwork.SecurityRule
 		expected bool
 	}{
 		{
 			name:     "rule doesn't exitst",
-			rules:    []network.SecurityRule{ruleA},
+			rules:    []*armnetwork.SecurityRule{ruleA},
 			rule:     ruleB,
 			expected: false,
 		},
 		{
 			name:     "rule exists",
-			rules:    []network.SecurityRule{ruleA, ruleB},
+			rules:    []*armnetwork.SecurityRule{ruleA, ruleB},
 			rule:     ruleB,
 			expected: true,
 		},
 		{
 			name:     "rule exists but has been modified",
-			rules:    []network.SecurityRule{ruleA, ruleB},
+			rules:    []*armnetwork.SecurityRule{ruleA, ruleB},
 			rule:     ruleBModified,
 			expected: false,
 		},

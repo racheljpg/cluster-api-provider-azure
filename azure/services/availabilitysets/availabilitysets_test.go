@@ -22,12 +22,12 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/availabilitysets/mock_availabilitysets"
@@ -38,10 +38,10 @@ import (
 var (
 	fakeFaultDomainCount = 3
 	fakeSku              = resourceskus.SKU{
-		Capabilities: &[]compute.ResourceSkuCapabilities{
+		Capabilities: []*armcompute.ResourceSKUCapabilities{
 			{
-				Name:  pointer.String(resourceskus.MaximumPlatformFaultDomainCount),
-				Value: pointer.String(strconv.Itoa(fakeFaultDomainCount)),
+				Name:  ptr.To(resourceskus.MaximumPlatformFaultDomainCount),
+				Value: ptr.To(strconv.Itoa(fakeFaultDomainCount)),
 			},
 		},
 	}
@@ -64,10 +64,10 @@ var (
 	internalError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusInternalServerError}, "Internal Server Error")
 	parameterError = errors.Errorf("some error with parameters")
 	notFoundError  = autorest.NewErrorWithResponse("", "", &http.Response{StatusCode: http.StatusNotFound}, "Not Found")
-	fakeSetWithVMs = compute.AvailabilitySet{
-		AvailabilitySetProperties: &compute.AvailabilitySetProperties{
-			VirtualMachines: &[]compute.SubResource{
-				{ID: pointer.String("vm-id")},
+	fakeSetWithVMs = armcompute.AvailabilitySet{
+		Properties: &armcompute.AvailabilitySetProperties{
+			VirtualMachines: []*armcompute.SubResource{
+				{ID: ptr.To("vm-id")},
 			},
 		},
 	}
@@ -155,7 +155,7 @@ func TestDeleteAvailabilitySets(t *testing.T) {
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, m *mock_async.MockGetterMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpec)
 				gomock.InOrder(
-					m.Get(gomockinternal.AContext(), &fakeSetSpec).Return(compute.AvailabilitySet{}, nil),
+					m.Get(gomockinternal.AContext(), &fakeSetSpec).Return(armcompute.AvailabilitySet{}, nil),
 					r.DeleteResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(nil),
 					s.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, nil),
 				)
@@ -174,7 +174,7 @@ func TestDeleteAvailabilitySets(t *testing.T) {
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, m *mock_async.MockGetterMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpecMissing)
 				gomock.InOrder(
-					m.Get(gomockinternal.AContext(), &fakeSetSpecMissing).Return(compute.AvailabilitySet{}, nil),
+					m.Get(gomockinternal.AContext(), &fakeSetSpecMissing).Return(armcompute.AvailabilitySet{}, nil),
 					r.DeleteResource(gomockinternal.AContext(), &fakeSetSpecMissing, serviceName).Return(nil),
 					s.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, nil),
 				)
@@ -215,12 +215,12 @@ func TestDeleteAvailabilitySets(t *testing.T) {
 		},
 		{
 			name:          "availability set get result is not an availability set",
-			expectedError: "string is not a compute.AvailabilitySet",
+			expectedError: "string is not an armcompute.AvailabilitySet",
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, m *mock_async.MockGetterMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpec)
 				gomock.InOrder(
 					m.Get(gomockinternal.AContext(), &fakeSetSpec).Return("not an availability set", nil),
-					s.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, gomockinternal.ErrStrEq("string is not a compute.AvailabilitySet")),
+					s.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, gomockinternal.ErrStrEq("string is not an armcompute.AvailabilitySet")),
 				)
 			},
 		},
@@ -230,7 +230,7 @@ func TestDeleteAvailabilitySets(t *testing.T) {
 			expect: func(s *mock_availabilitysets.MockAvailabilitySetScopeMockRecorder, m *mock_async.MockGetterMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.AvailabilitySetSpec().Return(&fakeSetSpec)
 				gomock.InOrder(
-					m.Get(gomockinternal.AContext(), &fakeSetSpec).Return(compute.AvailabilitySet{}, nil),
+					m.Get(gomockinternal.AContext(), &fakeSetSpec).Return(armcompute.AvailabilitySet{}, nil),
 					r.DeleteResource(gomockinternal.AContext(), &fakeSetSpec, serviceName).Return(internalError),
 					s.UpdateDeleteStatus(infrav1.AvailabilitySetReadyCondition, serviceName, internalError),
 				)

@@ -26,9 +26,9 @@ import (
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/go-logr/logr"
-	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	utilfeature "k8s.io/component-base/featuregate/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/internal/test/mock_log"
@@ -45,6 +45,7 @@ import (
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -75,7 +76,7 @@ func TestAzureClusterToAzureMachinesMapper(t *testing.T) {
 	mapper, err := AzureClusterToAzureMachinesMapper(context.Background(), client, &infrav1.AzureMachine{}, scheme, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
 
-	requests := mapper(&infrav1.AzureCluster{
+	requests := mapper(context.TODO(), &infrav1.AzureCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      clusterName,
 			Namespace: "default",
@@ -840,7 +841,7 @@ func TestAzureManagedClusterToAzureManagedMachinePoolsMapper(t *testing.T) {
 	mapper, err := AzureManagedClusterToAzureManagedMachinePoolsMapper(context.Background(), fakeClient, scheme, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
 
-	requests := mapper(&infrav1.AzureManagedCluster{
+	requests := mapper(context.TODO(), &infrav1.AzureManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      clusterName,
 			Namespace: "default",
@@ -905,7 +906,7 @@ func TestAzureManagedControlPlaneToAzureManagedMachinePoolsMapper(t *testing.T) 
 	mapper, err := AzureManagedControlPlaneToAzureManagedMachinePoolsMapper(context.Background(), fakeClient, scheme, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
 
-	requests := mapper(&infrav1.AzureManagedControlPlane{
+	requests := mapper(context.TODO(), &infrav1.AzureManagedControlPlane{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cpName,
 			Namespace: cluster.Namespace,
@@ -977,7 +978,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncSuccess(t *testing.T) {
 	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind("AzureManagedControlPlane"), logr.New(sink))
 
 	// system pool should trigger
-	requests := mapper(newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
+	requests := mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
 	g.Expect(requests).To(ConsistOf([]reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
@@ -988,7 +989,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncSuccess(t *testing.T) {
 	}))
 
 	// any other pool should not trigger
-	requests = mapper(newManagedMachinePoolInfraReference(clusterName, "my-mmp-1"))
+	requests = mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-1"))
 	g.Expect(requests).To(BeNil())
 }
 
@@ -1021,7 +1022,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncFailure(t *testing.T) {
 	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind("AzureManagedControlPlane"), logr.New(sink))
 
 	// default pool should trigger if owned cluster could not be fetched
-	requests := mapper(newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
+	requests := mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
 	g.Expect(requests).To(ConsistOf([]reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
@@ -1032,7 +1033,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncFailure(t *testing.T) {
 	}))
 
 	// any other pool should also trigger if owned cluster could not be fetched
-	requests = mapper(newManagedMachinePoolInfraReference(clusterName, "my-mmp-1"))
+	requests = mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-1"))
 	g.Expect(requests).To(ConsistOf([]reconcile.Request{
 		{
 			NamespacedName: types.NamespacedName{
@@ -1067,7 +1068,7 @@ func TestAzureManagedClusterToAzureManagedControlPlaneMapper(t *testing.T) {
 
 	mapper, err := AzureManagedClusterToAzureManagedControlPlaneMapper(context.Background(), fakeClient, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
-	requests := mapper(&infrav1.AzureManagedCluster{
+	requests := mapper(context.TODO(), &infrav1.AzureManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "az-" + cluster.Name,
 			Namespace: "default",
@@ -1136,7 +1137,7 @@ func TestAzureManagedControlPlaneToAzureManagedClusterMapper(t *testing.T) {
 
 	mapper, err := AzureManagedControlPlaneToAzureManagedClusterMapper(context.Background(), fakeClient, logr.New(sink))
 	g.Expect(err).NotTo(HaveOccurred())
-	requests := mapper(&infrav1.AzureManagedControlPlane{
+	requests := mapper(context.TODO(), &infrav1.AzureManagedControlPlane{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cpName,
 			Namespace: cluster.Namespace,
@@ -1197,7 +1198,7 @@ func newAzureManagedMachinePool(clusterName, poolName, mode string) *infrav1.Azu
 		Spec: infrav1.AzureManagedMachinePoolSpec{
 			Mode:         mode,
 			SKU:          "Standard_B2s",
-			OSDiskSizeGB: pointer.Int32(512),
+			OSDiskSizeGB: ptr.To[int32](512),
 			KubeletConfig: &infrav1.KubeletConfig{
 				CPUManagerPolicy:      &cpuManagerPolicyStatic,
 				TopologyManagerPolicy: &topologyManagerPolicy,
@@ -1220,7 +1221,7 @@ func newMachinePool(clusterName, poolName string) *expv1.MachinePool {
 			Namespace: "default",
 		},
 		Spec: expv1.MachinePoolSpec{
-			Replicas: pointer.Int32(2),
+			Replicas: ptr.To[int32](2),
 		},
 	}
 }
@@ -1305,8 +1306,219 @@ func Test_ManagedMachinePoolToInfrastructureMapFunc(t *testing.T) {
 				c.Setup(sink)
 			}
 			f := MachinePoolToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("AzureManagedMachinePool"), logr.New(sink))
-			reqs := f(c.MapObjectFactory(g))
+			reqs := f(context.TODO(), c.MapObjectFactory(g))
 			c.Expect(g, reqs)
+		})
+	}
+}
+
+func TestClusterPauseChangeAndInfrastructureReady(t *testing.T) {
+	tests := []struct {
+		name   string
+		event  any // an event.(Create|Update)Event
+		expect bool
+	}{
+		{
+			name: "create cluster infra not ready, not paused",
+			event: event.CreateEvent{
+				Object: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "create cluster infra ready, not paused",
+			event: event.CreateEvent{
+				Object: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "create cluster infra not ready, paused",
+			event: event.CreateEvent{
+				Object: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "create cluster infra ready, paused",
+			event: event.CreateEvent{
+				Object: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "update cluster infra ready true->true",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "update cluster infra ready false->true",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "update cluster infra ready true->false",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: true,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "update cluster infra ready false->false",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Status: clusterv1.ClusterStatus{
+						InfrastructureReady: false,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "update cluster paused false->false",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+				},
+			},
+			expect: false,
+		},
+		{
+			name: "update cluster paused false->true",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "update cluster paused true->false",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: false,
+					},
+				},
+			},
+			expect: true,
+		},
+		{
+			name: "update cluster paused true->true",
+			event: event.UpdateEvent{
+				ObjectOld: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+				},
+				ObjectNew: &clusterv1.Cluster{
+					Spec: clusterv1.ClusterSpec{
+						Paused: true,
+					},
+				},
+			},
+			expect: false,
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			p := ClusterPauseChangeAndInfrastructureReady(logr.New(nil))
+			var actual bool
+			switch e := test.event.(type) {
+			case event.CreateEvent:
+				actual = p.Create(e)
+			case event.UpdateEvent:
+				actual = p.Update(e)
+			default:
+				panic("unimplemented event type")
+			}
+			NewGomegaWithT(t).Expect(actual).To(Equal(test.expect))
 		})
 	}
 }

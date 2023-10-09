@@ -17,18 +17,21 @@ limitations under the License.
 package converters
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"k8s.io/utils/pointer"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	"k8s.io/utils/ptr"
 )
 
-// GetSubnetAddresses returns the address prefixes contained in a subnet.
-func GetSubnetAddresses(subnet network.Subnet) []string {
+// GetSubnetAddresses returns the address prefixes contained in an SDK v2 subnet.
+func GetSubnetAddresses(subnet *armnetwork.Subnet) []string {
 	var addresses []string
-	if subnet.SubnetPropertiesFormat != nil && subnet.SubnetPropertiesFormat.AddressPrefix != nil {
-		addresses = []string{pointer.StringDeref(subnet.SubnetPropertiesFormat.AddressPrefix, "")}
-	} else if subnet.SubnetPropertiesFormat != nil && subnet.SubnetPropertiesFormat.AddressPrefixes != nil {
-		addresses = azure.StringSlice(subnet.SubnetPropertiesFormat.AddressPrefixes)
+	if subnet.Properties != nil && subnet.Properties.AddressPrefix != nil {
+		addresses = []string{ptr.Deref(subnet.Properties.AddressPrefix, "")}
+	} else if subnet.Properties != nil && subnet.Properties.AddressPrefixes != nil {
+		for _, address := range subnet.Properties.AddressPrefixes {
+			if address != nil {
+				addresses = append(addresses, *address)
+			}
+		}
 	}
 	return addresses
 }

@@ -27,8 +27,9 @@ import (
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/pkg/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/net"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/bastionhosts"
@@ -129,9 +130,14 @@ func (s *ClusterScope) BaseURI() string {
 	return s.ResourceManagerEndpoint
 }
 
-// Authorizer returns the Azure client Authorizer.
+// Authorizer returns the Azure client Authorizer which is used for SDKv1 services.
 func (s *ClusterScope) Authorizer() autorest.Authorizer {
 	return s.AzureClients.Authorizer
+}
+
+// GetClient returns the controller-runtime client.
+func (s *ClusterScope) GetClient() client.Client {
+	return s.Client
 }
 
 // PublicIPSpecs returns the public IP specs.
@@ -412,12 +418,14 @@ func (s *ClusterScope) SubnetSpecs() []azure.ResourceSpecGetter {
 }
 
 // GroupSpec returns the resource group spec.
-func (s *ClusterScope) GroupSpec() azure.ResourceSpecGetter {
+func (s *ClusterScope) GroupSpec() azure.ASOResourceSpecGetter {
 	return &groups.GroupSpec{
 		Name:           s.ResourceGroup(),
+		Namespace:      s.Namespace(),
 		Location:       s.Location(),
 		ClusterName:    s.ClusterName(),
 		AdditionalTags: s.AdditionalTags(),
+		Owner:          *metav1.NewControllerRef(s.AzureCluster, infrav1.GroupVersion.WithKind("AzureCluster")),
 	}
 }
 
@@ -558,10 +566,10 @@ func (s *ClusterScope) Vnet() *infrav1.VnetSpec {
 // IsVnetManaged returns true if the vnet is managed.
 func (s *ClusterScope) IsVnetManaged() bool {
 	if s.cache.isVnetManaged != nil {
-		return pointer.BoolDeref(s.cache.isVnetManaged, false)
+		return ptr.Deref(s.cache.isVnetManaged, false)
 	}
 	isVnetManaged := s.Vnet().ID == "" || s.Vnet().Tags.HasOwned(s.ClusterName())
-	s.cache.isVnetManaged = pointer.Bool(isVnetManaged)
+	s.cache.isVnetManaged = ptr.To(isVnetManaged)
 	return isVnetManaged
 }
 
@@ -875,15 +883,18 @@ func (s *ClusterScope) SetFailureDomain(id string, spec clusterv1.FailureDomainS
 }
 
 // FailureDomains returns the failure domains for the cluster.
-func (s *ClusterScope) FailureDomains() []string {
-	fds := make([]string, len(s.AzureCluster.Status.FailureDomains))
+func (s *ClusterScope) FailureDomains() []*string {
+	fds := make([]*string, len(s.AzureCluster.Status.FailureDomains))
 	i := 0
 	for id := range s.AzureCluster.Status.FailureDomains {
-		fds[i] = id
+		fds[i] = ptr.To(id)
 		i++
 	}
 
-	sort.Strings(fds)
+	// sort in increasing order restoring the original sort.Strings(fds) behavior
+	sort.Slice(fds, func(i, j int) bool {
+		return *fds[i] < *fds[j]
+	})
 
 	return fds
 }
@@ -900,10 +911,11 @@ func (s *ClusterScope) SetControlPlaneSecurityRules() {
 				Priority:         2200,
 				Protocol:         infrav1.SecurityGroupProtocolTCP,
 				Direction:        infrav1.SecurityRuleDirectionInbound,
-				Source:           pointer.String("*"),
-				SourcePorts:      pointer.String("*"),
-				Destination:      pointer.String("*"),
-				DestinationPorts: pointer.String("22"),
+				Source:           ptr.To("*"),
+				SourcePorts:      ptr.To("*"),
+				Destination:      ptr.To("*"),
+				DestinationPorts: ptr.To("22"),
+				Action:           infrav1.SecurityRuleActionAllow,
 			},
 			infrav1.SecurityRule{
 				Name:             "allow_apiserver",
@@ -911,10 +923,11 @@ func (s *ClusterScope) SetControlPlaneSecurityRules() {
 				Priority:         2201,
 				Protocol:         infrav1.SecurityGroupProtocolTCP,
 				Direction:        infrav1.SecurityRuleDirectionInbound,
-				Source:           pointer.String("*"),
-				SourcePorts:      pointer.String("*"),
-				Destination:      pointer.String("*"),
-				DestinationPorts: pointer.String(strconv.Itoa(int(s.APIServerPort()))),
+				Source:           ptr.To("*"),
+				SourcePorts:      ptr.To("*"),
+				Destination:      ptr.To("*"),
+				DestinationPorts: ptr.To(strconv.Itoa(int(s.APIServerPort()))),
+				Action:           infrav1.SecurityRuleActionAllow,
 			},
 		}
 		s.AzureCluster.Spec.NetworkSpec.UpdateControlPlaneSubnet(subnet)
@@ -1039,17 +1052,6 @@ func (s *ClusterScope) SetAnnotation(key, value string) {
 		s.AzureCluster.Annotations = map[string]string{}
 	}
 	s.AzureCluster.Annotations[key] = value
-}
-
-// TagsSpecs returns the tag specs for the AzureCluster.
-func (s *ClusterScope) TagsSpecs() []azure.TagsSpec {
-	return []azure.TagsSpec{
-		{
-			Scope:      azure.ResourceGroupID(s.SubscriptionID(), s.ResourceGroup()),
-			Tags:       s.AdditionalTags(),
-			Annotation: azure.RGTagsLastAppliedAnnotation,
-		},
-	}
 }
 
 // PrivateEndpointSpecs returns the private endpoint specs.

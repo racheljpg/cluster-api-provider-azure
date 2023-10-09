@@ -19,6 +19,8 @@ package azure
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/Azure/go-autorest/autorest"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -30,6 +32,11 @@ type Reconciler interface {
 	Delete(ctx context.Context) error
 }
 
+// Pauser may be implemented for a ServiceReconciler that requires additional work to stop reconciliation.
+type Pauser interface {
+	Pause(context.Context) error
+}
+
 // ServiceReconciler is an Azure service reconciler which can reconcile an Azure service.
 type ServiceReconciler interface {
 	Name() string
@@ -38,6 +45,7 @@ type ServiceReconciler interface {
 }
 
 // Authorizer is an interface which can get the subscription ID, base URI, and authorizer for an Azure service.
+// The Authorizer field is used by SDKv1 services while the Token is used by SDKv2 services.
 type Authorizer interface {
 	SubscriptionID() string
 	ClientID() string
@@ -47,6 +55,7 @@ type Authorizer interface {
 	BaseURI() string
 	Authorizer() autorest.Authorizer
 	HashKey() string
+	Token() azcore.TokenCredential
 }
 
 // NetworkDescriber is an interface which can get common Azure Cluster Networking information.
@@ -81,7 +90,7 @@ type ClusterDescriber interface {
 	AdditionalTags() infrav1.Tags
 	AvailabilitySetEnabled() bool
 	CloudProviderConfigOverrides() *infrav1.CloudProviderConfigOverrides
-	FailureDomains() []string
+	FailureDomains() []*string
 }
 
 // AsyncStatusUpdater is an interface used to keep track of long running operations in Status that has Conditions and Futures.
@@ -126,4 +135,17 @@ type ResourceSpecGetterWithHeaders interface {
 	ResourceSpecGetter
 	// CustomHeaders returns the headers that should be added to Azure API calls.
 	CustomHeaders() map[string]string
+}
+
+// ASOResourceSpecGetter is an interface for getting all the required information to create/update/delete an Azure resource.
+type ASOResourceSpecGetter interface {
+	// ResourceRef returns a concrete, named (and namespaced if applicable) ASO
+	// resource type to facilitate a strongly-typed GET.
+	ResourceRef() genruntime.MetaObject
+	// Parameters returns a modified object if it points to a non-nil resource.
+	// Otherwise it returns a new value or nil if no updates are needed.
+	Parameters(ctx context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error)
+	// WasManaged returns whether or not the given resource was managed by a
+	// non-ASO-backed CAPZ and should be considered eligible for adoption.
+	WasManaged(genruntime.MetaObject) bool
 }

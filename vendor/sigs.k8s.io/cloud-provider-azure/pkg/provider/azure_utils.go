@@ -172,6 +172,7 @@ func (az *Cloud) reconcileTags(currentTagsOnResource, newTags map[string]*string
 		for k := range currentTagsOnResource {
 			if _, ok := newTags[k]; !ok {
 				if found, _ := findKeyInMapCaseInsensitive(systemTagsMap, k); !found {
+					klog.V(2).Infof("reconcileTags: delete tag %s: %s", k, pointer.StringDeref(currentTagsOnResource[k], ""))
 					delete(currentTagsOnResource, k)
 					changed = true
 				}
@@ -227,11 +228,10 @@ func getServiceAdditionalPublicIPs(service *v1.Service) ([]string, error) {
 	return result, nil
 }
 
-func getNodePrivateIPAddress(service *v1.Service, node *v1.Node) string {
-	isIPV6SVC := utilnet.IsIPv6String(service.Spec.ClusterIP)
+func getNodePrivateIPAddress(node *v1.Node, isIPv6 bool) string {
 	for _, nodeAddress := range node.Status.Addresses {
 		if strings.EqualFold(string(nodeAddress.Type), string(v1.NodeInternalIP)) &&
-			utilnet.IsIPv6String(nodeAddress.Address) == isIPV6SVC {
+			utilnet.IsIPv6String(nodeAddress.Address) == isIPv6 {
 			klog.V(6).Infof("getNodePrivateIPAddress: node %s, ip %s", node.Name, nodeAddress.Address)
 			return nodeAddress.Address
 		}
@@ -327,4 +327,214 @@ func isNodeInVMSSVMCache(nodeName string, vmssVMCache *azcache.TimedCache) bool 
 	}
 
 	return isInCache
+}
+
+func extractVmssVMName(name string) (string, string, error) {
+	split := strings.SplitAfter(name, consts.VMSSNameSeparator)
+	if len(split) < 2 {
+		klog.V(3).Infof("Failed to extract vmssVMName %q", name)
+		return "", "", ErrorNotVmssInstance
+	}
+
+	ssName := strings.Join(split[0:len(split)-1], "")
+	// removing the trailing `vmssNameSeparator` since we used SplitAfter
+	ssName = ssName[:len(ssName)-1]
+	instanceID := split[len(split)-1]
+	return ssName, instanceID, nil
+}
+
+// isServiceDualStack checks if a Service is dual-stack or not.
+func isServiceDualStack(svc *v1.Service) bool {
+	return len(svc.Spec.IPFamilies) == 2
+}
+
+// getIPFamiliesEnabled checks if IPv4, IPv6 are enabled according to svc.Spec.IPFamilies.
+func getIPFamiliesEnabled(svc *v1.Service) (v4Enabled bool, v6Enabled bool) {
+	for _, ipFamily := range svc.Spec.IPFamilies {
+		if ipFamily == v1.IPv4Protocol {
+			v4Enabled = true
+		} else if ipFamily == v1.IPv6Protocol {
+			v6Enabled = true
+		}
+	}
+	return
+}
+
+// getServiceLoadBalancerIP retrieves LB IP from IPv4 annotation, then IPv6 annotation, then service.Spec.LoadBalancerIP.
+func getServiceLoadBalancerIP(service *v1.Service, isIPv6 bool) string {
+	if service == nil {
+		return ""
+	}
+
+	if ip, ok := service.Annotations[consts.ServiceAnnotationLoadBalancerIPDualStack[isIPv6]]; ok && ip != "" {
+		return ip
+	}
+
+	// Retrieve LB IP from service.Spec.LoadBalancerIP (will be deprecated)
+	svcLBIP := service.Spec.LoadBalancerIP
+	if (net.ParseIP(svcLBIP).To4() != nil && !isIPv6) ||
+		(net.ParseIP(svcLBIP).To4() == nil && isIPv6) {
+		return svcLBIP
+	}
+	return ""
+}
+
+func getServiceLoadBalancerIPs(service *v1.Service) []string {
+	if service == nil {
+		return []string{}
+	}
+
+	ips := []string{}
+	if ip, ok := service.Annotations[consts.ServiceAnnotationLoadBalancerIPDualStack[false]]; ok && ip != "" {
+		ips = append(ips, ip)
+	}
+	if ip, ok := service.Annotations[consts.ServiceAnnotationLoadBalancerIPDualStack[true]]; ok && ip != "" {
+		ips = append(ips, ip)
+	}
+	if len(ips) != 0 {
+		return ips
+	}
+
+	lbIP := service.Spec.LoadBalancerIP
+	if lbIP != "" {
+		ips = append(ips, lbIP)
+	}
+
+	return ips
+}
+
+// setServiceLoadBalancerIP sets LB IP to a Service
+func setServiceLoadBalancerIP(service *v1.Service, ip string) {
+	if service.Annotations == nil {
+		service.Annotations = map[string]string{}
+	}
+	isIPv6 := net.ParseIP(ip).To4() == nil
+	service.Annotations[consts.ServiceAnnotationLoadBalancerIPDualStack[isIPv6]] = ip
+}
+
+func getServicePIPName(service *v1.Service, isIPv6 bool) string {
+	if service == nil {
+		return ""
+	}
+
+	if !isServiceDualStack(service) {
+		return service.Annotations[consts.ServiceAnnotationPIPNameDualStack[false]]
+	}
+
+	return service.Annotations[consts.ServiceAnnotationPIPNameDualStack[isIPv6]]
+}
+
+func getServicePIPNames(service *v1.Service) []string {
+	var ips []string
+	for _, ipVersion := range []bool{false, true} {
+		ips = append(ips, getServicePIPName(service, ipVersion))
+	}
+	return ips
+}
+
+func getServicePIPPrefixID(service *v1.Service, isIPv6 bool) string {
+	if service == nil {
+		return ""
+	}
+
+	if !isServiceDualStack(service) {
+		return service.Annotations[consts.ServiceAnnotationPIPPrefixIDDualStack[false]]
+	}
+
+	return service.Annotations[consts.ServiceAnnotationPIPPrefixIDDualStack[isIPv6]]
+}
+
+// getResourceByIPFamily returns the resource name of with IPv6 suffix when
+// it is a dual-stack Service and the resource is of IPv6.
+// NOTICE: For PIPs of IPv6 Services created with CCM v1.27.1, after the CCM is upgraded,
+// the old PIPs will be recreated.
+func getResourceByIPFamily(resource string, isDualStack, isIPv6 bool) string {
+	if isDualStack && isIPv6 {
+		return fmt.Sprintf("%s-%s", resource, v6Suffix)
+	}
+	return resource
+}
+
+// isFIPIPv6 checks if the frontend IP configuration is of IPv6.
+func (az *Cloud) isFIPIPv6(fip *network.FrontendIPConfiguration, pipResourceGroup string, isInternal bool) (isIPv6 bool, err error) {
+	pips, err := az.listPIP(pipResourceGroup, azcache.CacheReadTypeDefault)
+	if err != nil {
+		return false, fmt.Errorf("isFIPIPv6: failed to list pip: %w", err)
+	}
+	if isInternal {
+		if fip.FrontendIPConfigurationPropertiesFormat != nil {
+			if fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddressVersion != "" {
+				return fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddressVersion == network.IPv6, nil
+			}
+			return net.ParseIP(pointer.StringDeref(fip.FrontendIPConfigurationPropertiesFormat.PrivateIPAddress, "")).To4() == nil, nil
+		}
+		klog.Errorf("Checking IP Family of frontend IP configuration %q of internal Service but its"+
+			" FrontendIPConfigurationPropertiesFormat is nil. It's considered to be IPv4",
+			pointer.StringDeref(fip.Name, ""))
+		return
+	}
+	var fipPIPID string
+	if fip.FrontendIPConfigurationPropertiesFormat != nil && fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress != nil {
+		fipPIPID = pointer.StringDeref(fip.FrontendIPConfigurationPropertiesFormat.PublicIPAddress.ID, "")
+	}
+	for _, pip := range pips {
+		id := pointer.StringDeref(pip.ID, "")
+		if !strings.EqualFold(fipPIPID, id) {
+			continue
+		}
+		if pip.PublicIPAddressPropertiesFormat != nil {
+			// First check PublicIPAddressVersion, then IPAddress
+			if pip.PublicIPAddressPropertiesFormat.PublicIPAddressVersion == network.IPv6 ||
+				net.ParseIP(pointer.StringDeref(pip.PublicIPAddressPropertiesFormat.IPAddress, "")).To4() == nil {
+				isIPv6 = true
+				break
+			}
+		}
+		break
+	}
+	return isIPv6, nil
+}
+
+// getResourceIDPrefix returns a substring from the provided one between beginning and the last "/".
+func getResourceIDPrefix(id string) string {
+	idx := strings.LastIndexByte(id, '/')
+	if idx == -1 {
+		return id // Should not happen
+	}
+	return id[:idx]
+}
+
+func getLBNameFromBackendPoolID(backendPoolID string) (string, error) {
+	matches := backendPoolIDRE.FindStringSubmatch(backendPoolID)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("backendPoolID %q is in wrong format", backendPoolID)
+	}
+
+	return matches[1], nil
+}
+
+func countNICsOnBackendPool(backendPool network.BackendAddressPool) int {
+	if backendPool.BackendAddressPoolPropertiesFormat == nil ||
+		backendPool.BackendIPConfigurations == nil {
+		return 0
+	}
+
+	return len(*backendPool.BackendIPConfigurations)
+}
+
+func countIPsOnBackendPool(backendPool network.BackendAddressPool) int {
+	if backendPool.BackendAddressPoolPropertiesFormat == nil ||
+		backendPool.LoadBalancerBackendAddresses == nil {
+		return 0
+	}
+
+	var ipsCount int
+	for _, loadBalancerBackendAddress := range *backendPool.LoadBalancerBackendAddresses {
+		if loadBalancerBackendAddress.LoadBalancerBackendAddressPropertiesFormat != nil &&
+			pointer.StringDeref(loadBalancerBackendAddress.IPAddress, "") != "" {
+			ipsCount++
+		}
+	}
+
+	return ipsCount
 }

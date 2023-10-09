@@ -92,15 +92,15 @@ func (amr *AzureMachineReconciler) SetupWithManager(ctx context.Context, mgr ctr
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options.Options).
 		For(&infrav1.AzureMachine{}).
-		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(log, amr.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceHasFilterLabel(log, amr.WatchFilterValue)).
 		// watch for changes in CAPI Machine resources
 		Watches(
-			&source.Kind{Type: &clusterv1.Machine{}},
+			&clusterv1.Machine{},
 			handler.EnqueueRequestsFromMapFunc(util.MachineToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("AzureMachine"))),
 		).
 		// watch for changes in AzureCluster
 		Watches(
-			&source.Kind{Type: &infrav1.AzureCluster{}},
+			&infrav1.AzureCluster{},
 			handler.EnqueueRequestsFromMapFunc(azureClusterToAzureMachinesMapper),
 		).
 		Build(r)
@@ -108,17 +108,17 @@ func (amr *AzureMachineReconciler) SetupWithManager(ctx context.Context, mgr ctr
 		return errors.Wrap(err, "error creating controller")
 	}
 
-	azureMachineMapper, err := util.ClusterToObjectsMapper(amr.Client, &infrav1.AzureMachineList{}, mgr.GetScheme())
+	azureMachineMapper, err := util.ClusterToTypedObjectsMapper(amr.Client, &infrav1.AzureMachineList{}, mgr.GetScheme())
 	if err != nil {
 		return errors.Wrap(err, "failed to create mapper for Cluster to AzureMachines")
 	}
 
-	// Add a watch on clusterv1.Cluster object for unpause & ready notifications.
+	// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
 	if err := c.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
+		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
 		handler.EnqueueRequestsFromMapFunc(azureMachineMapper),
-		predicates.ClusterUnpausedAndInfrastructureReady(log),
-		predicates.ResourceNotPausedAndHasFilterLabel(log, amr.WatchFilterValue),
+		ClusterPauseChangeAndInfrastructureReady(log),
+		predicates.ResourceHasFilterLabel(log, amr.WatchFilterValue),
 	); err != nil {
 		return errors.Wrap(err, "failed adding a watch for ready clusters")
 	}
@@ -179,12 +179,6 @@ func (amr *AzureMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	log = log.WithValues("cluster", cluster.Name)
 
-	// Return early if the object or Cluster is paused.
-	if annotations.IsPaused(cluster, azureMachine) {
-		log.Info("AzureMachine or linked Cluster is marked as paused. Won't reconcile")
-		return ctrl.Result{}, nil
-	}
-
 	log = log.WithValues("AzureCluster", cluster.Spec.InfrastructureRef.Name)
 	azureClusterName := client.ObjectKey{
 		Namespace: azureMachine.Namespace,
@@ -227,6 +221,12 @@ func (amr *AzureMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}()
 
+	// Return early if the object or Cluster is paused.
+	if annotations.IsPaused(cluster, azureMachine) {
+		log.Info("AzureMachine or linked Cluster is marked as paused. Won't reconcile normally")
+		return amr.reconcilePause(ctx, machineScope)
+	}
+
 	// Handle deleted machines
 	if !azureMachine.ObjectMeta.DeletionTimestamp.IsZero() {
 		return amr.reconcileDelete(ctx, machineScope, clusterScope)
@@ -248,10 +248,11 @@ func (amr *AzureMachineReconciler) reconcileNormal(ctx context.Context, machineS
 	}
 
 	// If the AzureMachine doesn't have our finalizer, add it.
-	controllerutil.AddFinalizer(machineScope.AzureMachine, infrav1.MachineFinalizer)
-	// Register the finalizer immediately to avoid orphaning Azure resources on delete
-	if err := machineScope.PatchObject(ctx); err != nil {
-		return reconcile.Result{}, err
+	if controllerutil.AddFinalizer(machineScope.AzureMachine, infrav1.MachineFinalizer) {
+		// Register the finalizer immediately to avoid orphaning Azure resources on delete
+		if err := machineScope.PatchObject(ctx); err != nil {
+			return reconcile.Result{}, err
+		}
 	}
 
 	// Make sure the Cluster Infrastructure is ready.
@@ -336,6 +337,24 @@ func (amr *AzureMachineReconciler) reconcileNormal(ctx context.Context, machineS
 	}
 
 	machineScope.SetReady()
+
+	return reconcile.Result{}, nil
+}
+
+func (amr *AzureMachineReconciler) reconcilePause(ctx context.Context, machineScope *scope.MachineScope) (reconcile.Result, error) {
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureMachine.reconcilePause")
+	defer done()
+
+	log.Info("Reconciling AzureMachine pause")
+
+	ams, err := amr.createAzureMachineService(machineScope)
+	if err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to create azure machine service")
+	}
+
+	if err := ams.Pause(ctx); err != nil {
+		return reconcile.Result{}, errors.Wrap(err, "failed to pause azure machine services")
+	}
 
 	return reconcile.Result{}, nil
 }

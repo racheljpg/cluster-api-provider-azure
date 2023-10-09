@@ -21,10 +21,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages/mock_virtualmachineimages"
@@ -35,7 +36,7 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 		k8sVersion      string
 		expectedSKU     string
 		expectedVersion string
-		versions        compute.ListVirtualMachineImageResource
+		versions        armcompute.VirtualMachineImagesClientListResponse
 	}{
 		{
 			k8sVersion:      "v1.15.6",
@@ -86,11 +87,11 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.21.13",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "121.13.20220613",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("121.13.20220526")},
-					{Name: pointer.String("121.13.20220613")},
-					{Name: pointer.String("121.13.20220524")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("121.13.20220526")},
+					{Name: ptr.To("121.13.20220613")},
+					{Name: ptr.To("121.13.20220524")},
 				},
 			},
 		},
@@ -108,10 +109,10 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.22.10",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "122.10.20220613",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("122.10.20220524")},
-					{Name: pointer.String("122.10.20220613")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("122.10.20220524")},
+					{Name: ptr.To("122.10.20220613")},
 				},
 			},
 		},
@@ -119,9 +120,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.22.16",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "122.16.20221117",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("122.16.20221117")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("122.16.20221117")},
 				},
 			},
 		},
@@ -134,12 +135,12 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.23.7",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "123.7.20231231",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("123.7.20221124")},
-					{Name: pointer.String("123.7.20220524")},
-					{Name: pointer.String("123.7.20231231")},
-					{Name: pointer.String("123.7.20220818")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("123.7.20221124")},
+					{Name: ptr.To("123.7.20220524")},
+					{Name: ptr.To("123.7.20231231")},
+					{Name: ptr.To("123.7.20220818")},
 				},
 			},
 		},
@@ -147,9 +148,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.24.0",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "124.0.20220512",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.0.20220512")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.0.20220512")},
 				},
 			},
 		},
@@ -157,9 +158,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.23.12",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "123.12.20220921",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("123.12.20220921")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("123.12.20220921")},
 				},
 			},
 		},
@@ -167,9 +168,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.23.13",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "123.13.20221014",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("123.13.20221014")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("123.13.20221014")},
 				},
 			},
 		},
@@ -177,9 +178,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.24.6",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "124.6.20220921",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.6.20220921")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.6.20220921")},
 				},
 			},
 		},
@@ -187,9 +188,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.24.7",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "124.7.20221014",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.7.20221014")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.7.20221014")},
 				},
 			},
 		},
@@ -197,9 +198,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.25.2",
 			expectedSKU:     "ubuntu-2004-gen1",
 			expectedVersion: "125.2.20220921",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("125.2.20220921")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("125.2.20220921")},
 				},
 			},
 		},
@@ -207,9 +208,9 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			k8sVersion:      "v1.25.3",
 			expectedSKU:     "ubuntu-2204-gen1",
 			expectedVersion: "125.3.20221014",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("125.3.20221014")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("125.3.20221014")},
 				},
 			},
 		},
@@ -226,12 +227,13 @@ func TestGetDefaultUbuntuImage(t *testing.T) {
 			mockAuth := mock_azure.NewMockAuthorizer(mockCtrl)
 			mockAuth.EXPECT().HashKey().Return(t.Name()).AnyTimes()
 			mockAuth.EXPECT().Authorizer().AnyTimes()
-			mockAuth.EXPECT().BaseURI().AnyTimes()
 			mockAuth.EXPECT().SubscriptionID().AnyTimes()
+			mockAuth.EXPECT().CloudEnvironment().AnyTimes()
+			mockAuth.EXPECT().Token().Return(&azidentity.DefaultAzureCredential{}).AnyTimes()
 			mockClient := mock_virtualmachineimages.NewMockClient(mockCtrl)
 			svc := Service{Client: mockClient, Authorizer: mockAuth}
 
-			if test.versions.Value != nil {
+			if test.versions.VirtualMachineImageResourceArray != nil {
 				mockClient.EXPECT().
 					List(gomock.Any(), location, azure.DefaultImagePublisherID, azure.DefaultImageOfferID, gomock.Any()).
 					Return(test.versions, nil)
@@ -349,7 +351,7 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 		expectedSKU     string
 		expectedVersion string
 		expectedError   bool
-		versions        compute.ListVirtualMachineImageResource
+		versions        armcompute.VirtualMachineImagesClientListResponse
 	}{
 		{
 			k8sVersion:      "v1.14.9",
@@ -432,19 +434,19 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "121.13.20300524",
 			expectedError:   false,
 			osAndVersion:    "windows-2022",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("121.13.20220524")},
-					{Name: pointer.String("124.0.20220512")},
-					{Name: pointer.String("121.13.20220524")},
-					{Name: pointer.String("123.13.20220524")},
-					{Name: pointer.String("121.13.20220619")},
-					{Name: pointer.String("121.13.20300524")},
-					{Name: pointer.String("121.14.20220524")},
-					{Name: pointer.String("121.12.20220524")},
-					{Name: pointer.String("121.13.20220101")},
-					{Name: pointer.String("121.13.20231231")},
-					{Name: pointer.String("121.13.19991231")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("121.13.20220524")},
+					{Name: ptr.To("124.0.20220512")},
+					{Name: ptr.To("121.13.20220524")},
+					{Name: ptr.To("123.13.20220524")},
+					{Name: ptr.To("121.13.20220619")},
+					{Name: ptr.To("121.13.20300524")},
+					{Name: ptr.To("121.14.20220524")},
+					{Name: ptr.To("121.12.20220524")},
+					{Name: ptr.To("121.13.20220101")},
+					{Name: ptr.To("121.13.20231231")},
+					{Name: ptr.To("121.13.19991231")},
 				},
 			},
 		},
@@ -482,9 +484,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "123.12.20220921",
 			expectedError:   false,
 			osAndVersion:    "ubuntu-2004",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("123.12.20220921")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("123.12.20220921")},
 				},
 			},
 		},
@@ -494,9 +496,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "123.13.20220524",
 			expectedError:   false,
 			osAndVersion:    "ubuntu-2204",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("123.13.20220524")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("123.13.20220524")},
 				},
 			},
 		},
@@ -504,8 +506,8 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			k8sVersion:    "v1.23.13",
 			expectedError: true,
 			osAndVersion:  "ubuntu-2004",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{},
 			},
 		},
 		{
@@ -514,9 +516,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "124.0.20220512",
 			expectedError:   false,
 			osAndVersion:    "ubuntu-2004",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.0.20220512")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.0.20220512")},
 				},
 			},
 		},
@@ -526,9 +528,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "124.0.20220606",
 			expectedError:   false,
 			osAndVersion:    "windows-2022-containerd",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.0.20220606")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.0.20220606")},
 				},
 			},
 		},
@@ -536,9 +538,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			k8sVersion:    "v1.24.1",
 			expectedError: true,
 			osAndVersion:  "windows-2022-containerd",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("124.0.20220606")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("124.0.20220606")},
 				},
 			},
 		},
@@ -548,9 +550,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			expectedVersion: "125.4.20221011",
 			expectedError:   false,
 			osAndVersion:    "ubuntu-2204",
-			versions: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("125.4.20221011")},
+			versions: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("125.4.20221011")},
 				},
 			},
 		},
@@ -567,8 +569,9 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			mockAuth := mock_azure.NewMockAuthorizer(mockCtrl)
 			mockAuth.EXPECT().HashKey().Return(t.Name()).AnyTimes()
 			mockAuth.EXPECT().Authorizer().AnyTimes()
-			mockAuth.EXPECT().BaseURI().AnyTimes()
 			mockAuth.EXPECT().SubscriptionID().AnyTimes()
+			mockAuth.EXPECT().CloudEnvironment().AnyTimes()
+			mockAuth.EXPECT().Token().Return(&azidentity.DefaultAzureCredential{}).AnyTimes()
 			mockClient := mock_virtualmachineimages.NewMockClient(mockCtrl)
 			svc := Service{Client: mockClient, Authorizer: mockAuth}
 
@@ -576,7 +579,7 @@ func TestGetDefaultImageSKUID(t *testing.T) {
 			if strings.HasPrefix(test.osAndVersion, "windows") {
 				offer = azure.DefaultWindowsImageOfferID
 			}
-			if test.versions.Value != nil {
+			if test.versions.VirtualMachineImageResourceArray != nil {
 				mockClient.EXPECT().
 					List(gomock.Any(), location, azure.DefaultImagePublisherID, offer, gomock.Any()).
 					Return(test.versions, nil)

@@ -41,12 +41,20 @@ func newAzureMachinePoolService(machinePoolScope *scope.MachinePoolScope) (*azur
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create a NewCache")
 	}
+	roleAssignmentsSvc, err := roleassignments.New(machinePoolScope)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create a roleassignments service")
+	}
+	scaleSetsSvc, err := scalesets.New(machinePoolScope, cache)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create a scalesets service")
+	}
 
 	return &azureMachinePoolService{
 		scope: machinePoolScope,
 		services: []azure.ServiceReconciler{
-			scalesets.New(machinePoolScope, cache),
-			roleassignments.New(machinePoolScope),
+			scaleSetsSvc,
+			roleAssignmentsSvc,
 		},
 		skuCache: cache,
 	}, nil
@@ -67,6 +75,24 @@ func (s *azureMachinePoolService) Reconcile(ctx context.Context) error {
 	for _, service := range s.services {
 		if err := service.Reconcile(ctx); err != nil {
 			return errors.Wrapf(err, "failed to reconcile AzureMachinePool service %s", service.Name())
+		}
+	}
+
+	return nil
+}
+
+// Pause pauses all the services.
+func (s *azureMachinePoolService) Pause(ctx context.Context) error {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureMachinePoolService.Pause")
+	defer done()
+
+	for _, service := range s.services {
+		pauser, ok := service.(azure.Pauser)
+		if !ok {
+			continue
+		}
+		if err := pauser.Pause(ctx); err != nil {
+			return errors.Wrapf(err, "failed to pause AzureMachinePool service %s", service.Name())
 		}
 	}
 

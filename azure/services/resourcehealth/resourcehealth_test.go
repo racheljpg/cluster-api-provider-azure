@@ -20,12 +20,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/resourcehealth/mgmt/2020-05-01/resourcehealth"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcehealth/armresourcehealth"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	"go.uber.org/mock/gomock"
 	utilfeature "k8s.io/component-base/featuregate/testing"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourcehealth/mock_resourcehealth"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
@@ -46,9 +46,9 @@ func TestReconcileResourceHealth(t *testing.T) {
 			expect: func(s *mock_resourcehealth.MockResourceHealthScopeMockRecorder, m *mock_resourcehealth.MockclientMockRecorder, _ *mock_resourcehealth.MockAvailabilityStatusFiltererMockRecorder) {
 				s.AvailabilityStatusResource().Times(1)
 				s.AvailabilityStatusResourceURI().Times(1)
-				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(resourcehealth.AvailabilityStatus{
-					Properties: &resourcehealth.AvailabilityStatusProperties{
-						AvailabilityState: resourcehealth.AvailabilityStateValuesAvailable,
+				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(armresourcehealth.AvailabilityStatus{
+					Properties: &armresourcehealth.AvailabilityStatusProperties{
+						AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesAvailable),
 					},
 				}, nil)
 			},
@@ -59,10 +59,10 @@ func TestReconcileResourceHealth(t *testing.T) {
 			expect: func(s *mock_resourcehealth.MockResourceHealthScopeMockRecorder, m *mock_resourcehealth.MockclientMockRecorder, _ *mock_resourcehealth.MockAvailabilityStatusFiltererMockRecorder) {
 				s.AvailabilityStatusResource().Times(1)
 				s.AvailabilityStatusResourceURI().Times(1)
-				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(resourcehealth.AvailabilityStatus{
-					Properties: &resourcehealth.AvailabilityStatusProperties{
-						AvailabilityState: resourcehealth.AvailabilityStateValuesUnavailable,
-						Summary:           pointer.String("summary"),
+				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(armresourcehealth.AvailabilityStatus{
+					Properties: &armresourcehealth.AvailabilityStatusProperties{
+						AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesUnavailable),
+						Summary:           ptr.To("summary"),
 					},
 				}, nil)
 			},
@@ -72,7 +72,7 @@ func TestReconcileResourceHealth(t *testing.T) {
 			name: "API error",
 			expect: func(s *mock_resourcehealth.MockResourceHealthScopeMockRecorder, m *mock_resourcehealth.MockclientMockRecorder, _ *mock_resourcehealth.MockAvailabilityStatusFiltererMockRecorder) {
 				s.AvailabilityStatusResourceURI().Times(1).Return("myURI")
-				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(resourcehealth.AvailabilityStatus{}, errors.New("some API error"))
+				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(armresourcehealth.AvailabilityStatus{}, errors.New("some API error"))
 			},
 			expectedError: "failed to get availability status for resource myURI: some API error",
 		},
@@ -82,10 +82,10 @@ func TestReconcileResourceHealth(t *testing.T) {
 			expect: func(s *mock_resourcehealth.MockResourceHealthScopeMockRecorder, m *mock_resourcehealth.MockclientMockRecorder, f *mock_resourcehealth.MockAvailabilityStatusFiltererMockRecorder) {
 				s.AvailabilityStatusResource().Times(1)
 				s.AvailabilityStatusResourceURI().Times(1)
-				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(resourcehealth.AvailabilityStatus{
-					Properties: &resourcehealth.AvailabilityStatusProperties{
-						AvailabilityState: resourcehealth.AvailabilityStateValuesUnavailable,
-						Summary:           pointer.String("summary"),
+				m.GetByResource(gomockinternal.AContext(), gomock.Any()).Times(1).Return(armresourcehealth.AvailabilityStatus{
+					Properties: &armresourcehealth.AvailabilityStatusProperties{
+						AvailabilityState: ptr.To(armresourcehealth.AvailabilityStateValuesUnavailable),
+						Summary:           ptr.To("summary"),
 					},
 				}, nil)
 				// ignore the above status

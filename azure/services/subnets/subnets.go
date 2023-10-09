@@ -19,9 +19,9 @@ package subnets
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -49,12 +49,16 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope SubnetScope) *Service {
-	Client := NewClient(scope)
-	return &Service{
-		Scope:      scope,
-		Reconciler: async.New(scope, Client, Client),
+func New(scope SubnetScope) (*Service, error) {
+	Client, err := NewClient(scope)
+	if err != nil {
+		return nil, err
 	}
+	return &Service{
+		Scope: scope,
+		Reconciler: async.New[armnetwork.SubnetsClientCreateOrUpdateResponse,
+			armnetwork.SubnetsClientDeleteResponse](scope, Client, Client),
+	}, nil
 }
 
 // Name returns the service name.
@@ -86,12 +90,12 @@ func (s *Service) Reconcile(ctx context.Context) error {
 				resultErr = err
 			}
 		} else {
-			subnet, ok := result.(network.Subnet)
+			subnet, ok := result.(armnetwork.Subnet)
 			if !ok {
-				return errors.Errorf("%T is not a network.Subnet", result)
+				return errors.Errorf("%T is not an armnetwork.Subnet", result)
 			}
-			s.Scope.UpdateSubnetID(subnetSpec.ResourceName(), pointer.StringDeref(subnet.ID, ""))
-			s.Scope.UpdateSubnetCIDRs(subnetSpec.ResourceName(), converters.GetSubnetAddresses(subnet))
+			s.Scope.UpdateSubnetID(subnetSpec.ResourceName(), ptr.Deref(subnet.ID, ""))
+			s.Scope.UpdateSubnetCIDRs(subnetSpec.ResourceName(), converters.GetSubnetAddresses(&subnet))
 		}
 	}
 

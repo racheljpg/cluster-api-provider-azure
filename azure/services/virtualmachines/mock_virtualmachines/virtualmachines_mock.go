@@ -23,8 +23,9 @@ package mock_virtualmachines
 import (
 	reflect "reflect"
 
+	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	autorest "github.com/Azure/go-autorest/autorest"
-	gomock "github.com/golang/mock/gomock"
+	gomock "go.uber.org/mock/gomock"
 	v1 "k8s.io/api/core/v1"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -262,6 +263,20 @@ func (m *MockVMScope) TenantID() string {
 func (mr *MockVMScopeMockRecorder) TenantID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockVMScope)(nil).TenantID))
+}
+
+// Token mocks base method.
+func (m *MockVMScope) Token() azcore.TokenCredential {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Token")
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	return ret0
+}
+
+// Token indicates an expected call of Token.
+func (mr *MockVMScopeMockRecorder) Token() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockVMScope)(nil).Token))
 }
 
 // UpdateDeleteStatus mocks base method.

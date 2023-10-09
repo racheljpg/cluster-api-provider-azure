@@ -21,12 +21,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -48,8 +48,8 @@ var (
 		ClusterName:    "my-cluster",
 		NatGatewayIP:   infrav1.PublicIPSpec{Name: "pip-node-subnet"},
 	}
-	natGateway1 = network.NatGateway{
-		ID: pointer.String("/subscriptions/my-sub/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-node-natgateway-1"),
+	natGateway1 = armnetwork.NatGateway{
+		ID: ptr.To("/subscriptions/my-sub/resourceGroups/my-rg/providers/Microsoft.Network/natGateways/my-node-natgateway-1"),
 	}
 	customVNetTags = infrav1.Tags{
 		"Name": "my-vnet",
@@ -114,12 +114,12 @@ func TestReconcileNatGateways(t *testing.T) {
 		{
 			name:          "result is not a NAT gateway",
 			tags:          ownedVNetTags,
-			expectedError: "created resource string is not a network.NatGateway",
+			expectedError: "created resource string is not an armnetwork.NatGateway",
 			expect: func(s *mock_natgateways.MockNatGatewayScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder) {
 				s.IsVnetManaged().Return(true)
 				s.NatGatewaySpecs().Return([]azure.ResourceSpecGetter{&natGatewaySpec1})
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &natGatewaySpec1, serviceName).Return("not a nat gateway", nil)
-				s.UpdatePutStatus(infrav1.NATGatewaysReadyCondition, serviceName, gomockinternal.ErrStrEq("created resource string is not a network.NatGateway"))
+				s.UpdatePutStatus(infrav1.NATGatewaysReadyCondition, serviceName, gomockinternal.ErrStrEq("created resource string is not an armnetwork.NatGateway"))
 			},
 		},
 	}

@@ -29,7 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
@@ -49,6 +49,7 @@ type TestReconcileInput struct {
 	machineScopeFailureReason capierrors.MachineStatusError
 	ready                     bool
 	cache                     *scope.MachineCache
+	skuCache                  scope.SKUCacher
 	expectedResult            reconcile.Result
 }
 
@@ -111,16 +112,6 @@ func TestAzureMachineReconcile(t *testing.T) {
 			},
 			event: "Unable to get cluster from metadata",
 		},
-		"should return if cluster is paused": {
-			objects: []runtime.Object{
-				getFakeCluster(func(c *clusterv1.Cluster) {
-					c.Spec.Paused = true
-				}),
-				defaultAzureCluster,
-				defaultAzureMachine,
-				defaultMachine,
-			},
-		},
 		"should return if azureCluster does not yet available": {
 			objects: []runtime.Object{
 				defaultCluster,
@@ -133,7 +124,13 @@ func TestAzureMachineReconcile(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			client := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.objects...).Build()
+			client := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(tc.objects...).
+				WithStatusSubresource(
+					&infrav1.AzureMachine{},
+				).
+				Build()
 
 			reconciler := &AzureMachineReconciler{
 				Client:   client,
@@ -158,6 +155,12 @@ func TestAzureMachineReconcile(t *testing.T) {
 	}
 }
 
+type fakeSKUCacher struct{}
+
+func (f fakeSKUCacher) Get(context.Context, string, resourceskus.ResourceType) (resourceskus.SKU, error) {
+	return resourceskus.SKU{}, errors.New("not implemented")
+}
+
 func TestAzureMachineReconcileNormal(t *testing.T) {
 	cases := map[string]TestReconcileInput{
 		"should reconcile normally": {
@@ -175,6 +178,7 @@ func TestAzureMachineReconcileNormal(t *testing.T) {
 		"should fail if failed to initialize machine cache": {
 			createAzureMachineService: getFakeAzureMachineService,
 			cache:                     nil,
+			skuCache:                  fakeSKUCacher{},
 			expectedErr:               "failed to init machine scope cache",
 		},
 		"should fail if identities are not ready": {
@@ -249,6 +253,45 @@ func TestAzureMachineReconcileNormal(t *testing.T) {
 	}
 }
 
+func TestAzureMachineReconcilePause(t *testing.T) {
+	cases := map[string]TestReconcileInput{
+		"should pause successfully": {
+			createAzureMachineService: getFakeAzureMachineService,
+			cache:                     &scope.MachineCache{},
+		},
+		"should fail if failed to create azure machine service": {
+			createAzureMachineService: getFakeAzureMachineServiceWithFailure,
+			cache:                     &scope.MachineCache{},
+			expectedErr:               "failed to create AzureMachineService",
+		},
+		"should fail to pause for errors": {
+			createAzureMachineService: getFakeAzureMachineServiceWithGeneralError,
+			cache:                     &scope.MachineCache{},
+			expectedErr:               "failed to pause azure machine service",
+		},
+	}
+
+	for name, c := range cases {
+		tc := c
+		t.Run(name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			reconciler, machineScope, _, err := getReconcileInputs(tc)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			result, err := reconciler.reconcilePause(context.Background(), machineScope)
+			g.Expect(result).To(Equal(tc.expectedResult))
+
+			if tc.expectedErr != "" {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring(tc.expectedErr))
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
 func TestAzureMachineReconcileDelete(t *testing.T) {
 	cases := map[string]TestReconcileInput{
 		"should delete successfully": {
@@ -312,7 +355,7 @@ func getReconcileInputs(tc TestReconcileInput) (*AzureMachineReconciler, *scope.
 	})
 	machine := getFakeMachine(azureMachine, func(m *clusterv1.Machine) {
 		m.Spec.Bootstrap = clusterv1.Bootstrap{
-			DataSecretName: pointer.String("fooSecret"),
+			DataSecretName: ptr.To("fooSecret"),
 		}
 	})
 
@@ -332,7 +375,13 @@ func getReconcileInputs(tc TestReconcileInput) (*AzureMachineReconciler, *scope.
 		},
 	}
 
-	client := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...).Build()
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(objects...).
+		WithStatusSubresource(
+			&infrav1.AzureMachine{},
+		).
+		Build()
 
 	reconciler := &AzureMachineReconciler{
 		Client:                    client,
@@ -355,6 +404,7 @@ func getReconcileInputs(tc TestReconcileInput) (*AzureMachineReconciler, *scope.
 		AzureMachine: azureMachine,
 		ClusterScope: clusterScope,
 		Cache:        tc.cache,
+		SKUCache:     tc.skuCache,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -431,6 +481,9 @@ func getFakeAzureMachineServiceWithGeneralError(machineScope *scope.MachineScope
 	ams.Reconcile = func(context.Context) error {
 		return errors.New("foo error")
 	}
+	ams.Pause = func(context.Context) error {
+		return errors.New("foo error")
+	}
 	ams.Delete = func(context.Context) error {
 		return errors.New("foo error")
 	}
@@ -444,6 +497,9 @@ func getDefaultAzureMachineService(machineScope *scope.MachineScope, cache *reso
 		services: []azure.ServiceReconciler{},
 		skuCache: cache,
 		Reconcile: func(context.Context) error {
+			return nil
+		},
+		Pause: func(context.Context) error {
 			return nil
 		},
 		Delete: func(context.Context) error {
@@ -560,7 +616,7 @@ func getFakeMachine(azureMachine *infrav1.AzureMachine, changes ...func(*cluster
 				Name:       azureMachine.Name,
 				Namespace:  azureMachine.Namespace,
 			},
-			Version: pointer.String("v1.22.0"),
+			Version: ptr.To("v1.22.0"),
 		},
 	}
 	for _, change := range changes {

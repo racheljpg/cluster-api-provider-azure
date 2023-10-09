@@ -27,9 +27,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -59,7 +59,7 @@ func (r *AzureJSONMachinePoolReconciler) SetupWithManager(ctx context.Context, m
 	)
 	defer done()
 
-	azureMachinePoolMapper, err := util.ClusterToObjectsMapper(r.Client, &infrav1exp.AzureMachinePoolList{}, mgr.GetScheme())
+	azureMachinePoolMapper, err := util.ClusterToTypedObjectsMapper(r.Client, &infrav1exp.AzureMachinePoolList{}, mgr.GetScheme())
 	if err != nil {
 		return errors.Wrap(err, "failed to create mapper for Cluster to AzureMachinePools")
 	}
@@ -78,7 +78,7 @@ func (r *AzureJSONMachinePoolReconciler) SetupWithManager(ctx context.Context, m
 	// Add a watch on Clusters to requeue when the infraRef is set. This is needed because the infraRef is not initially
 	// set in Clusters created from a ClusterClass.
 	if err := c.Watch(
-		&source.Kind{Type: &clusterv1.Cluster{}},
+		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
 		handler.EnqueueRequestsFromMapFunc(azureMachinePoolMapper),
 		predicates.ClusterUnpausedAndInfrastructureReady(log),
 		predicates.ResourceNotPausedAndHasFilterLabel(log, r.WatchFilterValue),
@@ -174,13 +174,7 @@ func (r *AzureJSONMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl
 	// Construct secret for this machine
 	userAssignedIdentityIfExists := ""
 	if len(azureMachinePool.Spec.UserAssignedIdentities) > 0 {
-		// TODO: remove this ClientID lookup code when the fixed cloud-provider-azure is default
-		idsClient := identities.NewClient(clusterScope)
-		userAssignedIdentityIfExists, err = idsClient.GetClientID(
-			ctx, azureMachinePool.Spec.UserAssignedIdentities[0].ProviderID)
-		if err != nil {
-			return reconcile.Result{}, errors.Wrap(err, "failed to get user-assigned identity ClientID")
-		}
+		userAssignedIdentityIfExists = azureMachinePool.Spec.UserAssignedIdentities[0].ProviderID
 	}
 
 	apiVersion, kind := infrav1.GroupVersion.WithKind("AzureMachinePool").ToAPIVersionAndKind()
@@ -189,6 +183,7 @@ func (r *AzureJSONMachinePoolReconciler) Reconcile(ctx context.Context, req ctrl
 		Kind:       kind,
 		Name:       azureMachinePool.GetName(),
 		UID:        azureMachinePool.GetUID(),
+		Controller: ptr.To(true),
 	}
 
 	if azureMachinePool.Spec.Identity == infrav1.VMIdentityNone {

@@ -19,9 +19,9 @@ package scalesets
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
@@ -49,21 +49,21 @@ func (s *VMSSExtensionSpec) OwnerResourceName() string {
 // Parameters returns the parameters for the VMSS extension.
 func (s *VMSSExtensionSpec) Parameters(ctx context.Context, existing interface{}) (interface{}, error) {
 	if existing != nil {
-		_, ok := existing.(compute.VirtualMachineScaleSetExtension)
+		_, ok := existing.(armcompute.VirtualMachineScaleSetExtension)
 		if !ok {
-			return nil, errors.Errorf("%T is not a compute.VirtualMachineScaleSetExtension", existing)
+			return nil, errors.Errorf("%T is not an armcompute.VirtualMachineScaleSetExtension", existing)
 		}
 
 		// VMSS extension already exists, nothing to update.
 		return nil, nil
 	}
 
-	return compute.VirtualMachineScaleSetExtension{
-		Name: pointer.String(s.Name),
-		VirtualMachineScaleSetExtensionProperties: &compute.VirtualMachineScaleSetExtensionProperties{
-			Publisher:          pointer.String(s.Publisher),
-			Type:               pointer.String(s.Name),
-			TypeHandlerVersion: pointer.String(s.Version),
+	return armcompute.VirtualMachineScaleSetExtension{
+		Name: ptr.To(s.Name),
+		Properties: &armcompute.VirtualMachineScaleSetExtensionProperties{
+			Publisher:          ptr.To(s.Publisher),
+			Type:               ptr.To(s.Name),
+			TypeHandlerVersion: ptr.To(s.Version),
 			Settings:           s.Settings,
 			ProtectedSettings:  s.ProtectedSettings,
 		},

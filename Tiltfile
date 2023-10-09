@@ -19,10 +19,10 @@ settings = {
     "deploy_cert_manager": True,
     "preload_images_for_kind": True,
     "kind_cluster_name": "capz",
-    "capi_version": "v1.4.3",
-    "cert_manager_version": "v1.12.1",
-    "kubernetes_version": "v1.24.6",
-    "aks_kubernetes_version": "v1.24.6",
+    "capi_version": "v1.5.2",
+    "cert_manager_version": "v1.13.0",
+    "kubernetes_version": "v1.28.0",
+    "aks_kubernetes_version": "v1.26.3",
     "flatcar_version": "3374.2.1",
 }
 
@@ -35,8 +35,6 @@ settings.update(read_yaml(
     default = {},
 ))
 
-os_arch = str(local("go env GOARCH")).rstrip("\n")
-
 if settings.get("trigger_mode") == "manual":
     trigger_mode(TRIGGER_MODE_MANUAL)
 
@@ -45,6 +43,8 @@ if "allowed_contexts" in settings:
 
 if "default_registry" in settings:
     default_registry(settings.get("default_registry"))
+
+os_arch = str(local("go env GOARCH")).rstrip("\n")
 
 # deploy CAPI
 def deploy_capi():
@@ -155,7 +155,7 @@ def observability():
 
     k8s_yaml(helm(
         "./hack/observability/cluster-api-visualizer/chart",
-        name = "visualize-cluster",
+        name = "visualizer",
         namespace = "capz-system",
     ))
 
@@ -177,13 +177,14 @@ def observability():
     k8s_resource(workload = "opentelemetry-collector-agent", labels = ["observability"])
     k8s_resource(
         workload = "capi-visualizer",
-        new_name = "visualize-cluster",
+        new_name = "visualizer",
         port_forwards = [port_forward(local_port = 8000, container_port = 8081, name = "View visualization")],
         labels = ["observability"],
     )
 
     k8s_resource(workload = "capz-controller-manager", labels = ["cluster-api"])
     k8s_resource(workload = "capz-nmi", labels = ["cluster-api"])
+    k8s_resource(workload = "azureserviceoperator-controller-manager", labels = ["cluster-api"])
 
 # Build CAPZ and add feature gates
 def capz():
@@ -355,7 +356,7 @@ def deploy_worker_templates(template, substitutions):
 
     yaml = shlex.quote(yaml)
     flavor_name = os.path.basename(flavor)
-    flavor_cmd = "RANDOM=$(bash -c 'echo $RANDOM'); export CLUSTER_NAME=" + flavor.replace("windows", "win") + "-$RANDOM; make generate-flavors; echo " + yaml + "> ./.tiltbuild/" + flavor + "; cat ./.tiltbuild/" + flavor + " | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f - && echo \"Cluster \'$CLUSTER_NAME\' created, don't forget to delete\""
+    flavor_cmd = "RANDOM=$(bash -c 'echo $RANDOM'); export CLUSTER_NAME=" + flavor.replace("windows", "win") + "-$RANDOM; make generate-flavors; echo " + yaml + "> ./.tiltbuild/" + flavor + "; cat ./.tiltbuild/" + flavor + " | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f -; echo \"Cluster \'$CLUSTER_NAME\' created, don't forget to delete\""
 
     # wait for kubeconfig to be available
     flavor_cmd += "; until " + kubectl_cmd + " get secret ${CLUSTER_NAME}-kubeconfig > /dev/null 2>&1; do sleep 5; done; " + kubectl_cmd + " get secret ${CLUSTER_NAME}-kubeconfig -o jsonpath={.data.value} | base64 --decode > ./${CLUSTER_NAME}.kubeconfig; chmod 600 ./${CLUSTER_NAME}.kubeconfig; until " + kubectl_cmd + " --kubeconfig=./${CLUSTER_NAME}.kubeconfig get nodes > /dev/null 2>&1; do sleep 5; done"
@@ -364,29 +365,45 @@ def deploy_worker_templates(template, substitutions):
     # This is a workaround needed for the calico-node-windows daemonset to be able to run in the calico-system namespace.
     if "windows" in flavor_name:
         flavor_cmd += "; until " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig get configmap kubeadm-config --namespace=kube-system > /dev/null 2>&1; do sleep 5; done"
-        flavor_cmd += "; " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig create namespace calico-system --dry-run=client -o yaml | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f - && " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig get configmap kubeadm-config --namespace=kube-system -o yaml | sed 's/namespace: kube-system/namespace: calico-system/' | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f -"
+        flavor_cmd += "; " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig create namespace calico-system --dry-run=client -o yaml | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f -; " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig get configmap kubeadm-config --namespace=kube-system -o yaml | sed 's/namespace: kube-system/namespace: calico-system/' | " + kubectl_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig apply -f -"
 
-    # install calico
-    if "ipv6" in flavor_name:
-        calico_values = "./templates/addons/calico-ipv6/values.yaml"
-    elif "dual-stack" in flavor_name:
-        calico_values = "./templates/addons/calico-dual-stack/values.yaml"
-    else:
-        calico_values = "./templates/addons/calico/values.yaml"
-    flavor_cmd += "; " + helm_cmd + " repo add projectcalico https://docs.tigera.io/calico/charts; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install --version ${CALICO_VERSION} calico projectcalico/tigera-operator -f " + calico_values + " --namespace tigera-operator --create-namespace"
-    if "intree-cloud-provider" not in flavor_name:
-        flavor_cmd += "; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install --repo https://raw.githubusercontent.com/kubernetes-sigs/cloud-provider-azure/master/helm/repo cloud-provider-azure --generate-name --set infra.clusterName=${CLUSTER_NAME}"
-        if "flatcar" in flavor_name:  # append caCetDir location to the cloud-provider-azure helm install command for flatcar flavor
-            flavor_cmd += " --set-string cloudControllerManager.caCertDir=/usr/share/ca-certificates"
+    flavor_cmd += get_addons(flavor_name)
 
     local_resource(
         name = flavor_name,
-        cmd = flavor_cmd,
+        cmd = ["sh", "-ec", flavor_cmd],
         auto_init = False,
         trigger_mode = TRIGGER_MODE_MANUAL,
         labels = ["flavors"],
         allow_parallel = True,
     )
+
+def get_addons(flavor_name):
+    # do not install calico and out of tree cloud provider for aks workload cluster
+    if "aks" in flavor_name:
+        return ""
+
+    addon_cmd = ""
+    if "intree-cloud-provider" not in flavor_name:
+        addon_cmd += "; export CIDRS=$(" + kubectl_cmd + " get cluster ${CLUSTER_NAME} -o jsonpath='{.spec.clusterNetwork.pods.cidrBlocks[*]}')"
+        addon_cmd += "; export CIDR_LIST=$(bash -c 'echo $CIDRS' | tr ' ' ',')"
+        addon_cmd += "; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install --repo https://raw.githubusercontent.com/kubernetes-sigs/cloud-provider-azure/master/helm/repo cloud-provider-azure --generate-name --set infra.clusterName=${CLUSTER_NAME} --set cloudControllerManager.clusterCIDR=${CIDR_LIST}"
+        if "flatcar" in flavor_name:  # append caCetDir location to the cloud-provider-azure helm install command for flatcar flavor
+            addon_cmd += " --set-string cloudControllerManager.caCertDir=/usr/share/ca-certificates"
+
+    if "azure-cni-v1" in flavor_name:
+        addon_cmd += "; " + kubectl_cmd + " apply -f ./templates/addons/azure-cni-v1.yaml --kubeconfig ./${CLUSTER_NAME}.kubeconfig"
+    else:
+        # install calico
+        if "ipv6" in flavor_name:
+            calico_values = "./templates/addons/calico-ipv6/values.yaml"
+        elif "dual-stack" in flavor_name:
+            calico_values = "./templates/addons/calico-dual-stack/values.yaml"
+        else:
+            calico_values = "./templates/addons/calico/values.yaml"
+        addon_cmd += "; " + helm_cmd + " --kubeconfig ./${CLUSTER_NAME}.kubeconfig install --repo https://docs.tigera.io/calico/charts --version ${CALICO_VERSION} calico tigera-operator -f " + calico_values + " --namespace tigera-operator --create-namespace"
+
+    return addon_cmd
 
 def base64_encode(to_encode):
     encode_blob = local("echo '{}' | tr -d '\n' | base64 | tr -d '\n'".format(to_encode), quiet = True, echo_off = True)

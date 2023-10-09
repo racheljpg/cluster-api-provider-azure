@@ -30,7 +30,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2020-10-01/resources"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/blang/semver"
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/onsi/ginkgo/v2/types"
 	. "github.com/onsi/gomega"
@@ -38,7 +37,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	e2e_namespace "sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/namespace"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
@@ -66,7 +65,6 @@ const (
 	AzureVNetCidr                   = "AZURE_PRIVATE_VNET_CIDR"
 	AzureNodeSubnetCidr             = "AZURE_NODE_SUBNET_CIDR"
 	AzureBastionSubnetCidr          = "AZURE_BASTION_SUBNET_CIDR"
-	MultiTenancyIdentityName        = "MULTI_TENANCY_IDENTITY_NAME"
 	ClusterIdentityName             = "CLUSTER_IDENTITY_NAME"
 	ClusterIdentityNamespace        = "CLUSTER_IDENTITY_NAMESPACE"
 	ClusterIdentitySecretName       = "AZURE_CLUSTER_IDENTITY_SECRET_NAME"      //nolint:gosec // Not a secret itself, just its name
@@ -92,6 +90,7 @@ const (
 	aksClusterNameSuffix            = "aks"
 	flatcarCAPICommunityGallery     = "flatcar4capi-742ef0cb-dcaa-4ecb-9cb0-bfd2e43dccc0"
 	defaultNamespace                = "default"
+	AzureCNIv1Manifest              = "AZURE_CNI_V1_MANIFEST_PATH"
 )
 
 func Byf(format string, a ...interface{}) {
@@ -249,12 +248,12 @@ func createRestConfig(ctx context.Context, tmpdir, namespace, clusterName string
 // and then installs cloud-provider-azure components via Helm.
 // Fulfills the clusterctl.Waiter type so that it can be used as ApplyClusterTemplateAndWaitInput data
 // in the flow of a clusterctl.ApplyClusterTemplateAndWait E2E test scenario.
-func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, result *clusterctl.ApplyClusterTemplateAndWaitResult) {
+func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCustomClusterTemplateAndWaitInput, result *clusterctl.ApplyCustomClusterTemplateAndWaitResult) {
 	getter := input.ClusterProxy.GetClient()
 	cluster := framework.GetClusterByName(ctx, framework.GetClusterByNameInput{
 		Getter:    getter,
-		Name:      input.ConfigCluster.ClusterName,
-		Namespace: input.ConfigCluster.Namespace,
+		Name:      input.ClusterName,
+		Namespace: input.Namespace,
 	})
 	kubeadmControlPlane := &kubeadmv1.KubeadmControlPlane{}
 	key := client.ObjectKey{
@@ -271,7 +270,7 @@ func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCl
 	By("Ensuring API Server is reachable before applying Helm charts")
 	Eventually(func(g Gomega) {
 		ns := &corev1.Namespace{}
-		clusterProxy := input.ClusterProxy.GetWorkloadCluster(ctx, input.ConfigCluster.Namespace, input.ConfigCluster.ClusterName)
+		clusterProxy := input.ClusterProxy.GetWorkloadCluster(ctx, input.Namespace, input.ClusterName)
 		g.Expect(clusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)).To(Succeed(), "Failed to get kube-system namespace")
 	}, input.WaitForControlPlaneIntervals...).Should(Succeed(), "API Server was not reachable in time")
 
@@ -280,16 +279,10 @@ func EnsureControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCl
 		// There is a co-dependency between cloud-provider and CNI so we install both together if cloud-provider is external.
 		InstallCalicoAndCloudProviderAzureHelmChart(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
 	} else {
-		InstallCalicoHelmChart(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
+		InstallCNI(ctx, input, cluster.Spec.ClusterNetwork.Pods.CIDRBlocks, hasWindows)
 	}
 	controlPlane := discoveryAndWaitForControlPlaneInitialized(ctx, input, result)
-	v, err := semver.ParseTolerant(input.ConfigCluster.KubernetesVersion)
-	Expect(err).NotTo(HaveOccurred())
-	if v.GTE(semver.MustParse("1.23.0")) {
-		InstallAzureDiskCSIDriverHelmChart(ctx, input, hasWindows)
-	} else {
-		Logf("Skipping Azure Disk CSI Driver installation for Kubernetes version %s", input.ConfigCluster.KubernetesVersion)
-	}
+	InstallAzureDiskCSIDriverHelmChart(ctx, input, hasWindows)
 	result.ControlPlane = controlPlane
 }
 
@@ -302,7 +295,7 @@ func CheckTestBeforeCleanup() {
 	Logf("Cleaning up after \"%s\" spec", CurrentSpecReport().FullText())
 }
 
-func discoveryAndWaitForControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyClusterTemplateAndWaitInput, result *clusterctl.ApplyClusterTemplateAndWaitResult) *kubeadmv1.KubeadmControlPlane {
+func discoveryAndWaitForControlPlaneInitialized(ctx context.Context, input clusterctl.ApplyCustomClusterTemplateAndWaitInput, result *clusterctl.ApplyCustomClusterTemplateAndWaitResult) *kubeadmv1.KubeadmControlPlane {
 	return framework.DiscoveryAndWaitForControlPlaneInitialized(ctx, framework.DiscoveryAndWaitForControlPlaneInitializedInput{
 		Lister:  input.ClusterProxy.GetClient(),
 		Cluster: result.Cluster,
@@ -321,12 +314,14 @@ func createApplyClusterTemplateInput(specName string, changes ...func(*clusterct
 			Namespace:                "default",
 			ClusterName:              "cluster",
 			KubernetesVersion:        e2eConfig.GetVariable(capi_e2e.KubernetesVersion),
-			ControlPlaneMachineCount: pointer.Int64(1),
-			WorkerMachineCount:       pointer.Int64(1),
+			ControlPlaneMachineCount: ptr.To[int64](1),
+			WorkerMachineCount:       ptr.To[int64](1),
 		},
 		WaitForClusterIntervals:      e2eConfig.GetIntervals(specName, "wait-cluster"),
 		WaitForControlPlaneIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
 		WaitForMachineDeployments:    e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+		WaitForMachinePools:          e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
+		CNIManifestPath:              "",
 	}
 	for _, change := range changes {
 		change(&input)
@@ -367,13 +362,13 @@ func withKubernetesVersion(version string) func(*clusterctl.ApplyClusterTemplate
 
 func withControlPlaneMachineCount(count int64) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
 	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
-		input.ConfigCluster.ControlPlaneMachineCount = pointer.Int64(count)
+		input.ConfigCluster.ControlPlaneMachineCount = ptr.To[int64](count)
 	}
 }
 
 func withWorkerMachineCount(count int64) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
 	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
-		input.ConfigCluster.WorkerMachineCount = pointer.Int64(count)
+		input.ConfigCluster.WorkerMachineCount = ptr.To[int64](count)
 	}
 }
 
@@ -418,5 +413,11 @@ func withControlPlaneWaiters(waiters clusterctl.ControlPlaneWaiters) func(*clust
 func withPostMachinesProvisioned(postMachinesProvisioned func()) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
 	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
 		input.PostMachinesProvisioned = postMachinesProvisioned
+	}
+}
+
+func withAzureCNIv1Manifest(manifestPath string) func(*clusterctl.ApplyClusterTemplateAndWaitInput) {
+	return func(input *clusterctl.ApplyClusterTemplateAndWaitInput) {
+		input.CNIManifestPath = manifestPath
 	}
 }

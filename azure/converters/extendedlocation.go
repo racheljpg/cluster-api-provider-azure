@@ -17,30 +17,30 @@ limitations under the License.
 package converters
 
 import (
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"k8s.io/utils/pointer"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
-// ExtendedLocationToNetworkSDK converts infrav1.ExtendedLocationSpec to network.ExtendedLocation.
-func ExtendedLocationToNetworkSDK(src *infrav1.ExtendedLocationSpec) *network.ExtendedLocation {
+// ExtendedLocationToNetworkSDK converts an infrav1.ExtendedLocationSpec to an armnetwork.ExtendedLocation.
+func ExtendedLocationToNetworkSDK(src *infrav1.ExtendedLocationSpec) *armnetwork.ExtendedLocation {
 	if src == nil {
 		return nil
 	}
-	return &network.ExtendedLocation{
-		Name: pointer.String(src.Name),
-		Type: network.ExtendedLocationTypes(src.Type),
+	return &armnetwork.ExtendedLocation{
+		Name: ptr.To(src.Name),
+		Type: ptr.To(armnetwork.ExtendedLocationTypes(src.Type)),
 	}
 }
 
-// ExtendedLocationToComputeSDK converts infrav1.ExtendedLocationSpec to compute.ExtendedLocation.
-func ExtendedLocationToComputeSDK(src *infrav1.ExtendedLocationSpec) *compute.ExtendedLocation {
+// ExtendedLocationToComputeSDK converts an infrav1.ExtendedLocationSpec to an armcompute.ExtendedLocation.
+func ExtendedLocationToComputeSDK(src *infrav1.ExtendedLocationSpec) *armcompute.ExtendedLocation {
 	if src == nil {
 		return nil
 	}
-	return &compute.ExtendedLocation{
-		Name: pointer.String(src.Name),
-		Type: compute.ExtendedLocationTypes(src.Type),
+	return &armcompute.ExtendedLocation{
+		Name: ptr.To(src.Name),
+		Type: ptr.To(armcompute.ExtendedLocationTypes(src.Type)),
 	}
 }

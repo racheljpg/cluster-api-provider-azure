@@ -62,12 +62,18 @@
    - [install instructions](https://kubectl.docs.kubernetes.io/installation/kustomize/) on Windows + WSL2.
    - [install instructions][kustomizelinux] on Linux.
 6. Install Python 3.x or 2.7.x, if neither is already installed.
-7. Install make.
+7. Install pip
+   - [pip installation instruction](https://pip.pypa.io/en/stable/installation/#installation)
+8. Install make.
    - `brew install make` on MacOS.
    - `sudo apt install make` on Windows + WSL2.
    - `sudo apt install make` on Linux.
-8. Install [timeout][timeout]
+9. Install [timeout][timeout]
    - `brew install coreutils` on macOS.
+10. Install [pre-commit framework](https://pre-commit.com/#installation)
+   - `brew install pre-commit` Or `pip install pre-commit`. Installs pre-commit globally.
+   - run `pre-commit install` at the root of the project to install pre-commit hooks to read `.pre-commit-config.yaml`
+   - *Note*: use `git commit --no-verify` to skip running pre-commit workflow as and when needed.
 
 When developing on Windows, it is suggested to set up the project on Windows + WSL2 and the file should be checked out on as wsl file system for better results.
 
@@ -101,7 +107,7 @@ Change some code!
 
 ### Modules and dependencies
 
-This repositories uses [Go Modules](https://github.com/golang/go/wiki/Modules) to track and vendor dependencies.
+This repository uses [Go Modules](https://github.com/golang/go/wiki/Modules) to track and vendor dependencies.
 
 To pin a new dependency:
 
@@ -116,8 +122,7 @@ Makefile targets and scripts are offered to work with go modules:
 
 ### Setting up the environment
 
-Your environment must have the Azure credentials as outlined in the [getting
-started prerequisites](../topics/getting-started.md#Prerequisites) section.
+Your must have the Azure credentials as outlined in the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
 
 ### Tilt Requirements
 
@@ -148,17 +153,17 @@ development will span both CAPZ and CAPI, then follow the [CAPI and CAPZ instruc
 
 If you want to develop in CAPZ and get a local development cluster working quickly, this is the path for you.
 
-From the root of the CAPZ repository and after configuring the environment variables, you can run the following to generate your `tilt-settings.yaml` file:
+Create a file named `tilt-settings.yaml` in the root of the CAPZ repository with the following contents:
 
-```shell
-cat <<EOF > tilt-settings.yaml
+```yaml
 kustomize_substitutions:
-  AZURE_SUBSCRIPTION_ID_B64: "$(echo "${AZURE_SUBSCRIPTION_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_TENANT_ID_B64: "$(echo "${AZURE_TENANT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_SECRET_B64: "$(echo "${AZURE_CLIENT_SECRET}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_ID_B64: "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-EOF
+  AZURE_SUBSCRIPTION_ID: <subscription-id>
+  AZURE_TENANT_ID: <tenant-id>
+  AZURE_CLIENT_SECRET: <client-secret>
+  AZURE_CLIENT_ID: <client-id>
 ```
+
+You should have these values saved from the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
 
 To build a kind cluster and start Tilt, just run:
 
@@ -206,12 +211,14 @@ enable_providers:
 - kubeadm-bootstrap
 - kubeadm-control-plane
 kustomize_substitutions:
-  AZURE_SUBSCRIPTION_ID_B64: "$(echo "${AZURE_SUBSCRIPTION_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_TENANT_ID_B64: "$(echo "${AZURE_TENANT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_SECRET_B64: "$(echo "${AZURE_CLIENT_SECRET}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_ID_B64: "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
+  AZURE_SUBSCRIPTION_ID: <subscription-id>
+  AZURE_TENANT_ID: <tenant-id>
+  AZURE_CLIENT_SECRET: <client-secret>
+  AZURE_CLIENT_ID: <client-id>
 EOF
 ```
+
+Make sure to replace the credentials with the values from the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
 
 > `$REGISTRY` should be in the format `docker.io/<dockerhub-username>`
 
@@ -281,10 +288,10 @@ enable_providers:
 - kubeadm-bootstrap
 - kubeadm-control-plane
 kustomize_substitutions:
-  AZURE_SUBSCRIPTION_ID_B64: "$(echo "${AZURE_SUBSCRIPTION_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_TENANT_ID_B64: "$(echo "${AZURE_TENANT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_SECRET_B64: "$(echo "${AZURE_CLIENT_SECRET}" | tr -d '\n' | base64 | tr -d '\n')"
-  AZURE_CLIENT_ID_B64: "$(echo "${AZURE_CLIENT_ID}" | tr -d '\n' | base64 | tr -d '\n')"
+  AZURE_SUBSCRIPTION_ID: <subscription-id>
+  AZURE_TENANT_ID: <tenant-id>
+  AZURE_CLIENT_SECRET: <client-secret>
+  AZURE_CLIENT_ID: <client-id>
 debug:
   azure:
     continue: true
@@ -369,7 +376,7 @@ export CONTROL_PLANE_MACHINE_COUNT=3
 export AZURE_CONTROL_PLANE_MACHINE_TYPE="Standard_B2s"
 export AZURE_NODE_MACHINE_TYPE="Standard_B2s"
 export WORKER_MACHINE_COUNT=2
-export KUBERNETES_VERSION="v1.24.6"
+export KUBERNETES_VERSION="v1.25.6"
 
 # Identity secret.
 export AZURE_CLUSTER_IDENTITY_SECRET_NAME="cluster-identity-secret"
@@ -459,6 +466,7 @@ If you're interested in submitting PRs to the project, please be sure to run som
 ```bash
 make lint # Runs a suite of quick scripts to check code structure
 make lint-fix # Runs a suite of quick scripts to fix lint errors
+make verify # Runs a suite of verifying binaries
 make test # Runs tests on the Go code
 ```
 
@@ -580,7 +588,7 @@ You can also customize the configuration of the CAPZ cluster (assuming that `SKI
 [gettextwindows]: https://mlocati.github.io/articles/gettext-iconv-windows.html
 [go.mod]: https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/go.mod
 [kind]: https://sigs.k8s.io/kind
-[azure_cli]: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest
+[azure_cli]: https://learn.microsoft.com/cli/azure/install-azure-cli?view=azure-cli-latest
 [manifests]: /docs/manifests.md
 [kustomize]: https://github.com/kubernetes-sigs/kustomize
 [kustomizelinux]: https://kubectl.docs.kubernetes.io/installation/kustomize/

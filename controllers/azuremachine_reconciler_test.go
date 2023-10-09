@@ -21,9 +21,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
+	"go.uber.org/mock/gomock"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -90,10 +90,80 @@ func TestAzureMachineServiceReconcile(t *testing.T) {
 					svcTwoMock,
 					svcThreeMock,
 				},
-				skuCache: resourceskus.NewStaticCache([]compute.ResourceSku{}, ""),
+				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
 			err := s.reconcile(context.TODO())
+			if tc.expectedError != "" {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err).To(MatchError(tc.expectedError))
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestAzureMachineServicePause(t *testing.T) {
+	type pausingServiceReconciler struct {
+		*mock_azure.MockServiceReconciler
+		*mock_azure.MockPauser
+	}
+
+	cases := map[string]struct {
+		expectedError string
+		expect        func(one pausingServiceReconciler, two pausingServiceReconciler, three pausingServiceReconciler)
+	}{
+		"all services are paused in order": {
+			expectedError: "",
+			expect: func(one pausingServiceReconciler, two pausingServiceReconciler, three pausingServiceReconciler) {
+				gomock.InOrder(
+					one.MockPauser.EXPECT().Pause(gomockinternal.AContext()).Return(nil),
+					two.MockPauser.EXPECT().Pause(gomockinternal.AContext()).Return(nil),
+					three.MockPauser.EXPECT().Pause(gomockinternal.AContext()).Return(nil))
+			},
+		},
+		"service pause fails": {
+			expectedError: "failed to pause AzureMachine service two: some error happened",
+			expect: func(one pausingServiceReconciler, two pausingServiceReconciler, _ pausingServiceReconciler) {
+				gomock.InOrder(
+					one.MockPauser.EXPECT().Pause(gomockinternal.AContext()).Return(nil),
+					two.MockPauser.EXPECT().Pause(gomockinternal.AContext()).Return(errors.New("some error happened")),
+					two.MockServiceReconciler.EXPECT().Name().Return("two"))
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			t.Parallel()
+			mockCtrl := gomock.NewController(t)
+			defer mockCtrl.Finish()
+
+			newPausingServiceReconciler := func() pausingServiceReconciler {
+				return pausingServiceReconciler{
+					mock_azure.NewMockServiceReconciler(mockCtrl),
+					mock_azure.NewMockPauser(mockCtrl),
+				}
+			}
+			svcOneMock := newPausingServiceReconciler()
+			svcTwoMock := newPausingServiceReconciler()
+			svcThreeMock := newPausingServiceReconciler()
+
+			tc.expect(svcOneMock, svcTwoMock, svcThreeMock)
+
+			s := &azureMachineService{
+				services: []azure.ServiceReconciler{
+					svcOneMock,
+					svcTwoMock,
+					svcThreeMock,
+				},
+			}
+
+			err := s.pause(context.TODO())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -157,7 +227,7 @@ func TestAzureMachineServiceDelete(t *testing.T) {
 					svcTwoMock,
 					svcThreeMock,
 				},
-				skuCache: resourceskus.NewStaticCache([]compute.ResourceSku{}, ""),
+				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
 			err := s.delete(context.TODO())

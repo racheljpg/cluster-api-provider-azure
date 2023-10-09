@@ -27,7 +27,7 @@ import (
 	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
@@ -56,6 +56,12 @@ type ManagedControlPlaneScopeParams struct {
 	ControlPlane        *infrav1.AzureManagedControlPlane
 	ManagedMachinePools []ManagedMachinePool
 	Cache               *ManagedControlPlaneCache
+	VnetDescriber       VnetDescriber
+}
+
+// VnetDescriber answers whether a virtual network is managed or not.
+type VnetDescriber interface {
+	IsManaged(context.Context) (bool, error)
 }
 
 // NewManagedControlPlaneScope creates a new Scope from the supplied parameters.
@@ -73,7 +79,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 	}
 
 	if params.ControlPlane.Spec.IdentityRef == nil {
-		if err := params.AzureClients.setCredentials(params.ControlPlane.Spec.SubscriptionID, ""); err != nil {
+		if err := params.AzureClients.setCredentials(params.ControlPlane.Spec.SubscriptionID, params.ControlPlane.Spec.AzureEnvironment); err != nil {
 			return nil, errors.Wrap(err, "failed to create Azure session")
 		}
 	} else {
@@ -82,7 +88,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 			return nil, errors.Wrap(err, "failed to init credentials provider")
 		}
 
-		if err := params.AzureClients.setCredentialsWithProvider(ctx, params.ControlPlane.Spec.SubscriptionID, "", credentialsProvider); err != nil {
+		if err := params.AzureClients.setCredentialsWithProvider(ctx, params.ControlPlane.Spec.SubscriptionID, params.ControlPlane.Spec.AzureEnvironment, credentialsProvider); err != nil {
 			return nil, errors.Wrap(err, "failed to configure azure settings and credentials for Identity")
 		}
 	}
@@ -104,6 +110,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 		ManagedMachinePools: params.ManagedMachinePools,
 		patchHelper:         helper,
 		cache:               params.Cache,
+		VnetDescriber:       params.VnetDescriber,
 	}, nil
 }
 
@@ -118,11 +125,17 @@ type ManagedControlPlaneScope struct {
 	Cluster             *clusterv1.Cluster
 	ControlPlane        *infrav1.AzureManagedControlPlane
 	ManagedMachinePools []ManagedMachinePool
+	VnetDescriber       VnetDescriber
 }
 
 // ManagedControlPlaneCache stores ManagedControlPlane data locally so we don't have to hit the API multiple times within the same reconcile loop.
 type ManagedControlPlaneCache struct {
 	isVnetManaged *bool
+}
+
+// GetClient returns the controller-runtime client.
+func (s *ManagedControlPlaneScope) GetClient() client.Client {
+	return s.Client
 }
 
 // ResourceGroup returns the managed control plane's resource group.
@@ -239,12 +252,14 @@ func (s *ManagedControlPlaneScope) Vnet() *infrav1.VnetSpec {
 }
 
 // GroupSpec returns the resource group spec.
-func (s *ManagedControlPlaneScope) GroupSpec() azure.ResourceSpecGetter {
+func (s *ManagedControlPlaneScope) GroupSpec() azure.ASOResourceSpecGetter {
 	return &groups.GroupSpec{
 		Name:           s.ResourceGroup(),
+		Namespace:      s.Cluster.Namespace,
 		Location:       s.Location(),
 		ClusterName:    s.ClusterName(),
 		AdditionalTags: s.AdditionalTags(),
+		Owner:          *metav1.NewControllerRef(s.ControlPlane, infrav1.GroupVersion.WithKind("AzureManagedControlPlane")),
 	}
 }
 
@@ -368,18 +383,29 @@ func (s *ManagedControlPlaneScope) IsIPv6Enabled() bool {
 // IsVnetManaged returns true if the vnet is managed.
 func (s *ManagedControlPlaneScope) IsVnetManaged() bool {
 	if s.cache.isVnetManaged != nil {
-		return pointer.BoolDeref(s.cache.isVnetManaged, false)
+		return ptr.Deref(s.cache.isVnetManaged, false)
 	}
 	// TODO refactor `IsVnetManaged` so that it is able to use an upstream context
 	// see https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/2581
 	ctx := context.Background()
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "scope.ManagedControlPlaneScope.IsVnetManaged")
 	defer done()
-	isManaged, err := virtualnetworks.New(s).IsManaged(ctx)
+
+	var vnetDescriber = s.VnetDescriber
+	if vnetDescriber == nil {
+		virtualNetworksSvc, err := virtualnetworks.New(s)
+		if err != nil {
+			log.Error(err, "failed to create virtualnetworks service")
+			return false
+		}
+		vnetDescriber = virtualNetworksSvc
+	}
+	isManaged, err := vnetDescriber.IsManaged(ctx)
 	if err != nil {
 		log.Error(err, "Unable to determine if ManagedControlPlaneScope VNET is managed by capz", "AzureManagedCluster", s.ClusterName())
 	}
-	s.cache.isVnetManaged = pointer.Bool(isManaged)
+
+	s.cache.isVnetManaged = ptr.To(isManaged)
 	return isManaged
 }
 
@@ -427,8 +453,8 @@ func (s *ManagedControlPlaneScope) CloudProviderConfigOverrides() *infrav1.Cloud
 }
 
 // FailureDomains returns the failure domains for the cluster.
-func (s *ManagedControlPlaneScope) FailureDomains() []string {
-	return []string{}
+func (s *ManagedControlPlaneScope) FailureDomains() []*string {
+	return []*string{}
 }
 
 // ManagedClusterAnnotations returns the annotations for the managed cluster.
@@ -447,7 +473,6 @@ func (s *ManagedControlPlaneScope) ManagedClusterSpec() azure.ResourceSpecGetter
 		Tags:              s.ControlPlane.Spec.AdditionalTags,
 		Headers:           maps.FilterByKeyPrefix(s.ManagedClusterAnnotations(), infrav1.CustomHeaderPrefix),
 		Version:           strings.TrimPrefix(s.ControlPlane.Spec.Version, "v"),
-		SSHPublicKey:      s.ControlPlane.Spec.SSHPublicKey,
 		DNSServiceIP:      s.ControlPlane.Spec.DNSServiceIP,
 		VnetSubnetID: azure.SubnetID(
 			s.ControlPlane.Spec.SubscriptionID,
@@ -455,10 +480,16 @@ func (s *ManagedControlPlaneScope) ManagedClusterSpec() azure.ResourceSpecGetter
 			s.ControlPlane.Spec.VirtualNetwork.Name,
 			s.ControlPlane.Spec.VirtualNetwork.Subnet.Name,
 		),
-		GetAllAgentPools: s.GetAllAgentPoolSpecs,
-		OutboundType:     s.ControlPlane.Spec.OutboundType,
+		GetAllAgentPools:            s.GetAllAgentPoolSpecs,
+		OutboundType:                s.ControlPlane.Spec.OutboundType,
+		Identity:                    s.ControlPlane.Spec.Identity,
+		KubeletUserAssignedIdentity: s.ControlPlane.Spec.KubeletUserAssignedIdentity,
+		NetworkPluginMode:           s.ControlPlane.Spec.NetworkPluginMode,
 	}
 
+	if s.ControlPlane.Spec.SSHPublicKey != nil {
+		managedClusterSpec.SSHPublicKey = *s.ControlPlane.Spec.SSHPublicKey
+	}
 	if s.ControlPlane.Spec.NetworkPlugin != nil {
 		managedClusterSpec.NetworkPlugin = *s.ControlPlane.Spec.NetworkPlugin
 	}
@@ -543,6 +574,21 @@ func (s *ManagedControlPlaneScope) ManagedClusterSpec() azure.ResourceSpecGetter
 		}
 	}
 
+	if s.ControlPlane.Spec.HTTPProxyConfig != nil {
+		managedClusterSpec.HTTPProxyConfig = &managedclusters.HTTPProxyConfig{
+			HTTPProxy:  s.ControlPlane.Spec.HTTPProxyConfig.HTTPProxy,
+			HTTPSProxy: s.ControlPlane.Spec.HTTPProxyConfig.HTTPSProxy,
+			NoProxy:    s.ControlPlane.Spec.HTTPProxyConfig.NoProxy,
+			TrustedCA:  s.ControlPlane.Spec.HTTPProxyConfig.TrustedCA,
+		}
+	}
+
+	if s.ControlPlane.Spec.OIDCIssuerProfile != nil {
+		managedClusterSpec.OIDCIssuerProfile = &managedclusters.OIDCIssuerProfile{
+			Enabled: s.ControlPlane.Spec.OIDCIssuerProfile.Enabled,
+		}
+	}
+
 	return &managedClusterSpec
 }
 
@@ -591,6 +637,7 @@ func (s *ManagedControlPlaneScope) MakeEmptyKubeConfigSecret() corev1.Secret {
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(s.ControlPlane, infrav1.GroupVersion.WithKind("AzureManagedControlPlane")),
 			},
+			Labels: map[string]string{clusterv1.ClusterNameLabel: s.Cluster.Name},
 		},
 	}
 }
@@ -603,6 +650,11 @@ func (s *ManagedControlPlaneScope) GetKubeConfigData() []byte {
 // SetKubeConfigData sets kubeconfig data.
 func (s *ManagedControlPlaneScope) SetKubeConfigData(kubeConfigData []byte) {
 	s.kubeConfigData = kubeConfigData
+}
+
+// SetKubeletIdentity sets the ID of the user-assigned identity for kubelet if not already set.
+func (s *ManagedControlPlaneScope) SetKubeletIdentity(id string) {
+	s.ControlPlane.Spec.KubeletUserAssignedIdentity = id
 }
 
 // SetLongRunningOperationState will set the future on the AzureManagedControlPlane status to allow the resource to continue
@@ -694,18 +746,14 @@ func (s *ManagedControlPlaneScope) SetAnnotation(key, value string) {
 
 // TagsSpecs returns the tag specs for the ManagedControlPlane.
 func (s *ManagedControlPlaneScope) TagsSpecs() []azure.TagsSpec {
-	return []azure.TagsSpec{
-		{
-			Scope:      azure.ResourceGroupID(s.SubscriptionID(), s.ResourceGroup()),
-			Tags:       s.AdditionalTags(),
-			Annotation: azure.RGTagsLastAppliedAnnotation,
-		},
+	specs := []azure.TagsSpec{
 		{
 			Scope:      azure.ManagedClusterID(s.SubscriptionID(), s.ResourceGroup(), s.ManagedClusterSpec().ResourceName()),
 			Tags:       s.AdditionalTags(),
 			Annotation: azure.ManagedClusterTagsLastAppliedAnnotation,
 		},
 	}
+	return specs
 }
 
 // AvailabilityStatusResource refers to the AzureManagedControlPlane.
@@ -765,4 +813,9 @@ func (s *ManagedControlPlaneScope) PrivateEndpointSpecs() []azure.ResourceSpecGe
 	}
 
 	return privateEndpointSpecs
+}
+
+// SetOIDCIssuerProfileStatus sets the status for the OIDC issuer profile config.
+func (s *ManagedControlPlaneScope) SetOIDCIssuerProfileStatus(oidc *infrav1.OIDCIssuerProfileStatus) {
+	s.ControlPlane.Status.OIDCIssuerProfile = oidc
 }

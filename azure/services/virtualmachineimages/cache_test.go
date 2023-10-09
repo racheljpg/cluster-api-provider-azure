@@ -20,11 +20,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/golang/mock/gomock"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages/mock_virtualmachineimages"
 )
 
@@ -34,22 +34,22 @@ func TestCacheGet(t *testing.T) {
 		publisher     string
 		offer         string
 		sku           string
-		have          compute.ListVirtualMachineImageResource
+		have          armcompute.VirtualMachineImagesClientListResponse
 		expectedError error
 	}{
 		"should find": {
 			location: "test", publisher: "foo", offer: "bar", sku: "baz",
-			have: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{
-					{Name: pointer.String("foo")},
+			have: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{
+					{Name: ptr.To("foo")},
 				},
 			},
 			expectedError: nil,
 		},
 		"should not find": {
 			location: "test", publisher: "foo", offer: "bar", sku: "baz",
-			have: compute.ListVirtualMachineImageResource{
-				Value: &[]compute.VirtualMachineImageResource{},
+			have: armcompute.VirtualMachineImagesClientListResponse{
+				VirtualMachineImageResourceArray: []*armcompute.VirtualMachineImageResource{},
 			},
 			expectedError: errors.New("failed to refresh VM images cache"),
 		},

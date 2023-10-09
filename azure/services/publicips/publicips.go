@@ -19,6 +19,7 @@ package publicips
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -47,15 +48,21 @@ type Service struct {
 }
 
 // New creates a new service.
-func New(scope PublicIPScope) *Service {
-	client := NewClient(scope)
-	tagsClient := tags.NewClient(scope)
+func New(scope PublicIPScope) (*Service, error) {
+	client, err := NewClient(scope)
+	if err != nil {
+		return nil, err
+	}
+	tagsClient, err := tags.NewClient(scope)
+	if err != nil {
+		return nil, err
+	}
 	return &Service{
 		Scope:      scope,
 		Getter:     client,
 		TagsGetter: tagsClient,
-		Reconciler: async.New(scope, client, client),
-	}
+		Reconciler: async.New[armnetwork.PublicIPAddressesClientCreateOrUpdateResponse, armnetwork.PublicIPAddressesClientDeleteResponse](scope, client, client),
+	}, nil
 }
 
 // Name returns the service name.

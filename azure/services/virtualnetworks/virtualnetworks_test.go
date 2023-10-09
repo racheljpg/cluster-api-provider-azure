@@ -21,12 +21,12 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-10-01/resources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
-	"k8s.io/utils/pointer"
+	"go.uber.org/mock/gomock"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -44,48 +44,48 @@ var (
 		AdditionalTags: map[string]string{"foo": "bar"},
 	}
 
-	managedTags = resources.TagsResource{
-		Properties: &resources.Tags{
+	managedTags = armresources.TagsResource{
+		Properties: &armresources.Tags{
 			Tags: map[string]*string{
-				"foo": pointer.String("bar"),
-				"sigs.k8s.io_cluster-api-provider-azure_cluster_test-cluster": pointer.String("owned"),
+				"foo": ptr.To("bar"),
+				"sigs.k8s.io_cluster-api-provider-azure_cluster_test-cluster": ptr.To("owned"),
 			},
 		},
 	}
 
-	unmanagedTags = resources.TagsResource{
-		Properties: &resources.Tags{
+	unmanagedTags = armresources.TagsResource{
+		Properties: &armresources.Tags{
 			Tags: map[string]*string{
-				"foo":       pointer.String("bar"),
-				"something": pointer.String("else"),
+				"foo":       ptr.To("bar"),
+				"something": ptr.To("else"),
 			},
 		},
 	}
 
-	customVnet = network.VirtualNetwork{
-		ID:   pointer.String("/subscriptions/subscription/resourceGroups/test-group/providers/Microsoft.Network/virtualNetworks/test-vnet"),
-		Name: pointer.String("test-vnet"),
+	customVnet = armnetwork.VirtualNetwork{
+		ID:   ptr.To("/subscriptions/subscription/resourceGroups/test-group/providers/Microsoft.Network/virtualNetworks/test-vnet"),
+		Name: ptr.To("test-vnet"),
 		Tags: map[string]*string{
-			"foo":       pointer.String("bar"),
-			"something": pointer.String("else"),
+			"foo":       ptr.To("bar"),
+			"something": ptr.To("else"),
 		},
-		VirtualNetworkPropertiesFormat: &network.VirtualNetworkPropertiesFormat{
-			AddressSpace: &network.AddressSpace{
-				AddressPrefixes: &[]string{"fake-cidr"},
+		Properties: &armnetwork.VirtualNetworkPropertiesFormat{
+			AddressSpace: &armnetwork.AddressSpace{
+				AddressPrefixes: []*string{ptr.To("fake-cidr")},
 			},
-			Subnets: &[]network.Subnet{
+			Subnets: []*armnetwork.Subnet{
 				{
-					Name: pointer.String("test-subnet"),
-					SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-						AddressPrefix: pointer.String("subnet-cidr"),
+					Name: ptr.To("test-subnet"),
+					Properties: &armnetwork.SubnetPropertiesFormat{
+						AddressPrefix: ptr.To("subnet-cidr"),
 					},
 				},
 				{
-					Name: pointer.String("test-subnet-2"),
-					SubnetPropertiesFormat: &network.SubnetPropertiesFormat{
-						AddressPrefixes: &[]string{
-							"subnet-cidr-1",
-							"subnet-cidr-2",
+					Name: ptr.To("test-subnet-2"),
+					Properties: &armnetwork.SubnetPropertiesFormat{
+						AddressPrefixes: []*string{
+							ptr.To("subnet-cidr-1"),
+							ptr.To("subnet-cidr-2"),
 						},
 					},
 				},
@@ -304,7 +304,7 @@ func TestIsVnetManaged(t *testing.T) {
 			expect: func(s *mock_virtualnetworks.MockVNetScopeMockRecorder, m *mock_async.MockTagsGetterMockRecorder) {
 				s.VNetSpec().Return(&fakeVNetSpec)
 				s.SubscriptionID().Return("123")
-				m.GetAtScope(gomockinternal.AContext(), azure.VNetID("123", fakeVNetSpec.ResourceGroupName(), fakeVNetSpec.Name)).Return(resources.TagsResource{}, internalError)
+				m.GetAtScope(gomockinternal.AContext(), azure.VNetID("123", fakeVNetSpec.ResourceGroupName(), fakeVNetSpec.Name)).Return(armresources.TagsResource{}, internalError)
 			},
 		},
 	}

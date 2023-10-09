@@ -21,10 +21,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2022-03-01/containerservice"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	"github.com/google/go-cmp/cmp"
 	"github.com/pkg/errors"
-	"k8s.io/utils/pointer"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -100,7 +101,7 @@ type AgentPoolSpec struct {
 	NodeTaints []string `json:"nodeTaints,omitempty"`
 
 	// EnableAutoScaling - Whether to enable auto-scaler
-	EnableAutoScaling *bool `json:"enableAutoScaling,omitempty"`
+	EnableAutoScaling bool `json:"enableAutoScaling,omitempty"`
 
 	// AvailabilityZones represents the Availability zones for nodes in the AgentPool.
 	AvailabilityZones []string
@@ -129,6 +130,12 @@ type AgentPoolSpec struct {
 	// ScaleSetPriority specifies the ScaleSetPriority for the node pool. Allowed values are 'Spot' and 'Regular'
 	ScaleSetPriority *string `json:"scaleSetPriority,omitempty"`
 
+	// ScaleDownMode affects the cluster autoscaler behavior. Allowed values are 'Deallocate' and 'Delete'
+	ScaleDownMode *string `json:"scaleDownMode,omitempty"`
+
+	// SpotMaxPrice defines max price to pay for spot instance. Allowed values are any decimal value greater than zero or -1 which indicates the willingness to pay any on-demand price.
+	SpotMaxPrice *resource.Quantity `json:"spotMaxPrice,omitempty"`
+
 	// KubeletConfig specifies the kubelet configurations for nodes.
 	KubeletConfig *KubeletConfig `json:"kubeletConfig,omitempty"`
 
@@ -140,6 +147,9 @@ type AgentPoolSpec struct {
 
 	// LinuxOSConfig specifies the custom Linux OS settings and configurations
 	LinuxOSConfig *infrav1.LinuxOSConfig
+
+	// EnableFIPS indicates whether FIPS is enabled on the node pool
+	EnableFIPS *bool
 }
 
 // ResourceName returns the name of the agent pool.
@@ -169,53 +179,60 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 
 	nodeLabels := s.NodeLabels
 	if existing != nil {
-		existingPool, ok := existing.(containerservice.AgentPool)
+		existingPool, ok := existing.(armcontainerservice.AgentPool)
 		if !ok {
-			return nil, errors.Errorf("%T is not a containerservice.AgentPool", existing)
+			return nil, errors.Errorf("%T is not an armcontainerservice.AgentPool", existing)
 		}
 
 		// agent pool already exists
-		ps := *existingPool.ManagedClusterAgentPoolProfileProperties.ProvisioningState
+		ps := *existingPool.Properties.ProvisioningState
 		if ps != string(infrav1.Canceled) && ps != string(infrav1.Failed) && ps != string(infrav1.Succeeded) {
 			msg := fmt.Sprintf("Unable to update existing agent pool in non terminal state. Agent pool must be in one of the following provisioning states: Canceled, Failed, or Succeeded. Actual state: %s", ps)
 			return nil, azure.WithTransientError(errors.New(msg), 20*time.Second)
 		}
 
 		// Normalize individual agent pools to diff in case we need to update
-		existingProfile := containerservice.AgentPool{
-			ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
-				Count:               existingPool.Count,
-				OrchestratorVersion: existingPool.OrchestratorVersion,
-				Mode:                existingPool.Mode,
-				EnableAutoScaling:   existingPool.EnableAutoScaling,
-				MinCount:            existingPool.MinCount,
-				MaxCount:            existingPool.MaxCount,
-				NodeLabels:          existingPool.NodeLabels,
-				NodeTaints:          existingPool.NodeTaints,
-				Tags:                existingPool.Tags,
-				KubeletConfig:       existingPool.KubeletConfig,
+		existingProfile := armcontainerservice.AgentPool{
+			Properties: &armcontainerservice.ManagedClusterAgentPoolProfileProperties{
+				Count:               existingPool.Properties.Count,
+				OrchestratorVersion: existingPool.Properties.OrchestratorVersion,
+				Mode:                existingPool.Properties.Mode,
+				EnableAutoScaling:   existingPool.Properties.EnableAutoScaling,
+				MinCount:            existingPool.Properties.MinCount,
+				MaxCount:            existingPool.Properties.MaxCount,
+				NodeLabels:          existingPool.Properties.NodeLabels,
+				NodeTaints:          existingPool.Properties.NodeTaints,
+				Tags:                existingPool.Properties.Tags,
+				ScaleDownMode:       existingPool.Properties.ScaleDownMode,
+				SpotMaxPrice:        existingPool.Properties.SpotMaxPrice,
+				KubeletConfig:       existingPool.Properties.KubeletConfig,
 			},
 		}
 
-		normalizedProfile := containerservice.AgentPool{
-			ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
+		normalizedProfile := armcontainerservice.AgentPool{
+			Properties: &armcontainerservice.ManagedClusterAgentPoolProfileProperties{
 				Count:               &s.Replicas,
 				OrchestratorVersion: s.Version,
-				Mode:                containerservice.AgentPoolMode(s.Mode),
-				EnableAutoScaling:   s.EnableAutoScaling,
+				Mode:                azure.AliasOrNil[armcontainerservice.AgentPoolMode](&s.Mode),
+				EnableAutoScaling:   ptr.To(s.EnableAutoScaling),
 				MinCount:            s.MinCount,
 				MaxCount:            s.MaxCount,
 				NodeLabels:          s.NodeLabels,
-				NodeTaints:          &s.NodeTaints,
+				NodeTaints:          azure.PtrSlice(&s.NodeTaints),
+				ScaleDownMode:       azure.AliasOrNil[armcontainerservice.ScaleDownMode](s.ScaleDownMode),
 				Tags:                converters.TagsToMap(s.AdditionalTags),
 			},
 		}
-		if len(*normalizedProfile.NodeTaints) == 0 {
-			normalizedProfile.NodeTaints = nil
+		if len(normalizedProfile.Properties.NodeTaints) == 0 {
+			normalizedProfile.Properties.NodeTaints = nil
+		}
+
+		if s.SpotMaxPrice != nil {
+			normalizedProfile.Properties.SpotMaxPrice = ptr.To[float32](float32(s.SpotMaxPrice.AsApproximateFloat64()))
 		}
 
 		if s.KubeletConfig != nil {
-			normalizedProfile.KubeletConfig = &containerservice.KubeletConfig{
+			normalizedProfile.Properties.KubeletConfig = &armcontainerservice.KubeletConfig{
 				CPUManagerPolicy:      s.KubeletConfig.CPUManagerPolicy,
 				CPUCfsQuota:           s.KubeletConfig.CPUCfsQuota,
 				CPUCfsQuotaPeriod:     s.KubeletConfig.CPUCfsQuotaPeriod,
@@ -226,24 +243,22 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 				ContainerLogMaxSizeMB: s.KubeletConfig.ContainerLogMaxSizeMB,
 				ContainerLogMaxFiles:  s.KubeletConfig.ContainerLogMaxFiles,
 				PodMaxPids:            s.KubeletConfig.PodMaxPids,
-				AllowedUnsafeSysctls:  s.KubeletConfig.AllowedUnsafeSysctls,
+				AllowedUnsafeSysctls:  azure.PtrSlice(s.KubeletConfig.AllowedUnsafeSysctls),
 			}
 		}
 
 		// When autoscaling is set, the count of the nodes differ based on the autoscaler and should not depend on the
 		// count present in MachinePool or AzureManagedMachinePool, hence we should not make an update API call based
 		// on difference in count.
-		if pointer.BoolDeref(s.EnableAutoScaling, false) {
-			normalizedProfile.Count = existingProfile.Count
+		if s.EnableAutoScaling {
+			normalizedProfile.Properties.Count = existingProfile.Properties.Count
 		}
 
 		// We do a just-in-time merge of existent kubernetes.azure.com-prefixed labels
 		// So that we don't unintentionally delete them
 		// See https://github.com/Azure/AKS/issues/3152
-		if normalizedProfile.NodeLabels != nil {
-			nodeLabels = mergeSystemNodeLabels(normalizedProfile.NodeLabels, existingPool.NodeLabels)
-			normalizedProfile.NodeLabels = nodeLabels
-		}
+		nodeLabels = mergeSystemNodeLabels(normalizedProfile.Properties.NodeLabels, existingPool.Properties.NodeLabels)
+		normalizedProfile.Properties.NodeLabels = nodeLabels
 
 		// Compute a diff to check if we require an update
 		diff := cmp.Diff(normalizedProfile, existingProfile)
@@ -255,17 +270,15 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 		log.V(4).Info("found a diff between the desired spec and the existing agentpool", "difference", diff)
 	}
 
-	var availabilityZones *[]string
-	if len(s.AvailabilityZones) > 0 {
-		availabilityZones = &s.AvailabilityZones
-	}
-	var nodeTaints *[]string
-	if len(s.NodeTaints) > 0 {
-		nodeTaints = &s.NodeTaints
-	}
+	availabilityZones := azure.PtrSlice(&s.AvailabilityZones)
+	nodeTaints := azure.PtrSlice(&s.NodeTaints)
 	var sku *string
 	if s.SKU != "" {
 		sku = &s.SKU
+	}
+	var spotMaxPrice *float32
+	if s.SpotMaxPrice != nil {
+		spotMaxPrice = ptr.To[float32](float32(s.SpotMaxPrice.AsApproximateFloat64()))
 	}
 	tags := converters.TagsToMap(s.AdditionalTags)
 	if tags == nil {
@@ -277,9 +290,9 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 		vnetSubnetID = &s.VnetSubnetID
 	}
 
-	var kubeletConfig *containerservice.KubeletConfig
+	var kubeletConfig *armcontainerservice.KubeletConfig
 	if s.KubeletConfig != nil {
-		kubeletConfig = &containerservice.KubeletConfig{
+		kubeletConfig = &armcontainerservice.KubeletConfig{
 			CPUManagerPolicy:      s.KubeletConfig.CPUManagerPolicy,
 			CPUCfsQuota:           s.KubeletConfig.CPUCfsQuota,
 			CPUCfsQuotaPeriod:     s.KubeletConfig.CPUCfsQuotaPeriod,
@@ -290,19 +303,19 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 			ContainerLogMaxSizeMB: s.KubeletConfig.ContainerLogMaxSizeMB,
 			ContainerLogMaxFiles:  s.KubeletConfig.ContainerLogMaxFiles,
 			PodMaxPids:            s.KubeletConfig.PodMaxPids,
-			AllowedUnsafeSysctls:  s.KubeletConfig.AllowedUnsafeSysctls,
+			AllowedUnsafeSysctls:  azure.PtrSlice(s.KubeletConfig.AllowedUnsafeSysctls),
 		}
 	}
 
-	var linuxOSConfig *containerservice.LinuxOSConfig
+	var linuxOSConfig *armcontainerservice.LinuxOSConfig
 	if s.LinuxOSConfig != nil {
-		linuxOSConfig = &containerservice.LinuxOSConfig{
+		linuxOSConfig = &armcontainerservice.LinuxOSConfig{
 			SwapFileSizeMB:             s.LinuxOSConfig.SwapFileSizeMB,
 			TransparentHugePageEnabled: (*string)(s.LinuxOSConfig.TransparentHugePageEnabled),
 			TransparentHugePageDefrag:  (*string)(s.LinuxOSConfig.TransparentHugePageDefrag),
 		}
 		if s.LinuxOSConfig.Sysctls != nil {
-			linuxOSConfig.Sysctls = &containerservice.SysctlConfig{
+			linuxOSConfig.Sysctls = &armcontainerservice.SysctlConfig{
 				FsAioMaxNr:                     s.LinuxOSConfig.Sysctls.FsAioMaxNr,
 				FsFileMax:                      s.LinuxOSConfig.Sysctls.FsFileMax,
 				FsInotifyMaxUserWatches:        s.LinuxOSConfig.Sysctls.FsInotifyMaxUserWatches,
@@ -315,17 +328,17 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 				NetCoreSomaxconn:               s.LinuxOSConfig.Sysctls.NetCoreSomaxconn,
 				NetCoreWmemDefault:             s.LinuxOSConfig.Sysctls.NetCoreWmemDefault,
 				NetCoreWmemMax:                 s.LinuxOSConfig.Sysctls.NetCoreWmemMax,
-				NetIpv4IPLocalPortRange:        s.LinuxOSConfig.Sysctls.NetIpv4IPLocalPortRange,
-				NetIpv4NeighDefaultGcThresh1:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh1,
-				NetIpv4NeighDefaultGcThresh2:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh2,
-				NetIpv4NeighDefaultGcThresh3:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh3,
-				NetIpv4TCPFinTimeout:           s.LinuxOSConfig.Sysctls.NetIpv4TCPFinTimeout,
-				NetIpv4TCPKeepaliveProbes:      s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveProbes,
-				NetIpv4TCPKeepaliveTime:        s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveTime,
-				NetIpv4TCPMaxSynBacklog:        s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxSynBacklog,
-				NetIpv4TCPMaxTwBuckets:         s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxTwBuckets,
-				NetIpv4TCPTwReuse:              s.LinuxOSConfig.Sysctls.NetIpv4TCPTwReuse,
-				NetIpv4TcpkeepaliveIntvl:       s.LinuxOSConfig.Sysctls.NetIpv4TCPkeepaliveIntvl,
+				NetIPv4IPLocalPortRange:        s.LinuxOSConfig.Sysctls.NetIpv4IPLocalPortRange,
+				NetIPv4NeighDefaultGcThresh1:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh1,
+				NetIPv4NeighDefaultGcThresh2:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh2,
+				NetIPv4NeighDefaultGcThresh3:   s.LinuxOSConfig.Sysctls.NetIpv4NeighDefaultGcThresh3,
+				NetIPv4TCPFinTimeout:           s.LinuxOSConfig.Sysctls.NetIpv4TCPFinTimeout,
+				NetIPv4TCPKeepaliveProbes:      s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveProbes,
+				NetIPv4TCPKeepaliveTime:        s.LinuxOSConfig.Sysctls.NetIpv4TCPKeepaliveTime,
+				NetIPv4TCPMaxSynBacklog:        s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxSynBacklog,
+				NetIPv4TCPMaxTwBuckets:         s.LinuxOSConfig.Sysctls.NetIpv4TCPMaxTwBuckets,
+				NetIPv4TCPTwReuse:              s.LinuxOSConfig.Sysctls.NetIpv4TCPTwReuse,
+				NetIPv4TcpkeepaliveIntvl:       s.LinuxOSConfig.Sysctls.NetIpv4TCPkeepaliveIntvl,
 				NetNetfilterNfConntrackBuckets: s.LinuxOSConfig.Sysctls.NetNetfilterNfConntrackBuckets,
 				NetNetfilterNfConntrackMax:     s.LinuxOSConfig.Sysctls.NetNetfilterNfConntrackMax,
 				VMMaxMapCount:                  s.LinuxOSConfig.Sysctls.VMMaxMapCount,
@@ -335,31 +348,34 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 		}
 	}
 
-	agentPool := containerservice.AgentPool{
-		ManagedClusterAgentPoolProfileProperties: &containerservice.ManagedClusterAgentPoolProfileProperties{
+	agentPool := armcontainerservice.AgentPool{
+		Properties: &armcontainerservice.ManagedClusterAgentPoolProfileProperties{
 			AvailabilityZones:    availabilityZones,
 			Count:                &s.Replicas,
-			EnableAutoScaling:    s.EnableAutoScaling,
+			EnableAutoScaling:    ptr.To(s.EnableAutoScaling),
 			EnableUltraSSD:       s.EnableUltraSSD,
 			KubeletConfig:        kubeletConfig,
-			KubeletDiskType:      containerservice.KubeletDiskType(pointer.StringDeref((*string)(s.KubeletDiskType), "")),
+			KubeletDiskType:      azure.AliasOrNil[armcontainerservice.KubeletDiskType]((*string)(s.KubeletDiskType)),
 			MaxCount:             s.MaxCount,
 			MaxPods:              s.MaxPods,
 			MinCount:             s.MinCount,
-			Mode:                 containerservice.AgentPoolMode(s.Mode),
+			Mode:                 ptr.To(armcontainerservice.AgentPoolMode(s.Mode)),
 			NodeLabels:           nodeLabels,
 			NodeTaints:           nodeTaints,
 			OrchestratorVersion:  s.Version,
-			OsDiskSizeGB:         &s.OSDiskSizeGB,
-			OsDiskType:           containerservice.OSDiskType(pointer.StringDeref(s.OsDiskType, "")),
-			OsType:               containerservice.OSType(pointer.StringDeref(s.OSType, "")),
-			ScaleSetPriority:     containerservice.ScaleSetPriority(pointer.StringDeref(s.ScaleSetPriority, "")),
-			Type:                 containerservice.AgentPoolTypeVirtualMachineScaleSets,
+			OSDiskSizeGB:         &s.OSDiskSizeGB,
+			OSDiskType:           azure.AliasOrNil[armcontainerservice.OSDiskType](s.OsDiskType),
+			OSType:               azure.AliasOrNil[armcontainerservice.OSType](s.OSType),
+			ScaleSetPriority:     azure.AliasOrNil[armcontainerservice.ScaleSetPriority](s.ScaleSetPriority),
+			ScaleDownMode:        azure.AliasOrNil[armcontainerservice.ScaleDownMode](s.ScaleDownMode),
+			SpotMaxPrice:         spotMaxPrice,
+			Type:                 ptr.To(armcontainerservice.AgentPoolTypeVirtualMachineScaleSets),
 			VMSize:               sku,
 			VnetSubnetID:         vnetSubnetID,
 			EnableNodePublicIP:   s.EnableNodePublicIP,
 			NodePublicIPPrefixID: s.NodePublicIPPrefixID,
 			Tags:                 tags,
+			EnableFIPS:           s.EnableFIPS,
 			LinuxOSConfig:        linuxOSConfig,
 		},
 	}
@@ -371,11 +387,18 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing interface{}) (p
 // into the local capz label set.
 func mergeSystemNodeLabels(capz, aks map[string]*string) map[string]*string {
 	ret := capz
+	if ret == nil {
+		ret = make(map[string]*string)
+	}
 	// Look for labels returned from the AKS node pool API that begin with kubernetes.azure.com
 	for aksNodeLabelKey := range aks {
 		if azureutil.IsAzureSystemNodeLabelKey(aksNodeLabelKey) {
 			ret[aksNodeLabelKey] = aks[aksNodeLabelKey]
 		}
+	}
+	// Preserve nil-ness of capz
+	if capz == nil && len(ret) == 0 {
+		ret = nil
 	}
 	return ret
 }

@@ -28,14 +28,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	machinepool "sigs.k8s.io/cluster-api-provider-azure/azure/scope/strategies/machinepool_deployments"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/scalesets"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -60,6 +62,7 @@ type (
 		MachinePool      *expv1.MachinePool
 		AzureMachinePool *infrav1exp.AzureMachinePool
 		ClusterScope     azure.ClusterScoper
+		Cache            *MachinePoolCache
 	}
 
 	// MachinePoolScope defines a scope defined around a machine pool and its cluster.
@@ -71,12 +74,22 @@ type (
 		patchHelper                *patch.Helper
 		capiMachinePoolPatchHelper *patch.Helper
 		vmssState                  *azure.VMSS
+		cache                      *MachinePoolCache
 	}
 
 	// NodeStatus represents the status of a Kubernetes node.
 	NodeStatus struct {
 		Ready   bool
 		Version string
+	}
+
+	// MachinePoolCache stores common machine pool information so we don't have to hit the API multiple times within the same reconcile loop.
+	MachinePoolCache struct {
+		BootstrapData           string
+		HasBootstrapDataChanges bool
+		VMImage                 *infrav1.Image
+		VMSKU                   resourceskus.SKU
+		MaxSurge                int
 	}
 )
 
@@ -115,12 +128,60 @@ func NewMachinePoolScope(params MachinePoolScopeParams) (*MachinePoolScope, erro
 	}, nil
 }
 
+// InitMachinePoolCache sets cached information about the machine pool to be used in the scope.
+func (m *MachinePoolScope) InitMachinePoolCache(ctx context.Context) error {
+	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.InitMachinePoolCache")
+	defer done()
+
+	if m.cache == nil {
+		var err error
+		m.cache = &MachinePoolCache{}
+
+		m.cache.BootstrapData, err = m.GetBootstrapData(ctx)
+		if err != nil {
+			return err
+		}
+
+		m.cache.HasBootstrapDataChanges, err = m.HasBootstrapDataChanges(ctx)
+		if err != nil {
+			return err
+		}
+
+		m.cache.VMImage, err = m.GetVMImage(ctx)
+		if err != nil {
+			return err
+		}
+		m.SaveVMImageToStatus(m.cache.VMImage)
+
+		m.cache.MaxSurge, err = m.MaxSurge()
+		if err != nil {
+			return err
+		}
+
+		skuCache, err := resourceskus.GetCache(m, m.Location())
+		if err != nil {
+			return err
+		}
+
+		m.cache.VMSKU, err = skuCache.Get(ctx, m.AzureMachinePool.Spec.Template.VMSize, resourceskus.VirtualMachines)
+		if err != nil {
+			return errors.Wrapf(err, "failed to get VM SKU %s in compute api", m.AzureMachinePool.Spec.Template.VMSize)
+		}
+	}
+
+	return nil
+}
+
 // ScaleSetSpec returns the scale set spec.
-func (m *MachinePoolScope) ScaleSetSpec() azure.ScaleSetSpec {
-	return azure.ScaleSetSpec{
+func (m *MachinePoolScope) ScaleSetSpec(ctx context.Context) azure.ResourceSpecGetter {
+	ctx, log, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.ScaleSetSpec")
+	defer done()
+
+	spec := &scalesets.ScaleSetSpec{
 		Name:                         m.Name(),
+		ResourceGroup:                m.ResourceGroup(),
 		Size:                         m.AzureMachinePool.Spec.Template.VMSize,
-		Capacity:                     int64(pointer.Int32Deref(m.MachinePool.Spec.Replicas, 0)),
+		Capacity:                     int64(ptr.Deref[int32](m.MachinePool.Spec.Replicas, 0)),
 		SSHKeyData:                   m.AzureMachinePool.Spec.Template.SSHPublicKey,
 		OSDisk:                       m.AzureMachinePool.Spec.Template.OSDisk,
 		DataDisks:                    m.AzureMachinePool.Spec.Template.DataDisks,
@@ -140,7 +201,28 @@ func (m *MachinePoolScope) ScaleSetSpec() azure.ScaleSetSpec {
 		NetworkInterfaces:            m.AzureMachinePool.Spec.Template.NetworkInterfaces,
 		IPv6Enabled:                  m.IsIPv6Enabled(),
 		OrchestrationMode:            m.AzureMachinePool.Spec.OrchestrationMode,
+		Location:                     m.AzureMachinePool.Spec.Location,
+		SubscriptionID:               m.SubscriptionID(),
+		HasReplicasExternallyManaged: m.HasReplicasExternallyManaged(ctx),
+		ClusterName:                  m.ClusterName(),
+		AdditionalTags:               m.AzureMachinePool.Spec.AdditionalTags,
 	}
+
+	if m.cache != nil {
+		if m.HasReplicasExternallyManaged(ctx) {
+			spec.ShouldPatchCustomData = m.cache.HasBootstrapDataChanges
+			log.V(4).Info("has bootstrap data changed?", "shouldPatchCustomData", spec.ShouldPatchCustomData)
+		}
+		spec.VMSSExtensionSpecs = m.VMSSExtensionSpecs()
+		spec.SKU = m.cache.VMSKU
+		spec.VMImage = m.cache.VMImage
+		spec.BootstrapData = m.cache.BootstrapData
+		spec.MaxSurge = m.cache.MaxSurge
+	} else {
+		log.V(4).Info("machinepool cache is nil, this is only expected when deleting a machinepool")
+	}
+
+	return spec
 }
 
 // Name returns the Azure Machine Pool Name.
@@ -154,7 +236,7 @@ func (m *MachinePoolScope) Name() string {
 
 // ProviderID returns the AzureMachinePool ID by parsing Spec.ProviderID.
 func (m *MachinePoolScope) ProviderID() string {
-	resourceID, err := azure.ParseResourceID(m.AzureMachinePool.Spec.ProviderID)
+	resourceID, err := azureutil.ParseResourceID(m.AzureMachinePool.Spec.ProviderID)
 	if err != nil {
 		return ""
 	}
@@ -221,7 +303,7 @@ func (m *MachinePoolScope) NeedsRequeue() bool {
 
 // DesiredReplicas returns the replica count on machine pool or 0 if machine pool replicas is nil.
 func (m MachinePoolScope) DesiredReplicas() int32 {
-	return pointer.Int32Deref(m.MachinePool.Spec.Replicas, 0)
+	return ptr.Deref[int32](m.MachinePool.Spec.Replicas, 0)
 }
 
 // MaxSurge returns the number of machines to surge, or 0 if the deployment strategy does not support surge.
@@ -376,7 +458,7 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.MachinePoolScope.createMachine")
 	defer done()
 
-	parsed, err := azure.ParseResourceID(machine.ID)
+	parsed, err := azureutil.ParseResourceID(machine.ID)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to parse resource id %q", machine.ID))
 	}
@@ -391,7 +473,7 @@ func (m *MachinePoolScope) createMachine(ctx context.Context, machine azure.VMSS
 					APIVersion:         infrav1exp.GroupVersion.String(),
 					Kind:               "AzureMachinePool",
 					Name:               m.AzureMachinePool.Name,
-					BlockOwnerDeletion: pointer.Bool(true),
+					BlockOwnerDeletion: ptr.To(true),
 					UID:                m.AzureMachinePool.UID,
 				},
 			},
@@ -479,7 +561,7 @@ func (m *MachinePoolScope) SetNotReady() {
 
 // SetFailureMessage sets the AzureMachinePool status failure message.
 func (m *MachinePoolScope) SetFailureMessage(v error) {
-	m.AzureMachinePool.Status.FailureMessage = pointer.String(v.Error())
+	m.AzureMachinePool.Status.FailureMessage = ptr.To(v.Error())
 }
 
 // SetFailureReason sets the AzureMachinePool status failure reason.
@@ -582,11 +664,8 @@ func (m *MachinePoolScope) GetBootstrapData(ctx context.Context) (string, error)
 }
 
 // calculateBootstrapDataHash calculates the sha256 hash of the bootstrap data.
-func (m *MachinePoolScope) calculateBootstrapDataHash(ctx context.Context) (string, error) {
-	bootstrapData, err := m.GetBootstrapData(ctx)
-	if err != nil {
-		return "", err
-	}
+func (m *MachinePoolScope) calculateBootstrapDataHash(_ context.Context) (string, error) {
+	bootstrapData := m.cache.BootstrapData
 	h := sha256.New()
 	n, err := io.WriteString(h, bootstrapData)
 	if err != nil || n == 0 {
@@ -624,19 +703,23 @@ func (m *MachinePoolScope) GetVMImage(ctx context.Context) (*infrav1.Image, erro
 		return m.AzureMachinePool.Spec.Template.Image, nil
 	}
 
-	svc := virtualmachineimages.New(m)
-
 	var (
 		err          error
 		defaultImage *infrav1.Image
 	)
+
+	svc, err := virtualmachineimages.New(m)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create virtualmachineimages service")
+	}
+
 	if m.AzureMachinePool.Spec.Template.OSDisk.OSType == azure.WindowsOS {
 		runtime := m.AzureMachinePool.Annotations["runtime"]
 		windowsServerVersion := m.AzureMachinePool.Annotations["windowsServerVersion"]
 		log.V(4).Info("No image specified for machine, using default Windows Image", "machine", m.MachinePool.GetName(), "runtime", runtime, "windowsServerVersion", windowsServerVersion)
-		defaultImage, err = svc.GetDefaultWindowsImage(ctx, m.Location(), pointer.StringDeref(m.MachinePool.Spec.Template.Spec.Version, ""), runtime, windowsServerVersion)
+		defaultImage, err = svc.GetDefaultWindowsImage(ctx, m.Location(), ptr.Deref(m.MachinePool.Spec.Template.Spec.Version, ""), runtime, windowsServerVersion)
 	} else {
-		defaultImage, err = svc.GetDefaultUbuntuImage(ctx, m.Location(), pointer.StringDeref(m.MachinePool.Spec.Template.Spec.Version, ""))
+		defaultImage, err = svc.GetDefaultUbuntuImage(ctx, m.Location(), ptr.Deref(m.MachinePool.Spec.Template.Spec.Version, ""))
 	}
 
 	if err != nil {
@@ -698,7 +781,8 @@ func (m *MachinePoolScope) VMSSExtensionSpecs() []azure.ResourceSpecGetter {
 		})
 	}
 
-	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachinePool.Spec.Template.OSDisk.OSType, m.CloudEnvironment(), m.Name())
+	cpuArchitectureType, _ := m.cache.VMSKU.GetCapability(resourceskus.CPUArchitectureType)
+	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachinePool.Spec.Template.OSDisk.OSType, m.CloudEnvironment(), m.Name(), cpuArchitectureType)
 
 	if bootstrapExtensionSpec != nil {
 		extensionSpecs = append(extensionSpecs, &scalesets.VMSSExtensionSpec{

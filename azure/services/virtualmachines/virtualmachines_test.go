@@ -21,14 +21,14 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2021-11-01/compute"
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/golang/mock/gomock"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
+	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities/mock_identities"
@@ -52,18 +52,18 @@ var (
 		AvailabilitySetID: "availability-set",
 		Identity:          infrav1.VMIdentitySystemAssigned,
 		AdditionalTags:    map[string]string{"foo": "bar"},
-		Image:             &infrav1.Image{ID: pointer.String("fake-image-id")},
+		Image:             &infrav1.Image{ID: ptr.To("fake-image-id")},
 		BootstrapData:     "fake data",
 	}
-	fakeExistingVM = compute.VirtualMachine{
-		ID:   pointer.String("subscriptions/123/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm"),
-		Name: pointer.String("test-vm-name"),
-		VirtualMachineProperties: &compute.VirtualMachineProperties{
-			ProvisioningState: pointer.String("Succeeded"),
-			NetworkProfile: &compute.NetworkProfile{
-				NetworkInterfaces: &[]compute.NetworkInterfaceReference{
+	fakeExistingVM = armcompute.VirtualMachine{
+		ID:   ptr.To("subscriptions/123/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm"),
+		Name: ptr.To("test-vm-name"),
+		Properties: &armcompute.VirtualMachineProperties{
+			ProvisioningState: ptr.To("Succeeded"),
+			NetworkProfile: &armcompute.NetworkProfile{
+				NetworkInterfaces: []*armcompute.NetworkInterfaceReference{
 					{
-						ID: pointer.String("/subscriptions/123/resourceGroups/test-rg/providers/Microsoft.Network/networkInterfaces/nic-1"),
+						ID: ptr.To("/subscriptions/123/resourceGroups/test-rg/providers/Microsoft.Network/networkInterfaces/nic-1"),
 					},
 				},
 			},
@@ -73,14 +73,14 @@ var (
 		Name:          "nic-1",
 		ResourceGroup: "test-group",
 	}
-	fakeNetworkInterface = network.Interface{
-		InterfacePropertiesFormat: &network.InterfacePropertiesFormat{
-			IPConfigurations: &[]network.InterfaceIPConfiguration{
+	fakeNetworkInterface = armnetwork.Interface{
+		Properties: &armnetwork.InterfacePropertiesFormat{
+			IPConfigurations: []*armnetwork.InterfaceIPConfiguration{
 				{
-					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-						PrivateIPAddress: pointer.String("10.0.0.5"),
-						PublicIPAddress: &network.PublicIPAddress{
-							ID: pointer.String("/subscriptions/123/resourceGroups/test-rg/providers/Microsoft.Network/publicIPAddresses/pip-1"),
+					Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
+						PrivateIPAddress: ptr.To("10.0.0.5"),
+						PublicIPAddress: &armnetwork.PublicIPAddress{
+							ID: ptr.To("/subscriptions/123/resourceGroups/test-rg/providers/Microsoft.Network/publicIPAddresses/pip-1"),
 						},
 					},
 				},
@@ -91,9 +91,9 @@ var (
 		Name:          "pip-1",
 		ResourceGroup: "test-group",
 	}
-	fakePublicIPs = network.PublicIPAddress{
-		PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
-			IPAddress: pointer.String("10.0.0.6"),
+	fakePublicIPs = armnetwork.PublicIPAddress{
+		Properties: &armnetwork.PublicIPAddressPropertiesFormat{
+			IPAddress: ptr.To("10.0.0.6"),
 		},
 	}
 	fakeNodeAddresses = []corev1.NodeAddress{
@@ -168,7 +168,7 @@ func TestReconcileVM(t *testing.T) {
 				s.UpdatePutStatus(infrav1.DisksReadyCondition, serviceName, nil)
 				s.SetProviderID("azure://subscriptions/123/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
 				s.SetAnnotation("cluster-api-provider-azure", "true")
-				mnic.Get(gomockinternal.AContext(), &fakeNetworkInterfaceGetterSpec).Return(network.Interface{}, internalError)
+				mnic.Get(gomockinternal.AContext(), &fakeNetworkInterfaceGetterSpec).Return(armnetwork.Interface{}, internalError)
 			},
 		},
 		{
@@ -182,7 +182,7 @@ func TestReconcileVM(t *testing.T) {
 				s.SetProviderID("azure://subscriptions/123/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
 				s.SetAnnotation("cluster-api-provider-azure", "true")
 				mnic.Get(gomockinternal.AContext(), &fakeNetworkInterfaceGetterSpec).Return(fakeNetworkInterface, nil)
-				mpip.Get(gomockinternal.AContext(), &fakePublicIPSpec).Return(network.PublicIPAddress{}, internalError)
+				mpip.Get(gomockinternal.AContext(), &fakePublicIPSpec).Return(armnetwork.PublicIPAddress{}, internalError)
 			},
 		},
 	}

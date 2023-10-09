@@ -193,6 +193,11 @@ const (
 	BackoffJitterDefault = 1.0
 )
 
+const (
+	IPVersionIPv6 bool = true
+	IPVersionIPv4 bool = false
+)
+
 // LB variables for dual-stack
 var (
 	// Service.Spec.LoadBalancerIP has been deprecated and may be removed in a future release. Those two annotations are introduced as alternatives to set IPv4/IPv6 LoadBalancer IPs.
@@ -201,12 +206,20 @@ var (
 		false: "service.beta.kubernetes.io/azure-load-balancer-ipv4",
 		true:  "service.beta.kubernetes.io/azure-load-balancer-ipv6",
 	}
+	// ServiceAnnotationPIPName specifies the pip that will be applied to load balancer
+	ServiceAnnotationPIPNameDualStack = map[bool]string{
+		false: "service.beta.kubernetes.io/azure-pip-name",
+		true:  "service.beta.kubernetes.io/azure-pip-name-ipv6",
+	}
+	// ServiceAnnotationPIPPrefixID specifies the pip prefix that will be applied to the load balancer.
+	ServiceAnnotationPIPPrefixIDDualStack = map[bool]string{
+		false: "service.beta.kubernetes.io/azure-pip-prefix-id",
+		true:  "service.beta.kubernetes.io/azure-pip-prefix-id-ipv6",
+	}
 )
 
 // load balancer
 const (
-	// PreConfiguredBackendPoolLoadBalancerTypesNone means that the load balancers are not pre-configured
-	PreConfiguredBackendPoolLoadBalancerTypesNone = ""
 	// PreConfiguredBackendPoolLoadBalancerTypesInternal means that the `internal` load balancers are pre-configured
 	PreConfiguredBackendPoolLoadBalancerTypesInternal = "internal"
 	// PreConfiguredBackendPoolLoadBalancerTypesExternal means that the `external` load balancers are pre-configured
@@ -259,12 +272,6 @@ const (
 	// ServiceAnnotationLoadBalancerResourceGroup is the annotation used on the service
 	// to specify the resource group of load balancer objects that are not in the same resource group as the cluster.
 	ServiceAnnotationLoadBalancerResourceGroup = "service.beta.kubernetes.io/azure-load-balancer-resource-group"
-
-	// ServiceAnnotationPIPName specifies the pip that will be applied to load balancer
-	ServiceAnnotationPIPName = "service.beta.kubernetes.io/azure-pip-name"
-
-	// ServiceAnnotationPIPPrefixID specifies the pip prefix that will be applied to the load balancer.
-	ServiceAnnotationPIPPrefixID = "service.beta.kubernetes.io/azure-pip-prefix-id"
 
 	// ServiceAnnotationIPTagsForPublicIP specifies the iptags used when dynamically creating a public ip
 	ServiceAnnotationIPTagsForPublicIP = "service.beta.kubernetes.io/azure-pip-ip-tags"
@@ -352,6 +359,8 @@ const (
 	FrontendIPConfigNameMaxLength = 80
 	// LoadBalancerRuleNameMaxLength is the max length of the load balancing rule
 	LoadBalancerRuleNameMaxLength = 80
+	// IPFamilySuffixLength is the length of suffix length of IP family ("-IPv4", "-IPv6")
+	IPFamilySuffixLength = 5
 
 	// LoadBalancerBackendPoolConfigurationTypeNodeIPConfiguration is the lb backend pool config type node IP configuration
 	LoadBalancerBackendPoolConfigurationTypeNodeIPConfiguration = "nodeIPConfiguration"
@@ -380,6 +389,8 @@ const (
 	CannotUpdateVMBeingDeletedMessagePrefix = "'Put on Virtual Machine Scale Set VM Instance' is not allowed on Virtual Machine Scale Set"
 	// CannotUpdateVMBeingDeletedMessageSuffix is the suffix of the error message that the request failed due to delete a VM that is being deleted
 	CannotUpdateVMBeingDeletedMessageSuffix = "since it is marked for deletion"
+	// OperationPreemptedErrorCode is the error code returned for vm operation preempted errors
+	OperationPreemptedErrorCode = "OperationPreempted"
 )
 
 // node ipam controller
@@ -410,6 +421,9 @@ const (
 const (
 	RouteNameFmt       = "%s____%s"
 	RouteNameSeparator = "____"
+
+	// routeUpdateInterval defines the route reconciling interval.
+	RouteUpdateInterval = 30 * time.Second
 )
 
 // cloud provider config secret

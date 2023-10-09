@@ -89,7 +89,7 @@ KUSTOMIZE_VER := v4.5.2
 KUSTOMIZE_BIN := kustomize
 KUSTOMIZE := $(TOOLS_BIN_DIR)/$(KUSTOMIZE_BIN)-$(KUSTOMIZE_VER)
 
-MOCKGEN_VER := v1.6.0
+MOCKGEN_VER := v0.2.0
 MOCKGEN_BIN := mockgen
 MOCKGEN := $(TOOLS_BIN_DIR)/$(MOCKGEN_BIN)-$(MOCKGEN_VER)
 
@@ -105,7 +105,7 @@ GO_APIDIFF_VER := v0.6.0
 GO_APIDIFF_BIN := go-apidiff
 GO_APIDIFF := $(TOOLS_BIN_DIR)/$(GO_APIDIFF_BIN)
 
-GINKGO_VER := v2.9.2
+GINKGO_VER := v2.12.0
 GINKGO_BIN := ginkgo
 GINKGO := $(TOOLS_BIN_DIR)/$(GINKGO_BIN)-$(GINKGO_VER)
 
@@ -113,7 +113,7 @@ KUBECTL_VER := v1.25.6
 KUBECTL_BIN := kubectl
 KUBECTL := $(TOOLS_BIN_DIR)/$(KUBECTL_BIN)-$(KUBECTL_VER)
 
-HELM_VER := v3.11.3
+HELM_VER := v3.12.2
 HELM_BIN := helm
 HELM := $(TOOLS_BIN_DIR)/$(HELM_BIN)-$(HELM_VER)
 
@@ -121,9 +121,14 @@ YQ_VER := v4.14.2
 YQ_BIN := yq
 YQ :=  $(TOOLS_BIN_DIR)/$(YQ_BIN)-$(YQ_VER)
 
-KIND_VER := v0.18.0
+KIND_VER := v0.20.0
 KIND_BIN := kind
 KIND :=  $(TOOLS_BIN_DIR)/$(KIND_BIN)-$(KIND_VER)
+
+CODESPELL_VER := 2.2.5
+CODESPELL_BIN := codespell
+CODESPELL_DIST_DIR := codespell_dist
+CODESPELL := $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/$(CODESPELL_BIN)
 
 SETUP_ENVTEST_VER := v0.0.0-20211110210527-619e6b92dab9
 SETUP_ENVTEST_BIN := setup-envtest
@@ -137,7 +142,11 @@ else
 endif
 
 # Define Docker related variables. Releases should modify and double check these vars.
-REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
+ifeq (,$(shell command -v gcloud))
+    REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
+else
+    REGISTRY ?= localhost:5000
+endif
 STAGING_REGISTRY := gcr.io/k8s-staging-cluster-api-azure
 PROD_REGISTRY := registry.k8s.io/cluster-api-azure
 IMAGE_NAME ?= cluster-api-azure-controller
@@ -151,6 +160,9 @@ MANIFEST_ROOT ?= config
 CRD_ROOT ?= $(MANIFEST_ROOT)/crd/bases
 WEBHOOK_ROOT ?= $(MANIFEST_ROOT)/webhook
 RBAC_ROOT ?= $(MANIFEST_ROOT)/rbac
+ASO_CRDS_PATH := $(MANIFEST_ROOT)/aso/crds.yaml
+ASO_VERSION := v2.3.0
+ASO_CRDS := resourcegroups.resources.azure.com
 
 # Allow overriding the imagePullPolicy
 PULL_POLICY ?= Always
@@ -235,7 +247,7 @@ format-tiltfile: ## Format the Tiltfile.
 	./hack/verify-starlark.sh fix
 
 .PHONY: verify
-verify: verify-boilerplate verify-modules verify-gen verify-shellcheck verify-conversions verify-tiltfile ## Run "verify-boilerplate", "verify-modules", "verify-gen", "verify-shellcheck", "verify-conversions", "verify-tiltfile" rules.
+verify: verify-boilerplate verify-modules verify-gen verify-shellcheck verify-conversions verify-tiltfile verify-codespell ## Run "verify-boilerplate", "verify-modules", "verify-gen", "verify-shellcheck", "verify-conversions", "verify-tiltfile" "verify-codespell" rules.
 
 .PHONY: verify-boilerplate
 verify-boilerplate: ## Verify boilerplate header.
@@ -265,6 +277,10 @@ verify-conversions: $(CONVERSION_VERIFIER)  ## Verifies expected API conversion 
 verify-tiltfile: ## Verify Tiltfile format.
 	./hack/verify-starlark.sh
 
+.PHONY: verify-codespell
+verify-codespell: codespell ## Verify codespell.
+	@$(CODESPELL) $(ROOT_DIR) --ignore-words=$(ROOT_DIR)/.codespellignore --skip="*.git,*_artifacts,*.sum,$(ROOT_DIR)/hack/tools/bin/codespell_dist"
+
 ## --------------------------------------
 ## Development
 ## --------------------------------------
@@ -289,7 +305,7 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 	./hack/create-custom-cloud-provider-config.sh
 
 	# Deploy CAPI
-	curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.4.3/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -
+	curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.5.2/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -
 
 	# Deploy CAPZ
 	$(KIND) load docker-image $(CONTROLLER_IMG)-$(ARCH):$(TAG) --name=$(KIND_CLUSTER_NAME)
@@ -378,8 +394,8 @@ docker-pull-prerequisites: ## Pull prerequisites for building controller-manager
 .PHONY: docker-build
 docker-build: docker-pull-prerequisites ## Build the docker image for controller-manager.
 	DOCKER_BUILDKIT=1 docker build --build-arg goproxy=$(GOPROXY) --build-arg ARCH=$(ARCH) --build-arg ldflags="$(LDFLAGS)" . -t $(CONTROLLER_IMG)-$(ARCH):$(TAG)
-	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/default/manager_image_patch.yaml"
-	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/default/manager_pull_policy.yaml"
+	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/capz/manager_image_patch.yaml"
+	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/capz/manager_pull_policy.yaml"
 
 .PHONY: docker-push
 docker-push: ## Push the docker image
@@ -416,12 +432,12 @@ docker-push-manifest: ## Push the fat manifest docker image.
 .PHONY: set-manifest-image
 set-manifest-image: ## Update kustomize image patch file for default resource.
 	$(info Updating kustomize image patch file for default resource)
-	sed -i'' -e 's@image: .*@image: '"${MANIFEST_IMG}:$(MANIFEST_TAG)"'@' ./config/default/manager_image_patch.yaml
+	sed -i'' -e 's@image: .*@image: '"${MANIFEST_IMG}:$(MANIFEST_TAG)"'@' ./config/capz/manager_image_patch.yaml
 
 .PHONY: set-manifest-pull-policy
 set-manifest-pull-policy: ## Update kustomize pull policy file for default resource.
 	$(info Updating kustomize pull policy file for default resource)
-	sed -i'' -e 's@imagePullPolicy: .*@imagePullPolicy: '"$(PULL_POLICY)"'@' ./config/default/manager_pull_policy.yaml
+	sed -i'' -e 's@imagePullPolicy: .*@imagePullPolicy: '"$(PULL_POLICY)"'@' ./config/capz/manager_pull_policy.yaml
 
 ## --------------------------------------
 ## Generate
@@ -436,6 +452,7 @@ generate: ## Generate go related targets, manifests, flavors, e2e-templates and 
 	$(MAKE) generate-flavors
 	$(MAKE) generate-e2e-templates
 	$(MAKE) generate-addons
+	$(MAKE) generate-aso-crds
 
 .PHONY: generate-go
 generate-go: $(CONTROLLER_GEN) $(MOCKGEN) $(CONVERSION_GEN) ## Runs Go related generate targets.
@@ -476,14 +493,26 @@ generate-e2e-templates: $(KUSTOMIZE) ## Generate Azure infrastructure templates 
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-scale-in --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-scale-in.yaml
 
 .PHONY: generate-addons
-generate-addons: fetch-calico-manifests ## Generate metric-server, calico calico-ipv6 addons.
+generate-addons: fetch-calico-manifests ## Generate metric-server, calico, calico-ipv6, azure cni v1 addons.
 	$(KUSTOMIZE) build $(ADDONS_DIR)/metrics-server > $(ADDONS_DIR)/metrics-server/metrics-server.yaml
 	$(KUSTOMIZE) build $(ADDONS_DIR)/calico > $(ADDONS_DIR)/calico.yaml
 	$(KUSTOMIZE) build $(ADDONS_DIR)/calico-ipv6 > $(ADDONS_DIR)/calico-ipv6.yaml
 	$(KUSTOMIZE) build $(ADDONS_DIR)/calico-dual-stack > $(ADDONS_DIR)/calico-dual-stack.yaml
+	$(KUSTOMIZE) build $(ADDONS_DIR)/azure-cni-v1 > $(ADDONS_DIR)/azure-cni-v1.yaml
+
+.PHONY: generate-aso-crds
+# The yq command filters the list of all ASO CRDs to just the ones specified by ASO_CRDS.
+# The sed command changes '$$' to '$$$$' so once the CRDs get run through
+# envsubst, '$$$$' changes back to '$$' so ASO will not detect a diff and try to
+# update the CRDs for which we don't give it permission.
+generate-aso-crds: $(YQ)
+	curl -fSsL "https://github.com/Azure/azure-service-operator/releases/download/$(ASO_VERSION)/azureserviceoperator_customresourcedefinitions_$(ASO_VERSION).yaml" | \
+		$(YQ) e '. | select($(foreach name,$(ASO_CRDS),.metadata.name == "$(name)" or )false)' - | \
+		sed 's/\$$\$$/$$$$$$$$/g' \
+		> $(ASO_CRDS_PATH)
 
 # When updating this, make sure to also update the Windows image version in templates/addons/windows/calico.
-export CALICO_VERSION := v3.25.1
+export CALICO_VERSION := v3.26.1
 # Where all downloaded Calico manifests are unpacked and stored.
 CALICO_RELEASES := $(ARTIFACTS)/calico
 # Path to manifests directory in a Calico release archive.
@@ -653,7 +682,7 @@ test-cover: test ## Run tests with code coverage and generate reports.
 
 .PHONY: kind-create-bootstrap
 kind-create-bootstrap: $(KUBECTL) ## Create capz kind bootstrap cluster.
-	export AZWI=true KIND_CLUSTER_NAME=capz-e2e && ./scripts/kind-with-registry.sh
+	export AZWI=$${AZWI:-true} KIND_CLUSTER_NAME=capz-e2e && ./scripts/kind-with-registry.sh
 
 .PHONY: test-e2e-run
 test-e2e-run: generate-e2e-templates install-tools kind-create-bootstrap ## Run e2e tests.
@@ -663,6 +692,7 @@ test-e2e-run: generate-e2e-templates install-tools kind-create-bootstrap ## Run 
     	-e2e.config="$(E2E_CONF_FILE_ENVSUBST)" \
     	-e2e.skip-log-collection="$(SKIP_LOG_COLLECTION)" \
     	-e2e.skip-resource-cleanup=$(SKIP_CLEANUP) -e2e.use-existing-cluster=$(SKIP_CREATE_MGMT_CLUSTER) $(E2E_ARGS)
+	$(MAKE) clean-release-git
 
 .PHONY: test-e2e
 test-e2e: ## Run "docker-build" and "docker-push" rules then run e2e tests.
@@ -678,8 +708,8 @@ test-e2e-skip-push: ## Run "docker-build" rule then run e2e tests.
 
 .PHONY: test-e2e-skip-build-and-push
 test-e2e-skip-build-and-push:
-	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/default/manager_image_patch.yaml"
-	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/default/manager_pull_policy.yaml" PULL_POLICY=IfNotPresent
+	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/capz/manager_image_patch.yaml"
+	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/capz/manager_pull_policy.yaml" PULL_POLICY=IfNotPresent
 	MANAGER_IMAGE=$(CONTROLLER_IMG)-$(ARCH):$(TAG) \
 	$(MAKE) test-e2e-run
 
@@ -753,6 +783,7 @@ helm: $(HELM) ## Build a local copy of helm.
 yq: $(YQ) ## Build a local copy of yq.
 kind: $(KIND) ## Build a local copy of kind.
 setup-envtest: $(SETUP_ENVTEST) ## Build a local copy of setup-envtest.
+codespell : $(CODESPELL) ## Build a local copy of codespell.
 
 $(CONVERSION_VERIFIER): go.mod
 	cd $(TOOLS_DIR); go build -tags=tools -o $@ sigs.k8s.io/cluster-api/hack/tools/conversion-verifier
@@ -773,7 +804,7 @@ $(KUSTOMIZE): ## Build kustomize from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/kustomize/kustomize/v4 $(KUSTOMIZE_BIN) $(KUSTOMIZE_VER)
 
 $(MOCKGEN): ## Build mockgen from tools folder.
-	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/golang/mock/mockgen $(MOCKGEN_BIN) $(MOCKGEN_VER)
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) go.uber.org/mock/mockgen $(MOCKGEN_BIN) $(MOCKGEN_VER)
 
 $(KPROMO): ## Build kpromo from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/promo-tools/v3/cmd/kpromo $(KPROMO_BIN) $(KPROMO_VER)
@@ -790,7 +821,7 @@ $(GINKGO): ## Build ginkgo from tools folder.
 $(KUBECTL): ## Build kubectl from tools folder.
 	mkdir -p $(TOOLS_BIN_DIR)
 	rm -f "$(TOOLS_BIN_DIR)/$(KUBECTL_BIN)*"
-	curl --retry $(CURL_RETRIES) -fsL https://storage.googleapis.com/kubernetes-release/release/$(KUBECTL_VER)/bin/$(GOOS)/$(GOARCH)/kubectl -o $(KUBECTL)
+	curl --retry $(CURL_RETRIES) -fsL https://dl.k8s.io/release/$(KUBECTL_VER)/bin/$(GOOS)/$(GOARCH)/kubectl -o $(KUBECTL)
 	ln -sf $(KUBECTL) $(TOOLS_BIN_DIR)/$(KUBECTL_BIN)
 	chmod +x $(KUBECTL) $(TOOLS_BIN_DIR)/$(KUBECTL_BIN)
 
@@ -832,3 +863,11 @@ $(SETUP_ENVTEST_BIN): $(SETUP_ENVTEST) ## Build a local copy of setup-envtest.
 
 $(SETUP_ENVTEST): # Build setup-envtest from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) $(SETUP_ENVTEST_PKG) $(SETUP_ENVTEST_BIN) $(SETUP_ENVTEST_VER)
+
+$(CODESPELL): ## Build codespell from tools folder.
+	@which $(CODESPELL) >/dev/null || ( \
+        mkdir -p $(TOOLS_BIN_DIR); \
+        pip install --target=$(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR) $(CODESPELL_BIN)==$(CODESPELL_VER); \
+		mv $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin/$(CODESPELL_BIN) $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR); \
+		rm -r $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin; \
+    )
