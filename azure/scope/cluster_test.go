@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest"
+	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20220701"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
@@ -44,7 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func specToString(spec azure.ResourceSpecGetter) string {
+func specToString(spec any) string {
 	var sb strings.Builder
 	sb.WriteString("{ ")
 	sb.WriteString(fmt.Sprintf("%+v ", spec))
@@ -52,7 +52,7 @@ func specToString(spec azure.ResourceSpecGetter) string {
 	return sb.String()
 }
 
-func specArrayToString(specs []azure.ResourceSpecGetter) string {
+func specArrayToString[T any](specs []T) string {
 	var sb strings.Builder
 	sb.WriteString("[\n")
 	for _, spec := range specs {
@@ -173,9 +173,6 @@ func TestAPIServerHost(t *testing.T) {
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 		clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-			AzureClients: AzureClients{
-				Authorizer: autorest.NullAuthorizer{},
-			},
 			Cluster:      cluster,
 			AzureCluster: &tc.azureCluster,
 			Client:       fakeClient,
@@ -232,9 +229,6 @@ func TestGettingSecurityRules(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 	clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-		AzureClients: AzureClients{
-			Authorizer: autorest.NullAuthorizer{},
-		},
 		Cluster:      cluster,
 		AzureCluster: azureCluster,
 		Client:       fakeClient,
@@ -763,9 +757,6 @@ func TestPublicIPSpecs(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: tc.azureCluster,
 				Client:       fakeClient,
@@ -809,11 +800,13 @@ func TestRouteTableSpecs(t *testing.T) {
 				},
 				AzureCluster: &infrav1.AzureCluster{
 					Spec: infrav1.AzureClusterSpec{
-						ResourceGroup: "my-rg",
 						AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
 							Location: "centralIndia",
 						},
 						NetworkSpec: infrav1.NetworkSpec{
+							Vnet: infrav1.VnetSpec{
+								ResourceGroup: "my-rg",
+							},
 							Subnets: infrav1.Subnets{
 								{
 									RouteTable: infrav1.RouteTable{
@@ -867,7 +860,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 	tests := []struct {
 		name         string
 		clusterScope ClusterScope
-		want         []azure.ResourceSpecGetter
+		want         []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway]
 	}{
 		{
 			name: "returns nil if no subnets are specified",
@@ -929,7 +922,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 				},
 				cache: &ClusterCache{},
 			},
-			want: []azure.ResourceSpecGetter{
+			want: []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway]{
 				&natgateways.NatGatewaySpec{
 					Name:           "fake-nat-gateway-1",
 					ResourceGroup:  "my-rg",
@@ -940,6 +933,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 						Name: "44.78.67.90",
 					},
 					AdditionalTags: make(infrav1.Tags),
+					IsVnetManaged:  true,
 				},
 			},
 		},
@@ -1007,7 +1001,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 				},
 				cache: &ClusterCache{},
 			},
-			want: []azure.ResourceSpecGetter{
+			want: []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway]{
 				&natgateways.NatGatewaySpec{
 					Name:           "fake-nat-gateway-1",
 					ResourceGroup:  "my-rg",
@@ -1018,6 +1012,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 						Name: "44.78.67.90",
 					},
 					AdditionalTags: make(infrav1.Tags),
+					IsVnetManaged:  true,
 				},
 			},
 		},
@@ -1084,7 +1079,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 				},
 				cache: &ClusterCache{},
 			},
-			want: []azure.ResourceSpecGetter{
+			want: []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway]{
 				&natgateways.NatGatewaySpec{
 					Name:           "fake-nat-gateway-1",
 					ResourceGroup:  "my-rg",
@@ -1095,6 +1090,7 @@ func TestNatGatewaySpecs(t *testing.T) {
 						Name: "44.78.67.90",
 					},
 					AdditionalTags: make(infrav1.Tags),
+					IsVnetManaged:  true,
 				},
 			},
 		},
@@ -1106,6 +1102,78 @@ func TestNatGatewaySpecs(t *testing.T) {
 			t.Parallel()
 			if got := tt.clusterScope.NatGatewaySpecs(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("NatGatewaySpecs() = %s, want %s", specArrayToString(got), specArrayToString(tt.want))
+			}
+		})
+	}
+}
+
+func TestSetNatGatewayIDInSubnets(t *testing.T) {
+	tests := []struct {
+		name          string
+		clusterScope  ClusterScope
+		asoNatgateway *asonetworkv1.NatGateway
+	}{
+		{
+			name: "sets nat gateway id in the matching subnet",
+			clusterScope: ClusterScope{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "my-cluster",
+					},
+				},
+				AzureCluster: &infrav1.AzureCluster{
+					Spec: infrav1.AzureClusterSpec{
+						NetworkSpec: infrav1.NetworkSpec{
+							Subnets: infrav1.Subnets{
+								{
+									SubnetClassSpec: infrav1.SubnetClassSpec{
+										Name: "fake-subnet-1",
+									},
+									NatGateway: infrav1.NatGateway{
+										NatGatewayClassSpec: infrav1.NatGatewayClassSpec{
+											Name: "fake-nat-gateway-1",
+										},
+									},
+								},
+								{
+									SubnetClassSpec: infrav1.SubnetClassSpec{
+										Name: "fake-subnet-2",
+									},
+									NatGateway: infrav1.NatGateway{
+										NatGatewayClassSpec: infrav1.NatGatewayClassSpec{
+											Name: "fake-nat-gateway-2",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				cache: &ClusterCache{},
+			},
+			asoNatgateway: &asonetworkv1.NatGateway{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "fake-nat-gateway-1",
+				},
+				Status: asonetworkv1.NatGateway_STATUS{
+					Id: ptr.To("dummy-id-1"),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			t.Parallel()
+			tt.clusterScope.SetNatGatewayIDInSubnets(tt.asoNatgateway.Name, *tt.asoNatgateway.Status.Id)
+			for _, subnet := range tt.clusterScope.AzureCluster.Spec.NetworkSpec.Subnets {
+				if subnet.NatGateway.Name == tt.asoNatgateway.Name {
+					g.Expect(subnet.NatGateway.ID).To(Equal(*tt.asoNatgateway.Status.Id))
+				} else {
+					g.Expect(subnet.NatGateway.ID).To(Equal(""))
+				}
 			}
 		})
 	}
@@ -1140,11 +1208,13 @@ func TestNSGSpecs(t *testing.T) {
 				},
 				AzureCluster: &infrav1.AzureCluster{
 					Spec: infrav1.AzureClusterSpec{
-						ResourceGroup: "my-rg",
 						AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
 							Location: "centralIndia",
 						},
 						NetworkSpec: infrav1.NetworkSpec{
+							Vnet: infrav1.VnetSpec{
+								ResourceGroup: "my-rg",
+							},
 							Subnets: infrav1.Subnets{
 								{
 									SecurityGroup: infrav1.SecurityGroup{
@@ -1746,9 +1816,6 @@ func TestSubnet(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -1845,9 +1912,6 @@ func TestControlPlaneRouteTable(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -1914,9 +1978,6 @@ func TestGetPrivateDNSZoneName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -1984,9 +2045,6 @@ func TestAPIServerLBPoolName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2125,9 +2183,6 @@ func TestOutboundLBName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2254,9 +2309,6 @@ func TestBackendPoolName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2346,9 +2398,6 @@ func TestOutboundPoolName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2428,9 +2477,6 @@ func TestGenerateFQDN(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2516,9 +2562,6 @@ func TestAdditionalTags(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2595,9 +2638,6 @@ func TestAPIServerPort(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2680,9 +2720,6 @@ func TestFailureDomains(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -2960,9 +2997,6 @@ func TestClusterScope_LBSpecs(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: tc.azureCluster,
 				Client:       fakeClient,
@@ -3038,9 +3072,6 @@ func TestExtendedLocationName(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -3116,9 +3147,6 @@ func TestExtendedLocationType(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -3349,9 +3377,6 @@ func TestVNetPeerings(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := NewClusterScope(context.TODO(), ClusterScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      cluster,
 				AzureCluster: azureCluster,
 				Client:       fakeClient,
@@ -3359,6 +3384,76 @@ func TestVNetPeerings(t *testing.T) {
 			g.Expect(err).NotTo(HaveOccurred())
 			got := clusterScope.VnetPeeringSpecs()
 			g.Expect(tc.want).To(Equal(got))
+		})
+	}
+}
+
+func TestSetFailureDomain(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		discoveredFDs clusterv1.FailureDomains
+		specifiedFDs  clusterv1.FailureDomains
+		expectedFDs   clusterv1.FailureDomains
+	}{
+		"no failure domains specified": {
+			discoveredFDs: clusterv1.FailureDomains{
+				"fd1": clusterv1.FailureDomainSpec{ControlPlane: true},
+				"fd2": clusterv1.FailureDomainSpec{ControlPlane: false},
+			},
+			expectedFDs: clusterv1.FailureDomains{
+				"fd1": clusterv1.FailureDomainSpec{ControlPlane: true},
+				"fd2": clusterv1.FailureDomainSpec{ControlPlane: false},
+			},
+		},
+		"no failure domains discovered": {
+			specifiedFDs: clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: true}},
+		},
+		"failure domain specified without intersection": {
+			discoveredFDs: clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: true}},
+			specifiedFDs:  clusterv1.FailureDomains{"fd2": clusterv1.FailureDomainSpec{ControlPlane: false}},
+			expectedFDs:   clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: true}},
+		},
+		"failure domain override to false succeeds": {
+			discoveredFDs: clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: true}},
+			specifiedFDs:  clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: false}},
+			expectedFDs:   clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: false}},
+		},
+		"failure domain override to true fails": {
+			discoveredFDs: clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: false}},
+			specifiedFDs:  clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: true}},
+			expectedFDs:   clusterv1.FailureDomains{"fd1": clusterv1.FailureDomainSpec{ControlPlane: false}},
+		},
+	}
+
+	for name, tc := range cases {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			c := ClusterScope{
+				AzureCluster: &infrav1.AzureCluster{
+					Spec: infrav1.AzureClusterSpec{
+						AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+							FailureDomains: tc.specifiedFDs,
+						},
+					},
+				},
+			}
+
+			for fdName, fd := range tc.discoveredFDs {
+				c.SetFailureDomain(fdName, fd)
+			}
+
+			for fdName, fd := range tc.expectedFDs {
+				g.Expect(fdName).Should(BeKeyOf(c.AzureCluster.Status.FailureDomains))
+				g.Expect(c.AzureCluster.Status.FailureDomains[fdName].ControlPlane).To(Equal(fd.ControlPlane))
+
+				delete(c.AzureCluster.Status.FailureDomains, fdName)
+			}
+
+			g.Expect(c.AzureCluster.Status.FailureDomains).To(BeEmpty())
 		})
 	}
 }

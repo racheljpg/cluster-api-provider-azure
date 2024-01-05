@@ -22,12 +22,12 @@ package e2e
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
@@ -45,14 +45,11 @@ type AKSUpgradeSpecInput struct {
 func AKSUpgradeSpec(ctx context.Context, inputGetter func() AKSUpgradeSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := azureutil.GetAuthorizer(settings)
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	managedClustersClient := containerservice.NewManagedClustersClient(subscriptionID)
-	managedClustersClient.Authorizer = auth
+	managedClustersClient, err := armcontainerservice.NewManagedClustersClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
@@ -67,11 +64,14 @@ func AKSUpgradeSpec(ctx context.Context, inputGetter func() AKSUpgradeSpecInput)
 	}, inputGetter().WaitForControlPlane...).Should(Succeed())
 
 	Eventually(func(g Gomega) {
-		aksCluster, err := managedClustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
+		resp, err := managedClustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, nil)
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(aksCluster.ManagedClusterProperties).NotTo(BeNil())
-		g.Expect(aksCluster.ManagedClusterProperties.KubernetesVersion).NotTo(BeNil())
-		g.Expect("v" + *aksCluster.KubernetesVersion).To(Equal(input.KubernetesVersionUpgradeTo))
+		g.Expect(resp.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+		aksCluster := resp.ManagedCluster
+		g.Expect(aksCluster.Properties).NotTo(BeNil())
+		g.Expect(aksCluster.Properties.KubernetesVersion).NotTo(BeNil())
+		g.Expect("v" + *aksCluster.Properties.KubernetesVersion).To(Equal(input.KubernetesVersionUpgradeTo))
+		g.Expect(aksCluster.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
 	}, input.WaitForControlPlane...).Should(Succeed())
 
 	By("Upgrading the machinepool instances")

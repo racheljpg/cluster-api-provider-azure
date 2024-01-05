@@ -2,6 +2,7 @@ apiVersion: cluster.x-k8s.io/v1beta1
 kind: Cluster
 metadata:
   labels:
+    cni: calico
     cni-windows: ${CLUSTER_NAME}-calico
     containerd-logger: enabled
     csi-proxy: enabled
@@ -107,6 +108,23 @@ spec:
         set -o errexit
         [[ $(id -u) != 0 ]] && SUDO="sudo" || SUDO=""
 
+        echo "Use OOT credential provider"
+        mkdir -p /var/lib/kubelet/credential-provider
+        curl --retry 10 --retry-delay 5 -w "response status code is %{http_code}" -Lo /var/lib/kubelet/credential-provider/acr-credential-provider "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/azure-acr-credential-provider"
+        chmod 755 /var/lib/kubelet/credential-provider/acr-credential-provider
+        curl --retry 10 --retry-delay 5 -w "response status code is %{http_code}" -Lo /var/lib/kubelet/credential-provider-config.yaml "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/credential-provider-config.yaml"
+        chmod 644 /var/lib/kubelet/credential-provider-config.yaml
+      owner: root:root
+      path: /tmp/oot-cred-provider.sh
+      permissions: "0744"
+    - content: |
+        #!/bin/bash
+
+        set -o nounset
+        set -o pipefail
+        set -o errexit
+        [[ $(id -u) != 0 ]] && SUDO="sudo" || SUDO=""
+
         # This test installs release packages or binaries that are a result of the CI and release builds.
         # It runs '... --version' commands to verify that the binaries are correctly installed
         # and finally uninstalls the packages.
@@ -125,8 +143,8 @@ spec:
           if [[ "$${CI_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             VERSION_WITHOUT_PREFIX="${CI_VERSION#v}"
             DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https curl
-            curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
-            echo 'deb https://apt.kubernetes.io/ kubernetes-xenial main' > /etc/apt/sources.list.d/kubernetes.list
+            curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_VERSION}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+            echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_VERSION}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
             apt-get update
             # replace . with \.
             VERSION_REGEX="${VERSION_WITHOUT_PREFIX//./\\.}"
@@ -139,14 +157,14 @@ spec:
             CI_URL="https://storage.googleapis.com/k8s-release-dev/ci/$${CI_VERSION}/bin/linux/amd64"
             for CI_PACKAGE in "$${PACKAGES_TO_TEST[@]}"; do
               echo "* downloading binary: $$CI_URL/$$CI_PACKAGE"
-              wget "$$CI_URL/$$CI_PACKAGE" -nv -O "$$CI_DIR/$$CI_PACKAGE"
+              wget --inet4-only "$$CI_URL/$$CI_PACKAGE" -nv -O "$$CI_DIR/$$CI_PACKAGE"
               chmod +x "$$CI_DIR/$$CI_PACKAGE"
               mv "$$CI_DIR/$$CI_PACKAGE" "/usr/bin/$$CI_PACKAGE"
             done
             IMAGE_REGISTRY_PREFIX=registry.k8s.io
             for CI_CONTAINER in "$${CONTAINERS_TO_TEST[@]}"; do
               echo "* downloading package: $$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT"
-              wget "$$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT" -nv -O "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT"
+              wget --inet4-only "$$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT" -nv -O "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT"
               $${SUDO} ctr -n k8s.io images import "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT" || echo "* ignoring expected 'ctr images import' result"
               $${SUDO} ctr -n k8s.io images tag $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER-amd64:"$${CI_VERSION//+/_}" $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER:"$${CI_VERSION//+/_}"
               $${SUDO} ctr -n k8s.io images tag $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER-amd64:"$${CI_VERSION//+/_}" gcr.io/k8s-staging-ci-images/$$CI_CONTAINER:"$${CI_VERSION//+/_}"
@@ -157,7 +175,7 @@ spec:
         echo "* checking binary versions"
         echo "ctr version: " $(ctr version)
         echo "kubeadm version: " $(kubeadm version -o=short)
-        echo "kubectl version: " $(kubectl version --client=true --short=true)
+        echo "kubectl version: " $(kubectl version --client=true)
         echo "kubelet version: " $(kubelet --version)
         echo "$$LINE_SEPARATOR"
       owner: root:root
@@ -168,18 +186,23 @@ spec:
         kubeletExtraArgs:
           azure-container-registry-config: /etc/kubernetes/azure.json
           cloud-provider: external
+          image-credential-provider-bin-dir: /var/lib/kubelet/credential-provider
+          image-credential-provider-config: /var/lib/kubelet/credential-provider-config.yaml
         name: '{{ ds.meta_data["local_hostname"] }}'
     joinConfiguration:
       nodeRegistration:
         kubeletExtraArgs:
           azure-container-registry-config: /etc/kubernetes/azure.json
           cloud-provider: external
+          image-credential-provider-bin-dir: /var/lib/kubelet/credential-provider
+          image-credential-provider-config: /var/lib/kubelet/credential-provider-config.yaml
         name: '{{ ds.meta_data["local_hostname"] }}'
     mounts:
     - - LABEL=etcd_disk
       - /var/lib/etcddisk
     postKubeadmCommands: []
     preKubeadmCommands:
+    - bash -c /tmp/oot-cred-provider.sh
     - bash -c /tmp/kubeadm-bootstrap.sh
     verbosity: 5
   machineTemplate:
@@ -293,6 +316,23 @@ spec:
           set -o errexit
           [[ $(id -u) != 0 ]] && SUDO="sudo" || SUDO=""
 
+          echo "Use OOT credential provider"
+          mkdir -p /var/lib/kubelet/credential-provider
+          curl --retry 10 --retry-delay 5 -w "response status code is %{http_code}" -Lo /var/lib/kubelet/credential-provider/acr-credential-provider "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/azure-acr-credential-provider"
+          chmod 755 /var/lib/kubelet/credential-provider/acr-credential-provider
+          curl --retry 10 --retry-delay 5 -w "response status code is %{http_code}" -Lo /var/lib/kubelet/credential-provider-config.yaml "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/credential-provider-config.yaml"
+          chmod 644 /var/lib/kubelet/credential-provider-config.yaml
+        owner: root:root
+        path: /tmp/oot-cred-provider.sh
+        permissions: "0744"
+      - content: |
+          #!/bin/bash
+
+          set -o nounset
+          set -o pipefail
+          set -o errexit
+          [[ $(id -u) != 0 ]] && SUDO="sudo" || SUDO=""
+
           # This test installs release packages or binaries that are a result of the CI and release builds.
           # It runs '... --version' commands to verify that the binaries are correctly installed
           # and finally uninstalls the packages.
@@ -311,8 +351,8 @@ spec:
             if [[ "$${CI_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               VERSION_WITHOUT_PREFIX="${CI_VERSION#v}"
               DEBIAN_FRONTEND=noninteractive apt-get install -y apt-transport-https curl
-              curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
-              echo 'deb https://apt.kubernetes.io/ kubernetes-xenial main' > /etc/apt/sources.list.d/kubernetes.list
+              curl -fsSL https://pkgs.k8s.io/core:/stable:/${KUBERNETES_VERSION}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/${KUBERNETES_VERSION}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
               apt-get update
               # replace . with \.
               VERSION_REGEX="${VERSION_WITHOUT_PREFIX//./\\.}"
@@ -325,14 +365,14 @@ spec:
               CI_URL="https://storage.googleapis.com/k8s-release-dev/ci/$${CI_VERSION}/bin/linux/amd64"
               for CI_PACKAGE in "$${PACKAGES_TO_TEST[@]}"; do
                 echo "* downloading binary: $$CI_URL/$$CI_PACKAGE"
-                wget "$$CI_URL/$$CI_PACKAGE" -nv -O "$$CI_DIR/$$CI_PACKAGE"
+                wget --inet4-only "$$CI_URL/$$CI_PACKAGE" -nv -O "$$CI_DIR/$$CI_PACKAGE"
                 chmod +x "$$CI_DIR/$$CI_PACKAGE"
                 mv "$$CI_DIR/$$CI_PACKAGE" "/usr/bin/$$CI_PACKAGE"
               done
               IMAGE_REGISTRY_PREFIX=registry.k8s.io
               for CI_CONTAINER in "$${CONTAINERS_TO_TEST[@]}"; do
                 echo "* downloading package: $$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT"
-                wget "$$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT" -nv -O "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT"
+                wget --inet4-only "$$CI_URL/$$CI_CONTAINER.$$CONTAINER_EXT" -nv -O "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT"
                 $${SUDO} ctr -n k8s.io images import "$$CI_DIR/$$CI_CONTAINER.$$CONTAINER_EXT" || echo "* ignoring expected 'ctr images import' result"
                 $${SUDO} ctr -n k8s.io images tag $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER-amd64:"$${CI_VERSION//+/_}" $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER:"$${CI_VERSION//+/_}"
                 $${SUDO} ctr -n k8s.io images tag $$IMAGE_REGISTRY_PREFIX/$$CI_CONTAINER-amd64:"$${CI_VERSION//+/_}" gcr.io/k8s-staging-ci-images/$$CI_CONTAINER:"$${CI_VERSION//+/_}"
@@ -343,7 +383,7 @@ spec:
           echo "* checking binary versions"
           echo "ctr version: " $(ctr version)
           echo "kubeadm version: " $(kubeadm version -o=short)
-          echo "kubectl version: " $(kubectl version --client=true --short=true)
+          echo "kubectl version: " $(kubectl version --client=true)
           echo "kubelet version: " $(kubelet --version)
           echo "$$LINE_SEPARATOR"
         owner: root:root
@@ -354,8 +394,11 @@ spec:
           kubeletExtraArgs:
             azure-container-registry-config: /etc/kubernetes/azure.json
             cloud-provider: external
+            image-credential-provider-bin-dir: /var/lib/kubelet/credential-provider
+            image-credential-provider-config: /var/lib/kubelet/credential-provider-config.yaml
           name: '{{ ds.meta_data["local_hostname"] }}'
       preKubeadmCommands:
+      - bash -c /tmp/oot-cred-provider.sh
       - bash -c /tmp/kubeadm-bootstrap.sh
       verbosity: 5
 ---
@@ -471,6 +514,16 @@ spec:
       - content: |
           $ErrorActionPreference = 'Stop'
 
+          echo "Use OOT credential provider"
+          mkdir C:\var\lib\kubelet\credential-provider
+          curl.exe --retry 10 --retry-delay 5 -L "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/azure-acr-credential-provider.exe" --output C:\var\lib\kubelet\credential-provider\acr-credential-provider.exe
+          cp C:\var\lib\kubelet\credential-provider\acr-credential-provider.exe C:\var\lib\kubelet\credential-provider\acr-credential-provider
+          curl.exe --retry 10 --retry-delay 5 -L "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/credential-provider-config-win.yaml" --output C:\var\lib\kubelet\credential-provider-config.yaml
+        path: C:/oot-cred-provider.ps1
+        permissions: "0744"
+      - content: |
+          $ErrorActionPreference = 'Stop'
+
           Stop-Service kubelet -Force
 
           $$CI_VERSION="${CI_VERSION}"
@@ -491,7 +544,7 @@ spec:
           ctr.exe -n k8s.io images tag docker.io/sigwindowstools/kube-proxy:v1.23.1-calico-hostprocess "docker.io/sigwindowstools/kube-proxy:${CI_VERSION/+/_}-calico-hostprocess"
 
           kubeadm.exe version -o=short
-          kubectl.exe version --client=true --short=true
+          kubectl.exe version --client=true
           kubelet.exe --version
           kube-proxy.exe --version
         path: C:/replace-ci-binaries.ps1
@@ -503,6 +556,8 @@ spec:
             azure-container-registry-config: c:/k/azure.json
             cloud-provider: external
             feature-gates: ${NODE_FEATURE_GATES:-""}
+            image-credential-provider-bin-dir: /var/lib/kubelet/credential-provider
+            image-credential-provider-config: /var/lib/kubelet/credential-provider-config.yaml
             v: "2"
             windows-priorityclass: ABOVE_NORMAL_PRIORITY_CLASS
           name: '{{ ds.meta_data["local_hostname"] }}'
@@ -513,6 +568,7 @@ spec:
       - powershell C:/create-temp-folder.ps1
       - powershell C:/replace-containerd.ps1
       - powershell C:/collect-hns-crashes.ps1
+      - powershell C:/oot-cred-provider.ps1
       - powershell C:/replace-ci-binaries.ps1
       users:
       - groups: Administrators
@@ -593,6 +649,60 @@ spec:
   - kind: ConfigMap
     name: containerd-logger-${CLUSTER_NAME}
   strategy: ApplyOnce
+---
+apiVersion: addons.cluster.x-k8s.io/v1alpha1
+kind: HelmChartProxy
+metadata:
+  name: calico
+  namespace: default
+spec:
+  chartName: tigera-operator
+  clusterSelector:
+    matchLabels:
+      cni: calico
+  namespace: tigera-operator
+  releaseName: projectcalico
+  repoURL: https://docs.tigera.io/calico/charts
+  valuesTemplate: |-
+    installation:
+      cni:
+        type: Calico
+      calicoNetwork:
+        bgp: Disabled
+        mtu: 1350
+        ipPools:
+        ipPools:{{range $i, $cidr := .Cluster.spec.clusterNetwork.pods.cidrBlocks }}
+        - cidr: {{ $cidr }}
+          encapsulation: VXLAN{{end}}
+      registry: mcr.microsoft.com/oss
+    # Image and registry configuration for the tigera/operator pod.
+    tigeraOperator:
+      image: tigera/operator
+      registry: mcr.microsoft.com/oss
+    calicoctl:
+      image: mcr.microsoft.com/oss/calico/ctl
+  version: ${CALICO_VERSION}
+---
+apiVersion: addons.cluster.x-k8s.io/v1alpha1
+kind: HelmChartProxy
+metadata:
+  name: azuredisk-csi-driver-chart
+  namespace: default
+spec:
+  chartName: azuredisk-csi-driver
+  clusterSelector:
+    matchLabels:
+      azuredisk-csi: "true"
+  namespace: kube-system
+  releaseName: azuredisk-csi-driver-oot
+  repoURL: https://raw.githubusercontent.com/kubernetes-sigs/azuredisk-csi-driver/master/charts
+  valuesTemplate: |-
+    controller:
+      replicas: 1
+      runOnControlPlane: true
+    windows:
+      useHostProcessContainers: {{ hasKey .Cluster.metadata.labels "cni-windows" }}
+  version: ${AZUREDISK_CSI_DRIVER_VERSION}
 ---
 apiVersion: v1
 data:

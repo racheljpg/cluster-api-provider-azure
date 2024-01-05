@@ -37,8 +37,6 @@ var (
 )
 
 func TestAzureMachine_ValidateCreate(t *testing.T) {
-	g := NewWithT(t)
-
 	tests := []struct {
 		name    string
 		machine *AzureMachine
@@ -220,6 +218,7 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
 			mw := &azureMachineWebhook{}
 			_, err := mw.ValidateCreate(context.Background(), tc.machine)
 			if tc.wantErr {
@@ -232,8 +231,6 @@ func TestAzureMachine_ValidateCreate(t *testing.T) {
 }
 
 func TestAzureMachine_ValidateUpdate(t *testing.T) {
-	g := NewWithT(t)
-
 	tests := []struct {
 		name       string
 		oldMachine *AzureMachine
@@ -794,9 +791,25 @@ func TestAzureMachine_ValidateUpdate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalidtest: updating subnet name from empty to non empty",
+			oldMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					NetworkInterfaces: []NetworkInterface{{SubnetName: ""}},
+				},
+			},
+			newMachine: &AzureMachine{
+				Spec: AzureMachineSpec{
+					NetworkInterfaces: []NetworkInterface{{SubnetName: "subnet1"}},
+				},
+			},
+			wantErr: true,
+		},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
 			mw := &azureMachineWebhook{}
 			_, err := mw.ValidateUpdate(context.Background(), tc.oldMachine, tc.newMachine)
 			if tc.wantErr {
@@ -819,7 +832,7 @@ func (m mockDefaultClient) Get(ctx context.Context, key client.ObjectKey, obj cl
 		obj.Spec.SubscriptionID = m.SubscriptionID
 	case *clusterv1.Cluster:
 		obj.Spec.InfrastructureRef = &corev1.ObjectReference{
-			Kind: "AzureCluster",
+			Kind: AzureClusterKind,
 			Name: "test-cluster",
 		}
 	default:

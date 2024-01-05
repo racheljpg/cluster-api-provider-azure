@@ -23,7 +23,6 @@ import (
 
 	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
 	asoannotations "github.com/Azure/azure-service-operator/v2/pkg/common/annotations"
-	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime/conditions"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
@@ -79,10 +78,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -116,10 +115,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -165,16 +164,20 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
+		})
+		specMock.EXPECT().WasManaged(gomock.Any()).Return(false)
 
 		ctx := context.Background()
 		g.Expect(c.Create(ctx, &asoresourcesv1.ResourceGroup{
@@ -183,6 +186,9 @@ func TestCreateOrUpdateResource(t *testing.T) {
 				Namespace: "namespace",
 				Labels: map[string]string{
 					infrav1.OwnedByClusterLabelKey: clusterName,
+				},
+				Annotations: map[string]string{
+					asoannotations.PerResourceSecret: "cluster-aso-secret",
 				},
 			},
 			Status: asoresourcesv1.ResourceGroup_STATUS{
@@ -203,6 +209,7 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		var recerr azure.ReconcileError
 		g.Expect(errors.As(err, &recerr)).To(BeTrue())
 		g.Expect(recerr.IsTransient()).To(BeTrue())
+		g.Expect(recerr.IsTerminal()).To(BeFalse())
 	})
 
 	t.Run("resource is not ready in reconciling state", func(t *testing.T) {
@@ -213,10 +220,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -231,6 +238,9 @@ func TestCreateOrUpdateResource(t *testing.T) {
 				Namespace: "namespace",
 				Labels: map[string]string{
 					infrav1.OwnedByClusterLabelKey: clusterName,
+				},
+				Annotations: map[string]string{
+					asoannotations.PerResourceSecret: "cluster-aso-secret",
 				},
 			},
 			Status: asoresourcesv1.ResourceGroup_STATUS{
@@ -258,16 +268,20 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
+		})
+		specMock.EXPECT().WasManaged(gomock.Any()).Return(false)
 
 		ctx := context.Background()
 		g.Expect(c.Create(ctx, &asoresourcesv1.ResourceGroup{
@@ -276,6 +290,9 @@ func TestCreateOrUpdateResource(t *testing.T) {
 				Namespace: "namespace",
 				Labels: map[string]string{
 					infrav1.OwnedByClusterLabelKey: clusterName,
+				},
+				Annotations: map[string]string{
+					asoannotations.PerResourceSecret: "cluster-aso-secret",
 				},
 			},
 			Status: asoresourcesv1.ResourceGroup_STATUS{
@@ -296,6 +313,7 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		var recerr azure.ReconcileError
 		g.Expect(errors.As(err, &recerr)).To(BeTrue())
 		g.Expect(recerr.IsTerminal()).To(BeTrue())
+		g.Expect(recerr.IsTransient()).To(BeFalse())
 	})
 
 	t.Run("error getting existing resource", func(t *testing.T) {
@@ -306,10 +324,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(ErroringGetClient{Client: c, err: errors.New("an error")}, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](ErroringGetClient{Client: c, err: errors.New("an error")}, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -332,18 +350,17 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			group := object.DeepCopyObject().(*asoresourcesv1.ResourceGroup)
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
 			group.Spec.Location = ptr.To("location")
 			return group, nil
 		})
@@ -382,18 +399,18 @@ func TestCreateOrUpdateResource(t *testing.T) {
 			WithScheme(sch).
 			Build()
 		clusterName := "cluster"
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return object, nil
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 
 		ctx := context.Background()
@@ -440,18 +457,18 @@ func TestCreateOrUpdateResource(t *testing.T) {
 			WithScheme(sch).
 			Build()
 		clusterName := "cluster"
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return nil, nil
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Not(gomock.Nil())).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 		specMock.EXPECT().WasManaged(gomock.Any()).Return(true)
 
@@ -497,10 +514,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -542,10 +559,10 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -582,18 +599,18 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return nil, nil
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 		specMock.EXPECT().WasManaged(gomock.Any()).Return(false)
 
@@ -629,7 +646,7 @@ func TestCreateOrUpdateResource(t *testing.T) {
 
 		g.Expect(result.GetName()).To(Equal("name"))
 		g.Expect(result.GetNamespace()).To(Equal("namespace"))
-		g.Expect(result.(*asoresourcesv1.ResourceGroup).Spec.Location).To(Equal(ptr.To("location")))
+		g.Expect(result.Spec.Location).To(Equal(ptr.To("location")))
 	})
 
 	t.Run("error updating", func(t *testing.T) {
@@ -640,18 +657,17 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(ErroringPatchClient{Client: c, err: errors.New("an error")}, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](ErroringPatchClient{Client: c, err: errors.New("an error")}, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			group := object.DeepCopyObject().(*asoresourcesv1.ResourceGroup)
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
 			group.Spec.Location = ptr.To("location")
 			return group, nil
 		})
@@ -690,15 +706,15 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
 		specMock := struct {
-			*mock_azure.MockASOResourceSpecGetter
-			*mock_aso.MockTagsGetterSetter
+			*mock_azure.MockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]
+			*mock_aso.MockTagsGetterSetter[*asoresourcesv1.ResourceGroup]
 		}{
-			MockASOResourceSpecGetter: mock_azure.NewMockASOResourceSpecGetter(mockCtrl),
-			MockTagsGetterSetter:      mock_aso.NewMockTagsGetterSetter(mockCtrl),
+			MockASOResourceSpecGetter: mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl),
+			MockTagsGetterSetter:      mock_aso.NewMockTagsGetterSetter[*asoresourcesv1.ResourceGroup](mockCtrl),
 		}
 		specMock.MockASOResourceSpecGetter.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
@@ -706,14 +722,14 @@ func TestCreateOrUpdateResource(t *testing.T) {
 				Namespace: "namespace",
 			},
 		})
-		specMock.MockASOResourceSpecGetter.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return nil, nil
+		specMock.MockASOResourceSpecGetter.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 		specMock.MockASOResourceSpecGetter.EXPECT().WasManaged(gomock.Any()).Return(false)
 
-		specMock.MockTagsGetterSetter.EXPECT().GetActualTags(gomock.Any()).Return(nil, nil)
+		specMock.MockTagsGetterSetter.EXPECT().GetActualTags(gomock.Any()).Return(nil)
 		specMock.MockTagsGetterSetter.EXPECT().GetAdditionalTags().Return(nil)
-		specMock.MockTagsGetterSetter.EXPECT().GetDesiredTags(gomock.Any()).Return(nil, nil)
+		specMock.MockTagsGetterSetter.EXPECT().GetDesiredTags(gomock.Any()).Return(nil).Times(2)
 		specMock.MockTagsGetterSetter.EXPECT().SetTags(gomock.Any(), gomock.Any())
 
 		ctx := context.Background()
@@ -755,15 +771,15 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
 		specMock := struct {
-			*mock_azure.MockASOResourceSpecGetter
-			*mock_aso.MockTagsGetterSetter
+			*mock_azure.MockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]
+			*mock_aso.MockTagsGetterSetter[*asoresourcesv1.ResourceGroup]
 		}{
-			MockASOResourceSpecGetter: mock_azure.NewMockASOResourceSpecGetter(mockCtrl),
-			MockTagsGetterSetter:      mock_aso.NewMockTagsGetterSetter(mockCtrl),
+			MockASOResourceSpecGetter: mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl),
+			MockTagsGetterSetter:      mock_aso.NewMockTagsGetterSetter[*asoresourcesv1.ResourceGroup](mockCtrl),
 		}
 		specMock.MockASOResourceSpecGetter.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
@@ -771,8 +787,8 @@ func TestCreateOrUpdateResource(t *testing.T) {
 				Namespace: "namespace",
 			},
 		})
-		specMock.MockASOResourceSpecGetter.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return nil, nil
+		specMock.MockASOResourceSpecGetter.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 
 		ctx := context.Background()
@@ -811,18 +827,18 @@ func TestCreateOrUpdateResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
 				Namespace: "namespace",
 			},
 		})
-		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, object genruntime.MetaObject) (genruntime.MetaObject, error) {
-			return nil, nil
+		specMock.EXPECT().Parameters(gomockinternal.AContext(), gomock.Any()).DoAndReturn(func(_ context.Context, group *asoresourcesv1.ResourceGroup) (*asoresourcesv1.ResourceGroup, error) {
+			return group, nil
 		})
 		specMock.EXPECT().WasManaged(gomock.Any()).Return(false)
 
@@ -873,10 +889,10 @@ func TestDeleteResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -897,10 +913,10 @@ func TestDeleteResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -935,10 +951,10 @@ func TestDeleteResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(c, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](c, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -966,10 +982,10 @@ func TestDeleteResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(ErroringGetClient{Client: c, err: errors.New("a get error")}, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](ErroringGetClient{Client: c, err: errors.New("a get error")}, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -997,10 +1013,10 @@ func TestDeleteResource(t *testing.T) {
 		c := fakeclient.NewClientBuilder().
 			WithScheme(sch).
 			Build()
-		s := New(ErroringDeleteClient{Client: c, err: errors.New("an error")}, clusterName)
+		s := New[*asoresourcesv1.ResourceGroup](ErroringDeleteClient{Client: c, err: errors.New("an error")}, clusterName)
 
 		mockCtrl := gomock.NewController(t)
-		specMock := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+		specMock := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 		specMock.EXPECT().ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "name",
@@ -1028,14 +1044,14 @@ func TestDeleteResource(t *testing.T) {
 func TestPauseResource(t *testing.T) {
 	tests := []struct {
 		name          string
-		expect        func(*mock_azure.MockASOResourceSpecGetterMockRecorder)
+		expect        func(*mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup])
 		clientBuilder func(g Gomega) client.Client
 		expectedErr   string
-		verify        func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter)
+		verify        func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup])
 	}{
 		{
 			name: "success, not already paused",
-			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder) {
+			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup]) {
 				spec.ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "name",
@@ -1062,7 +1078,7 @@ func TestPauseResource(t *testing.T) {
 					}).
 					Build()
 			},
-			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter) {
+			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]) {
 				ctx := context.Background()
 				actual := &asoresourcesv1.ResourceGroup{}
 				g.Expect(ctrlClient.Get(ctx, client.ObjectKeyFromObject(spec.ResourceRef()), actual)).To(Succeed())
@@ -1072,7 +1088,7 @@ func TestPauseResource(t *testing.T) {
 		},
 		{
 			name: "success, already paused",
-			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder) {
+			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup]) {
 				spec.ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "name",
@@ -1099,7 +1115,7 @@ func TestPauseResource(t *testing.T) {
 					}).
 					Build()
 			},
-			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter) {
+			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]) {
 				ctx := context.Background()
 				actual := &asoresourcesv1.ResourceGroup{}
 				g.Expect(ctrlClient.Get(ctx, client.ObjectKeyFromObject(spec.ResourceRef()), actual)).To(Succeed())
@@ -1109,7 +1125,7 @@ func TestPauseResource(t *testing.T) {
 		},
 		{
 			name: "failure getting existing resource",
-			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder) {
+			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup]) {
 				spec.ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "name",
@@ -1128,7 +1144,7 @@ func TestPauseResource(t *testing.T) {
 		},
 		{
 			name: "failure patching resource",
-			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder) {
+			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup]) {
 				spec.ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "name",
@@ -1160,7 +1176,7 @@ func TestPauseResource(t *testing.T) {
 		},
 		{
 			name: "success, unmanaged resource",
-			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder) {
+			expect: func(spec *mock_azure.MockASOResourceSpecGetterMockRecorder[*asoresourcesv1.ResourceGroup]) {
 				spec.ResourceRef().Return(&asoresourcesv1.ResourceGroup{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "name",
@@ -1187,7 +1203,7 @@ func TestPauseResource(t *testing.T) {
 					}).
 					Build()
 			},
-			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter) {
+			verify: func(g Gomega, ctrlClient client.Client, spec azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]) {
 				ctx := context.Background()
 				actual := &asoresourcesv1.ResourceGroup{}
 				g.Expect(ctrlClient.Get(ctx, client.ObjectKeyFromObject(spec.ResourceRef()), actual)).To(Succeed())
@@ -1207,10 +1223,12 @@ func TestPauseResource(t *testing.T) {
 			ctrlClient := test.clientBuilder(g)
 
 			mockCtrl := gomock.NewController(t)
-			spec := mock_azure.NewMockASOResourceSpecGetter(mockCtrl)
+			spec := mock_azure.NewMockASOResourceSpecGetter[*asoresourcesv1.ResourceGroup](mockCtrl)
 			test.expect(spec.EXPECT())
 
-			err := PauseResource(ctx, ctrlClient, spec, clusterName, svcName)
+			s := New[*asoresourcesv1.ResourceGroup](ctrlClient, clusterName)
+
+			err := s.PauseResource(ctx, spec, svcName)
 			if test.expectedErr != "" {
 				g.Expect(err.Error()).To(ContainSubstring(test.expectedErr))
 			} else {

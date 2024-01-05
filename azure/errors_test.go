@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package azure
 
 import (
@@ -93,49 +109,6 @@ func TestResourceNotFound(t *testing.T) {
 			t.Parallel()
 			if got := ResourceNotFound(tc.err); got != tc.success {
 				t.Errorf("ResourceNotFound() = %v, want %v", got, tc.success)
-			}
-		})
-	}
-}
-
-func TestResourceConflict(t *testing.T) {
-	tests := []struct {
-		name    string
-		err     error
-		success bool
-	}{
-		{
-			name:    "Not Found detailed error",
-			err:     autorest.DetailedError{StatusCode: http.StatusNotFound},
-			success: false,
-		},
-		{
-			name:    "Conflict detailed error",
-			err:     autorest.DetailedError{StatusCode: http.StatusConflict},
-			success: true,
-		},
-		{
-			name:    "Not Found response error",
-			err:     &azcore.ResponseError{StatusCode: http.StatusNotFound},
-			success: false,
-		},
-		{
-			name:    "Conflict response error",
-			err:     &azcore.ResponseError{StatusCode: http.StatusConflict},
-			success: true,
-		},
-		{
-			name:    "Conflict generic error",
-			err:     errors.New("409: Conflict"),
-			success: false,
-		},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := ResourceConflict(tc.err); got != tc.success {
-				t.Errorf("ResourceConflict() = %v, want %v", got, tc.success)
 			}
 		})
 	}

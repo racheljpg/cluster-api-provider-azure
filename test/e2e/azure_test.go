@@ -135,6 +135,7 @@ var _ = Describe("Workload cluster creation", func() {
 		}
 		dumpSpecResourcesAndCleanup(ctx, cleanInput)
 		Expect(os.Unsetenv(AzureResourceGroup)).To(Succeed())
+		Expect(os.Unsetenv(AzureCustomVnetResourceGroup)).To(Succeed())
 		Expect(os.Unsetenv(AzureVNetName)).To(Succeed())
 		Expect(os.Unsetenv(ClusterIdentityName)).To(Succeed())
 		Expect(os.Unsetenv(ClusterIdentityNamespace)).To(Succeed())
@@ -155,6 +156,7 @@ var _ = Describe("Workload cluster creation", func() {
 				clusterName = getClusterName(clusterNamePrefix, "public-custom-vnet")
 				By("Creating a custom virtual network", func() {
 					Expect(os.Setenv(AzureCustomVNetName, "custom-vnet")).To(Succeed())
+					Expect(os.Setenv(AzureCustomVnetResourceGroup, clusterName+"-vnetrg")).To(Succeed())
 					additionalCleanup = SetupExistingVNet(ctx,
 						"10.0.0.0/16",
 						map[string]string{fmt.Sprintf("%s-controlplane-subnet", os.Getenv(AzureCustomVNetName)): "10.0.0.0/24"},
@@ -172,7 +174,7 @@ var _ = Describe("Workload cluster creation", func() {
 					withControlPlaneMachineCount(1),
 					withWorkerMachineCount(1),
 					withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-						WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+						WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 					}),
 					withPostMachinesProvisioned(func() {
 						EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -222,7 +224,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withWorkerMachineCount(2),
 				withControlPlaneInterval(specName, "wait-control-plane-ha"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -320,7 +322,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withWorkerMachineCount(2),
 				withControlPlaneInterval(specName, "wait-control-plane-ha"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -379,7 +381,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneMachineCount(1),
 				withWorkerMachineCount(1),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -417,7 +419,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withWorkerMachineCount(1),
 				withControlPlaneInterval(specName, "wait-control-plane-ha"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -477,7 +479,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneInterval(specName, "wait-control-plane"),
 				withMachinePoolInterval(specName, "wait-machine-pool-nodes"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -523,17 +525,6 @@ var _ = Describe("Workload cluster creation", func() {
 				})
 			})
 
-			By("Cordon and draining a node", func() {
-				AzureMachinePoolDrainSpec(ctx, func() AzureMachinePoolDrainSpecInput {
-					return AzureMachinePoolDrainSpecInput{
-						BootstrapClusterProxy: bootstrapClusterProxy,
-						Namespace:             namespace,
-						ClusterName:           clusterName,
-						SkipCleanup:           skipCleanup,
-					}
-				})
-			})
-
 			By("PASSED!")
 		})
 	})
@@ -556,7 +547,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withWorkerMachineCount(1),
 				withMachineDeploymentInterval(specName, "wait-gpu-nodes"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -615,7 +606,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withKubernetesVersion("v1.26.1"),
 				withMachineDeploymentInterval(specName, ""),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withMachinePoolInterval(specName, "wait-machine-pool-nodes"),
 				withControlPlaneInterval(specName, "wait-control-plane"),
@@ -671,7 +662,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneMachineCount(1),
 				withWorkerMachineCount(2),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -726,13 +717,16 @@ var _ = Describe("Workload cluster creation", func() {
 		It("with a single control plane node and 1 node", func() {
 			clusterName = getClusterName(clusterNamePrefix, aksClusterNameSuffix)
 			kubernetesVersionUpgradeFrom, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersionUpgradeFrom)
+			Byf("Upgrading from k8s version %s", kubernetesVersionUpgradeFrom)
 			Expect(err).To(BeNil())
 			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
+			Byf("Upgrading to k8s version %s", kubernetesVersion)
 			Expect(err).To(BeNil())
 
 			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
 				specName,
 				withFlavor("aks"),
+				withAzureCNIv1Manifest(e2eConfig.GetVariable(AzureCNIv1Manifest)),
 				withNamespace(namespace.Name),
 				withClusterName(clusterName),
 				withKubernetesVersion(kubernetesVersionUpgradeFrom),
@@ -839,6 +833,63 @@ var _ = Describe("Workload cluster creation", func() {
 					}
 				})
 			})
+
+			By("creating a byo nodepool", func() {
+				AKSBYONodeSpec(ctx, func() AKSBYONodeSpecInput {
+					return AKSBYONodeSpecInput{
+						Cluster:             result.Cluster,
+						KubernetesVersion:   kubernetesVersion,
+						WaitIntervals:       e2eConfig.GetIntervals(specName, "wait-worker-nodes"),
+						ExpectedWorkerNodes: result.ExpectedWorkerNodes(),
+					}
+				})
+			})
+		})
+	})
+
+	Context("Creating an AKS cluster using ClusterClass [Managed Kubernetes]", func() {
+		It("with a single control plane node and 1 node", func() {
+			// Use default as the clusterclass name so test infra can find the clusterclass template
+			os.Setenv("CLUSTER_CLASS_NAME", "default")
+
+			// Use "cc" as spec name because NAT gateway pip name exceeds limit.
+			clusterName = getClusterName(clusterNamePrefix, "cc")
+			kubernetesVersionUpgradeFrom, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersionUpgradeFrom)
+			Byf("Upgrading from k8s version %s", kubernetesVersionUpgradeFrom)
+			Expect(err).To(BeNil())
+			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
+			Byf("Upgrading to k8s version %s", kubernetesVersion)
+			Expect(err).To(BeNil())
+
+			// Create a cluster using the cluster class created above
+			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+				specName,
+				withFlavor("aks-clusterclass"),
+				withAzureCNIv1Manifest(e2eConfig.GetVariable(AzureCNIv1Manifest)),
+				withNamespace(namespace.Name),
+				withClusterName(clusterName),
+				withKubernetesVersion(kubernetesVersionUpgradeFrom),
+				withControlPlaneMachineCount(1),
+				withWorkerMachineCount(1),
+				withMachineDeploymentInterval(specName, ""),
+				withMachinePoolInterval(specName, "wait-machine-pool-nodes"),
+				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized:   WaitForAKSControlPlaneInitialized,
+					WaitForControlPlaneMachinesReady: WaitForAKSControlPlaneReady,
+				}),
+			), result)
+
+			By("Performing ClusterClass operations on the cluster", func() {
+				AKSClusterClassSpec(ctx, func() AKSClusterClassInput {
+					return AKSClusterClassInput{
+						Cluster:                    result.Cluster,
+						MachinePool:                result.MachinePools[0],
+						WaitIntervals:              e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
+						WaitUpgradeIntervals:       e2eConfig.GetIntervals(specName, "wait-machine-pool-upgrade"),
+						KubernetesVersionUpgradeTo: kubernetesVersion,
+					}
+				})
+			})
 		})
 	})
 
@@ -859,7 +910,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withWorkerMachineCount(1),
 				withControlPlaneInterval(specName, "wait-control-plane-ha"),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -915,10 +966,10 @@ var _ = Describe("Workload cluster creation", func() {
 
 	Context("Creating clusters using clusterclass [OPTIONAL]", func() {
 		It("with a single control plane node, one linux worker node, and one windows worker node", func() {
-			// use ci-default as the clusterclass name so test infra can find the clusterclass template
+			// Use ci-default as the clusterclass name so test infra can find the clusterclass template
 			os.Setenv("CLUSTER_CLASS_NAME", "ci-default")
 
-			// use "cc" as spec name because natgw pip name exceeds limit.
+			// Use "cc" as spec name because NAT gateway pip name exceeds limit.
 			clusterName = getClusterName(clusterNamePrefix, "cc")
 
 			// Opt into using windows with prow template
@@ -933,7 +984,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneMachineCount(1),
 				withWorkerMachineCount(1),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -977,7 +1028,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneMachineCount(1),
 				withWorkerMachineCount(1),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
@@ -1018,7 +1069,7 @@ var _ = Describe("Workload cluster creation", func() {
 				withControlPlaneMachineCount(1),
 				withWorkerMachineCount(2),
 				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				}),
 				withPostMachinesProvisioned(func() {
 					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {

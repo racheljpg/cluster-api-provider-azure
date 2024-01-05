@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -90,6 +91,13 @@ func TestAzureMachineSpec_SetIdentityDefaults(t *testing.T) {
 		Identity:                   VMIdentitySystemAssigned,
 		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{},
 	}}}
+	bothDeprecatedRoleAssignmentNameAndSystemAssignedIdentityRoleTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		Identity:           VMIdentitySystemAssigned,
+		RoleAssignmentName: existingRoleAssignmentName,
+		SystemAssignedIdentityRole: &SystemAssignedIdentityRole{
+			Name: existingRoleAssignmentName,
+		},
+	}}}
 
 	roleAssignmentExistTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
 	g.Expect(roleAssignmentExistTest.machine.Spec.SystemAssignedIdentityRole.Name).To(Equal(existingRoleAssignmentName))
@@ -111,6 +119,44 @@ func TestAzureMachineSpec_SetIdentityDefaults(t *testing.T) {
 	g.Expect(err).To(Not(HaveOccurred()))
 	g.Expect(emptyTest.machine.Spec.SystemAssignedIdentityRole.Scope).To(Equal(fmt.Sprintf("/subscriptions/%s/", fakeSubscriptionID)))
 	g.Expect(emptyTest.machine.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", fakeSubscriptionID, ContributorRoleID)))
+
+	bothDeprecatedRoleAssignmentNameAndSystemAssignedIdentityRoleTest.machine.Spec.SetIdentityDefaults(fakeSubscriptionID)
+	g.Expect(bothDeprecatedRoleAssignmentNameAndSystemAssignedIdentityRoleTest.machine.Spec.RoleAssignmentName).To(Not(BeEmpty()))
+	g.Expect(bothDeprecatedRoleAssignmentNameAndSystemAssignedIdentityRoleTest.machine.Spec.SystemAssignedIdentityRole.Name).To(Not(BeEmpty()))
+}
+
+func TestAzureMachineSpec_SetSpotEvictionPolicyDefaults(t *testing.T) {
+	deallocatePolicy := SpotEvictionPolicyDeallocate
+	deletePolicy := SpotEvictionPolicyDelete
+
+	g := NewWithT(t)
+
+	type test struct {
+		machine *AzureMachine
+	}
+
+	spotVMOptionsExistTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		SpotVMOptions: &SpotVMOptions{
+			MaxPrice: &resource.Quantity{Format: "vmoptions-0"},
+		},
+	}}}
+
+	localDiffDiskSettingsExistTest := test{machine: &AzureMachine{Spec: AzureMachineSpec{
+		SpotVMOptions: &SpotVMOptions{
+			MaxPrice: &resource.Quantity{},
+		},
+		OSDisk: OSDisk{
+			DiffDiskSettings: &DiffDiskSettings{
+				Option: "Local",
+			},
+		},
+	}}}
+
+	spotVMOptionsExistTest.machine.Spec.SetSpotEvictionPolicyDefaults()
+	g.Expect(spotVMOptionsExistTest.machine.Spec.SpotVMOptions.EvictionPolicy).To(Equal(&deallocatePolicy))
+
+	localDiffDiskSettingsExistTest.machine.Spec.SetSpotEvictionPolicyDefaults()
+	g.Expect(localDiffDiskSettingsExistTest.machine.Spec.SpotVMOptions.EvictionPolicy).To(Equal(&deletePolicy))
 }
 
 func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
@@ -302,8 +348,6 @@ func TestAzureMachineSpec_SetDataDisksDefaults(t *testing.T) {
 }
 
 func TestAzureMachineSpec_SetNetworkInterfacesDefaults(t *testing.T) {
-	g := NewWithT(t)
-
 	tests := []struct {
 		name    string
 		machine *AzureMachine
@@ -396,6 +440,7 @@ func TestAzureMachineSpec_SetNetworkInterfacesDefaults(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
 			tc.machine.Spec.SetNetworkInterfacesDefaults()
 			g.Expect(tc.machine).To(Equal(tc.want))
 		})
@@ -450,8 +495,6 @@ func TestAzureMachineSpec_GetOwnerCluster(t *testing.T) {
 }
 
 func TestAzureMachineSpec_GetSubscriptionID(t *testing.T) {
-	g := NewWithT(t)
-
 	tests := []struct {
 		name                       string
 		maxAttempts                int
@@ -495,6 +538,7 @@ func TestAzureMachineSpec_GetSubscriptionID(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
 			client := mockClient{ReturnError: tc.wantErr}
 			result, err := GetSubscriptionID(client, tc.ownerAzureClusterName, tc.ownerAzureClusterNamespace, tc.maxAttempts)
 			if tc.wantErr {
@@ -523,7 +567,7 @@ func (m mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Ob
 	case *clusterv1.Cluster:
 		obj.Spec = clusterv1.ClusterSpec{
 			InfrastructureRef: &corev1.ObjectReference{
-				Kind:      "AzureCluster",
+				Kind:      AzureClusterKind,
 				Name:      "test-cluster",
 				Namespace: "default",
 			},

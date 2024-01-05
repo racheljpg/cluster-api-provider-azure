@@ -23,8 +23,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,14 +44,11 @@ type AKSNodeLabelsSpecInput struct {
 func AKSNodeLabelsSpec(ctx context.Context, inputGetter func() AKSNodeLabelsSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := settings.GetAuthorizer()
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	agentpoolsClient := containerservice.NewAgentPoolsClient(subscriptionID)
-	agentpoolsClient.Authorizer = auth
+	agentpoolsClient, err := armcontainerservice.NewAgentPoolsClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
@@ -79,13 +76,15 @@ func AKSNodeLabelsSpec(ctx context.Context, inputGetter func() AKSNodeLabelsSpec
 
 			var expectedLabels map[string]string
 			checkLabels := func(g Gomega) {
-				agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
+				resp, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name, nil)
 				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(resp.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
 
+				agentpool := resp.AgentPool
 				var actualLabels map[string]string
-				if agentpool.NodeLabels != nil {
+				if agentpool.Properties.NodeLabels != nil {
 					actualLabels = make(map[string]string)
-					for k, v := range agentpool.NodeLabels {
+					for k, v := range agentpool.Properties.NodeLabels {
 						actualLabels[k] = ptr.Deref(v, "")
 					}
 				}
@@ -96,15 +95,24 @@ func AKSNodeLabelsSpec(ctx context.Context, inputGetter func() AKSNodeLabelsSpec
 				}
 			}
 
-			Byf("Creating node labels for machine pool %s", mp.Name)
+			Byf("Deleting all node labels for machine pool %s", mp.Name)
+			expectedLabels = nil
 			var initialLabels map[string]string
+			Eventually(func(g Gomega) {
+				g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
+				initialLabels = ammp.Spec.NodeLabels
+				ammp.Spec.NodeLabels = expectedLabels
+				g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
+			}, inputGetter().WaitForUpdate...).Should(Succeed())
+			Eventually(checkLabels, input.WaitForUpdate...).Should(Succeed())
+
+			Byf("Creating node labels for machine pool %s", mp.Name)
 			expectedLabels = map[string]string{
 				"test":    "label",
 				"another": "value",
 			}
 			Eventually(func(g Gomega) {
 				g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
-				initialLabels = ammp.Spec.NodeLabels
 				ammp.Spec.NodeLabels = expectedLabels
 				g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
 			}, input.WaitForUpdate...).Should(Succeed())
@@ -121,16 +129,14 @@ func AKSNodeLabelsSpec(ctx context.Context, inputGetter func() AKSNodeLabelsSpec
 			}, input.WaitForUpdate...).Should(Succeed())
 			Eventually(checkLabels, input.WaitForUpdate...).Should(Succeed())
 
-			if initialLabels != nil {
-				Byf("Restoring initial node labels for machine pool %s", mp.Name)
-				expectedLabels = initialLabels
-				Eventually(func(g Gomega) {
-					g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
-					ammp.Spec.NodeLabels = expectedLabels
-					g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
-				}, input.WaitForUpdate...).Should(Succeed())
-				Eventually(checkLabels, input.WaitForUpdate...).Should(Succeed())
-			}
+			Byf("Restoring initial node labels for machine pool %s", mp.Name)
+			expectedLabels = initialLabels
+			Eventually(func(g Gomega) {
+				g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
+				ammp.Spec.NodeLabels = expectedLabels
+				g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
+			}, input.WaitForUpdate...).Should(Succeed())
+			Eventually(checkLabels, input.WaitForUpdate...).Should(Succeed())
 		}(mp)
 	}
 

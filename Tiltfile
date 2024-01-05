@@ -19,8 +19,8 @@ settings = {
     "deploy_cert_manager": True,
     "preload_images_for_kind": True,
     "kind_cluster_name": "capz",
-    "capi_version": "v1.5.2",
-    "cert_manager_version": "v1.13.0",
+    "capi_version": "v1.5.4",
+    "cert_manager_version": "v1.13.2",
     "kubernetes_version": "v1.28.0",
     "aks_kubernetes_version": "v1.26.3",
     "flatcar_version": "3374.2.1",
@@ -346,7 +346,7 @@ def deploy_worker_templates(template, substitutions):
         "CLUSTER_CLASS_NAME": "default",
     }
 
-    if flavor == "aks":
+    if "aks" in flavor:
         # AKS version support is usually a bit behind CAPI version, so use an older version
         substitutions["KUBERNETES_VERSION"] = settings.get("aks_kubernetes_version")
 

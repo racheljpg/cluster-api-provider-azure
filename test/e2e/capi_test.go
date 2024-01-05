@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -110,7 +111,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -125,7 +126,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -141,7 +142,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 					ArtifactFolder:        artifactFolder,
 					SkipCleanup:           skipCleanup,
 					ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-						WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+						WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 					},
 				}
 			})
@@ -158,7 +159,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -173,7 +174,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -188,7 +189,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -203,7 +204,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 				ArtifactFolder:        artifactFolder,
 				SkipCleanup:           skipCleanup,
 				ControlPlaneWaiters: clusterctl.ControlPlaneWaiters{
-					WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
 				},
 			}
 		})
@@ -211,6 +212,7 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 
 	if os.Getenv("USE_LOCAL_KIND_REGISTRY") != "true" {
 		Context("API Version Upgrade", func() {
+			var e2eConfigNoAddons *clusterctl.E2EConfig
 
 			Context("upgrade from an old version of v1beta1 to current, and scale workload clusters created in the old version", func() {
 				BeforeEach(func() {
@@ -223,10 +225,31 @@ var _ = Describe("Running the Cluster API E2E tests", func() {
 					Expect(os.Unsetenv("WINDOWS_WORKER_MACHINE_COUNT")).To(Succeed())
 
 					Expect(os.Setenv("K8S_FEATURE_GATES", "WindowsHostProcessContainers=true")).To(Succeed())
+
+					e2eConfigNoAddons = &clusterctl.E2EConfig{}
+					e2eConfig.ManagementClusterName = e2eConfigNoAddons.ManagementClusterName
+					e2eConfigNoAddons.Variables = e2eConfig.Variables
+					e2eConfigNoAddons.Intervals = e2eConfig.Intervals
+
+					providers := []clusterctl.ProviderConfig{}
+					for _, provider := range e2eConfig.Providers {
+						if provider.Type != "AddonProvider" {
+							providers = append(providers, provider)
+						}
+					}
+					e2eConfigNoAddons.Providers = providers
+
+					images := []clusterctl.ContainerImage{}
+					for _, image := range e2eConfig.Images {
+						if !strings.Contains(image.Name, "cluster-api-helm") {
+							images = append(images, image)
+						}
+					}
+					e2eConfigNoAddons.Images = images
 				})
 				capi_e2e.ClusterctlUpgradeSpec(ctx, func() capi_e2e.ClusterctlUpgradeSpecInput {
 					return capi_e2e.ClusterctlUpgradeSpecInput{
-						E2EConfig:                 e2eConfig,
+						E2EConfig:                 e2eConfigNoAddons,
 						ClusterctlConfigPath:      clusterctlConfigPath,
 						BootstrapClusterProxy:     bootstrapClusterProxy,
 						ArtifactFolder:            artifactFolder,
