@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/go-logr/logr"
 	"github.com/google/go-cmp/cmp"
@@ -179,9 +178,6 @@ func TestGetCloudProviderConfig(t *testing.T) {
 			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(initObjects...).Build()
 
 			clusterScope, err := scope.NewClusterScope(context.Background(), scope.ClusterScopeParams{
-				AzureClients: scope.AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster:      tc.cluster,
 				AzureCluster: tc.azureCluster,
 				Client:       fakeClient,
@@ -221,7 +217,7 @@ func TestReconcileAzureSecret(t *testing.T) {
 			ownerName:  "azureMachineName",
 		},
 		"azuremachinepool should reconcile secret successfully": {
-			kind:       "AzureMachinePool",
+			kind:       infrav1.AzureMachinePoolKind,
 			apiVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
 			ownerName:  "azureMachinePoolName",
 		},
@@ -288,9 +284,6 @@ func TestReconcileAzureSecret(t *testing.T) {
 	kubeclient := fake.NewClientBuilder().WithScheme(scheme).Build()
 
 	clusterScope, err := scope.NewClusterScope(context.Background(), scope.ClusterScopeParams{
-		AzureClients: scope.AzureClients{
-			Authorizer: autorest.NullAuthorizer{},
-		},
 		Cluster:      cluster,
 		AzureCluster: azureCluster,
 		Client:       kubeclient,
@@ -883,7 +876,7 @@ func TestAzureManagedControlPlaneToAzureManagedMachinePoolsMapper(t *testing.T) 
 	cluster := newCluster("my-cluster")
 	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedControlPlane",
+		Kind:       infrav1.AzureManagedControlPlaneKind,
 		Name:       cpName,
 		Namespace:  cluster.Namespace,
 	}
@@ -949,7 +942,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncSuccess(t *testing.T) {
 	controlPlane := newAzureManagedControlPlane(cpName)
 	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedControlPlane",
+		Kind:       infrav1.AzureManagedControlPlaneKind,
 		Name:       cpName,
 		Namespace:  cluster.Namespace,
 	}
@@ -975,7 +968,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncSuccess(t *testing.T) {
 
 	sink := mock_log.NewMockLogSink(gomock.NewController(t))
 	sink.EXPECT().Init(logr.RuntimeInfo{CallDepth: 1})
-	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind("AzureManagedControlPlane"), logr.New(sink))
+	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind(infrav1.AzureManagedControlPlaneKind), logr.New(sink))
 
 	// system pool should trigger
 	requests := mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
@@ -1000,7 +993,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncFailure(t *testing.T) {
 	cluster := newCluster(clusterName)
 	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedControlPlane",
+		Kind:       infrav1.AzureManagedControlPlaneKind,
 		Name:       cpName,
 		Namespace:  cluster.Namespace,
 	}
@@ -1019,7 +1012,7 @@ func TestMachinePoolToAzureManagedControlPlaneMapFuncFailure(t *testing.T) {
 	sink.EXPECT().Error(gomock.Any(), "failed to fetch default pool reference")
 	sink.EXPECT().Error(gomock.Any(), "failed to fetch default pool reference") // twice because we are testing two calls
 
-	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind("AzureManagedControlPlane"), logr.New(sink))
+	mapper := MachinePoolToAzureManagedControlPlaneMapFunc(context.Background(), fakeClient, infrav1.GroupVersion.WithKind(infrav1.AzureManagedControlPlaneKind), logr.New(sink))
 
 	// default pool should trigger if owned cluster could not be fetched
 	requests := mapper(context.TODO(), newManagedMachinePoolInfraReference(clusterName, "my-mmp-0"))
@@ -1051,7 +1044,7 @@ func TestAzureManagedClusterToAzureManagedControlPlaneMapper(t *testing.T) {
 	cluster := newCluster("my-cluster")
 	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedControlPlane",
+		Kind:       infrav1.AzureManagedControlPlaneKind,
 		Name:       cpName,
 		Namespace:  cluster.Namespace,
 	}
@@ -1113,13 +1106,13 @@ func TestAzureManagedControlPlaneToAzureManagedClusterMapper(t *testing.T) {
 
 	cluster.Spec.ControlPlaneRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedControlPlane",
+		Kind:       infrav1.AzureManagedControlPlaneKind,
 		Name:       cpName,
 		Namespace:  cluster.Namespace,
 	}
 	cluster.Spec.InfrastructureRef = &corev1.ObjectReference{
 		APIVersion: infrav1.GroupVersion.String(),
-		Kind:       "AzureManagedCluster",
+		Kind:       infrav1.AzureManagedClusterKind,
 		Name:       azManagedCluster.Name,
 		Namespace:  azManagedCluster.Namespace,
 	}
@@ -1196,16 +1189,18 @@ func newAzureManagedMachinePool(clusterName, poolName, mode string) *infrav1.Azu
 			Namespace: "default",
 		},
 		Spec: infrav1.AzureManagedMachinePoolSpec{
-			Mode:         mode,
-			SKU:          "Standard_B2s",
-			OSDiskSizeGB: ptr.To[int32](512),
-			KubeletConfig: &infrav1.KubeletConfig{
-				CPUManagerPolicy:      &cpuManagerPolicyStatic,
-				TopologyManagerPolicy: &topologyManagerPolicy,
-			},
-			LinuxOSConfig: &infrav1.LinuxOSConfig{
-				TransparentHugePageDefrag:  &transparentHugePageDefragMAdvise,
-				TransparentHugePageEnabled: &transparentHugePageEnabledAlways,
+			AzureManagedMachinePoolClassSpec: infrav1.AzureManagedMachinePoolClassSpec{
+				Mode:         mode,
+				SKU:          "Standard_B2s",
+				OSDiskSizeGB: ptr.To(512),
+				KubeletConfig: &infrav1.KubeletConfig{
+					CPUManagerPolicy:      &cpuManagerPolicyStatic,
+					TopologyManagerPolicy: &topologyManagerPolicy,
+				},
+				LinuxOSConfig: &infrav1.LinuxOSConfig{
+					TransparentHugePageDefrag:  &transparentHugePageDefragMAdvise,
+					TransparentHugePageEnabled: &transparentHugePageEnabledAlways,
+				},
 			},
 		},
 	}

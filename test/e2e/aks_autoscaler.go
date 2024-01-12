@@ -22,14 +22,13 @@ package e2e
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,13 +43,10 @@ type AKSAutoscaleSpecInput struct {
 func AKSAutoscaleSpec(ctx context.Context, inputGetter func() AKSAutoscaleSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := azureutil.GetAuthorizer(settings)
+	agentpoolClient, err := armcontainerservice.NewAgentPoolsClient(getSubscriptionID(Default), cred, nil)
 	Expect(err).NotTo(HaveOccurred())
-	agentpoolClient := containerservice.NewAgentPoolsClient(subscriptionID)
-	agentpoolClient.Authorizer = auth
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
 
@@ -68,8 +64,9 @@ func AKSAutoscaleSpec(ctx context.Context, inputGetter func() AKSAutoscaleSpecIn
 	resourceGroupName := amcp.Spec.ResourceGroupName
 	managedClusterName := amcp.Name
 	agentPoolName := *ammp.Spec.Name
-	getAgentPool := func() (containerservice.AgentPool, error) {
-		return agentpoolClient.Get(ctx, resourceGroupName, managedClusterName, agentPoolName)
+	getAgentPool := func() (armcontainerservice.AgentPool, error) {
+		resp, err := agentpoolClient.Get(ctx, resourceGroupName, managedClusterName, agentPoolName, nil)
+		return resp.AgentPool, err
 	}
 
 	toggleAutoscaling := func() {
@@ -85,8 +82,8 @@ func AKSAutoscaleSpec(ctx context.Context, inputGetter func() AKSAutoscaleSpecIn
 			} else {
 				enabling = "Enabling"
 				ammp.Spec.Scaling = &infrav1.ManagedMachinePoolScaling{
-					MinSize: ptr.To[int32](1),
-					MaxSize: ptr.To[int32](2),
+					MinSize: ptr.To(1),
+					MaxSize: ptr.To(2),
 				}
 			}
 			By(enabling + " autoscaling")
@@ -109,20 +106,22 @@ func AKSAutoscaleSpec(ctx context.Context, inputGetter func() AKSAutoscaleSpecIn
 	validateUntoggled(getAgentPool, inputGetter)
 }
 
-func validateAKSAutoscaleDisabled(agentPoolGetter func() (containerservice.AgentPool, error), inputGetter func() AKSAutoscaleSpecInput) {
+func validateAKSAutoscaleDisabled(agentPoolGetter func() (armcontainerservice.AgentPool, error), inputGetter func() AKSAutoscaleSpecInput) {
 	By("Validating autoscaler disabled")
 	Eventually(func(g Gomega) {
 		agentpool, err := agentPoolGetter()
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(ptr.Deref(agentpool.EnableAutoScaling, false)).To(BeFalse())
+		g.Expect(agentpool.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+		g.Expect(ptr.Deref(agentpool.Properties.EnableAutoScaling, false)).To(BeFalse())
 	}, inputGetter().WaitIntervals...).Should(Succeed())
 }
 
-func validateAKSAutoscaleEnabled(agentPoolGetter func() (containerservice.AgentPool, error), inputGetter func() AKSAutoscaleSpecInput) {
+func validateAKSAutoscaleEnabled(agentPoolGetter func() (armcontainerservice.AgentPool, error), inputGetter func() AKSAutoscaleSpecInput) {
 	By("Validating autoscaler enabled")
 	Eventually(func(g Gomega) {
 		agentpool, err := agentPoolGetter()
 		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(ptr.Deref(agentpool.EnableAutoScaling, false)).To(BeTrue())
+		g.Expect(agentpool.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+		g.Expect(ptr.Deref(agentpool.Properties.EnableAutoScaling, false)).To(BeTrue())
 	}, inputGetter().WaitIntervals...).Should(Succeed())
 }

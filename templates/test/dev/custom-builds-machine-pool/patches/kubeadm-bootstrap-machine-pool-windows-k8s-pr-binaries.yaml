@@ -10,7 +10,7 @@
       if($$KUBE_GIT_VERSION -ne "")
       {
         $$binaries=@("kubeadm", "kubectl", "kubelet", "kube-proxy")
-        $$ci_url="https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${JOB_NAME}/${KUBE_GIT_VERSION}/bin/windows/amd64"
+        $$ci_url="https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${KUBE_GIT_VERSION}/bin/windows/amd64"
         foreach ( $$binary in $$binaries )
         {
           echo "downloading binary: $$ci_url/$$binary.exe"
@@ -24,12 +24,37 @@
       ctr.exe -n k8s.io images tag docker.io/sigwindowstools/kube-proxy:v1.23.1-calico-hostprocess "docker.io/sigwindowstools/kube-proxy:${CI_VERSION/+/_}-calico-hostprocess"
 
       kubeadm.exe version -o=short
-      kubectl.exe version --client=true --short=true
+      kubectl.exe version --client=true
       kubelet.exe --version
       kube-proxy.exe --version
     path: C:/replace-pr-binaries.ps1
     permissions: "0744"
 - op: add
+  path: /spec/files/-
+  value:
+    content: |
+      $ErrorActionPreference = 'Stop'
+
+      echo "Use OOT credential provider"
+      mkdir C:\var\lib\kubelet\credential-provider
+      curl.exe --retry 10 --retry-delay 5 -L "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/azure-acr-credential-provider.exe" --output C:\var\lib\kubelet\credential-provider\acr-credential-provider.exe
+      cp C:\var\lib\kubelet\credential-provider\acr-credential-provider.exe C:\var\lib\kubelet\credential-provider\acr-credential-provider
+      curl.exe --retry 10 --retry-delay 5 -L "https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_BLOB_CONTAINER_NAME}/${IMAGE_TAG_ACR_CREDENTIAL_PROVIDER}/credential-provider-config-win.yaml" --output C:\var\lib\kubelet\credential-provider-config.yaml
+    path: C:/oot-cred-provider.ps1
+    permissions: "0744"
+- op: add
   path: /spec/preKubeadmCommands/-
   value:
     powershell C:/replace-pr-binaries.ps1
+- op: add
+  path: /spec/preKubeadmCommands/-
+  value:
+    powershell C:/oot-cred-provider.ps1
+- op: add
+  path: /spec/joinConfiguration/nodeRegistration/kubeletExtraArgs/image-credential-provider-bin-dir
+  value:
+    /var/lib/kubelet/credential-provider
+- op: add
+  path: /spec/joinConfiguration/nodeRegistration/kubeletExtraArgs/image-credential-provider-config
+  value:
+    /var/lib/kubelet/credential-provider-config.yaml  

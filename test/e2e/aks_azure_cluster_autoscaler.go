@@ -24,7 +24,6 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,15 +40,11 @@ type AKSAzureClusterAutoscalerSettingsSpecInput struct {
 func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func() AKSAzureClusterAutoscalerSettingsSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	Expect(err).NotTo(HaveOccurred())
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
-	containerserviceClient, err := armcontainerservice.NewManagedClustersClient(subscriptionID, cred, nil)
+	containerserviceClient, err := armcontainerservice.NewManagedClustersClient(getSubscriptionID(Default), cred, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	var expectedAksExpander armcontainerservice.Expander
@@ -66,6 +61,7 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 
 		aks, err := containerserviceClient.Get(ctx, amcp.Spec.ResourceGroupName, amcp.Name, nil)
 		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(aks.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
 		aksInitialAutoScalerProfile := aks.Properties.AutoScalerProfile
 
 		// Conditional is based off of the actual AKS settings not the AzureManagedControlPlane
@@ -111,6 +107,7 @@ func AKSAzureClusterAutoscalerSettingsSpec(ctx context.Context, inputGetter func
 		// Check that the autoscaler settings have been sync'd to AKS
 		aks, err := containerserviceClient.Get(ctx, amcp.Spec.ResourceGroupName, amcp.Name, nil)
 		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(aks.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
 		g.Expect(aks.Properties.AutoScalerProfile).ToNot(BeNil())
 		g.Expect(aks.Properties.AutoScalerProfile.Expander).To(Equal(&expectedAksExpander))
 	}, input.WaitIntervals...).Should(Succeed())

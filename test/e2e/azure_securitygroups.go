@@ -22,14 +22,13 @@ package e2e
 import (
 	"context"
 
-	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2021-08-01/network"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -87,22 +86,15 @@ func AzureSecurityGroupsSpec(ctx context.Context, inputGetter func() AzureSecuri
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
 
-	// get subscription id
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := azureutil.GetAuthorizer(settings)
+	By("creating securitygroups and securityrules clients")
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	By("creating a subnets client")
-	subnetsClient := network.NewSubnetsClient(subscriptionID)
-	subnetsClient.Authorizer = auth
+	securityGroupsClient, err := armnetwork.NewSecurityGroupsClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
-	securityGroupsClient := network.NewSecurityGroupsClient(subscriptionID)
-	securityGroupsClient.Authorizer = auth
-
-	securityRulesClient := network.NewSecurityRulesClient(subscriptionID)
-	securityRulesClient.Authorizer = auth
+	securityRulesClient, err := armnetwork.NewSecurityRulesClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
 	azureCluster := &infrav1.AzureCluster{}
 	err = mgmtClient.Get(ctx, client.ObjectKey{
@@ -114,18 +106,23 @@ func AzureSecurityGroupsSpec(ctx context.Context, inputGetter func() AzureSecuri
 	var expectedSubnets infrav1.Subnets
 	checkSubnets := func(g Gomega) {
 		for _, expectedSubnet := range expectedSubnets {
-			securityGroup, err := securityGroupsClient.Get(ctx, azureCluster.Spec.ResourceGroup, expectedSubnet.SecurityGroup.Name, "")
+			securityGroup, err := securityGroupsClient.Get(ctx, azureCluster.Spec.ResourceGroup, expectedSubnet.SecurityGroup.Name, nil)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			securityRules, err := securityRulesClient.List(ctx, azureCluster.Spec.ResourceGroup, *securityGroup.Name)
-			g.Expect(err).NotTo(HaveOccurred())
+			var securityRules []*armnetwork.SecurityRule
+			pager := securityRulesClient.NewListPager(azureCluster.Spec.ResourceGroup, *securityGroup.Name, nil)
+			for pager.More() {
+				nextResult, err := pager.NextPage(ctx)
+				Expect(err).NotTo(HaveOccurred())
+				securityRules = append(securityRules, nextResult.Value...)
+			}
 
 			var expectedSecurityRuleNames []string
 			for _, expectedSecurityRule := range expectedSubnet.SecurityGroup.SecurityRules {
 				expectedSecurityRuleNames = append(expectedSecurityRuleNames, expectedSecurityRule.Name)
 			}
 
-			for _, securityRule := range securityRules.Values() {
+			for _, securityRule := range securityRules {
 				g.Expect(expectedSecurityRuleNames).To(ContainElement(*securityRule.Name))
 			}
 		}

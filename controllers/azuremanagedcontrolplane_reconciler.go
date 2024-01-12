@@ -18,8 +18,10 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
@@ -27,7 +29,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privateendpoints"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourcehealth"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/tags"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	"sigs.k8s.io/cluster-api/util/secret"
@@ -44,10 +45,6 @@ type azureManagedControlPlaneService struct {
 
 // newAzureManagedControlPlaneReconciler populates all the services based on input scope.
 func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope) (*azureManagedControlPlaneService, error) {
-	managedClustersSvc, err := managedclusters.New(scope)
-	if err != nil {
-		return nil, err
-	}
 	privateEndpointsSvc, err := privateendpoints.New(scope)
 	if err != nil {
 		return nil, err
@@ -57,10 +54,6 @@ func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope
 		return nil, err
 	}
 	subnetsSvc, err := subnets.New(scope)
-	if err != nil {
-		return nil, err
-	}
-	tagsSvc, err := tags.New(scope)
 	if err != nil {
 		return nil, err
 	}
@@ -75,9 +68,8 @@ func newAzureManagedControlPlaneReconciler(scope *scope.ManagedControlPlaneScope
 			groups.New(scope),
 			virtualNetworksSvc,
 			subnetsSvc,
-			managedClustersSvc,
+			managedclusters.New(scope),
 			privateEndpointsSvc,
-			tagsSvc,
 			resourceHealthSvc,
 		},
 	}, nil
@@ -138,20 +130,48 @@ func (r *azureManagedControlPlaneService) reconcileKubeconfig(ctx context.Contex
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "controllers.azureManagedControlPlaneService.reconcileKubeconfig")
 	defer done()
 
-	kubeConfigData := r.scope.GetKubeConfigData()
-	if kubeConfigData == nil {
-		return nil
-	}
-	kubeConfigSecret := r.scope.MakeEmptyKubeConfigSecret()
+	kubeConfigs := [][]byte{r.scope.GetAdminKubeconfigData(), r.scope.GetUserKubeconfigData()}
 
-	// Always update credentials in case of rotation
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.kubeclient, &kubeConfigSecret, func() error {
-		kubeConfigSecret.Data = map[string][]byte{
-			secret.KubeconfigDataName: kubeConfigData,
+	for i, kubeConfigData := range kubeConfigs {
+		if len(kubeConfigData) == 0 {
+			continue
+		}
+		kubeConfigSecret := r.scope.MakeEmptyKubeConfigSecret()
+		if i == 1 {
+			// 2nd kubeconfig is the user kubeconfig
+			kubeConfigSecret.Name = fmt.Sprintf("%s-user", kubeConfigSecret.Name)
+		}
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.kubeclient, &kubeConfigSecret, func() error {
+			kubeConfigSecret.Data = map[string][]byte{
+				secret.KubeconfigDataName: kubeConfigData,
+			}
+			return nil
+		}); err != nil {
+			return errors.Wrap(err, "failed to reconcile kubeconfig secret for cluster")
+		}
+	}
+
+	// store cluster-info for the cluster with the admin kubeconfig.
+	kubeconfigFile, err := clientcmd.Load(kubeConfigs[0])
+	if err != nil {
+		return errors.Wrap(err, "failed to turn aks credentials into kubeconfig file struct")
+	}
+
+	cluster := kubeconfigFile.Contexts[kubeconfigFile.CurrentContext].Cluster
+	caData := kubeconfigFile.Clusters[cluster].CertificateAuthorityData
+	caSecret := r.scope.MakeClusterCA()
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.kubeclient, caSecret, func() error {
+		caSecret.Data = map[string][]byte{
+			secret.TLSCrtDataName: caData,
+			secret.TLSKeyDataName: []byte("foo"),
 		}
 		return nil
 	}); err != nil {
-		return errors.Wrap(err, "failed to kubeconfig secret for cluster")
+		return errors.Wrapf(err, "failed to reconcile certificate authority data secret for cluster")
+	}
+
+	if err := r.scope.StoreClusterInfo(ctx, caData); err != nil {
+		return errors.Wrap(err, "failed to construct cluster-info")
 	}
 
 	return nil

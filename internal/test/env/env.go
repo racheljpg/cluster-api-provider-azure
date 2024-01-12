@@ -49,7 +49,7 @@ var (
 	logger                 = record.NewLogger(record.WithThreshold(ptr.To(1)), record.WithWriter(ginkgo.GinkgoWriter))
 	scheme                 = runtime.NewScheme()
 	env                    *envtest.Environment
-	clusterAPIVersionRegex = regexp.MustCompile(`^(\W)sigs.k8s.io/cluster-api v(.+)`)
+	clusterAPIVersionRegex = regexp.MustCompile(`^(\W)sigs\.k8s\.io/cluster-api v(.+)`)
 )
 
 func init() {
@@ -101,8 +101,7 @@ func NewTestEnvironment() *TestEnvironment {
 	}
 
 	mgr, err := manager.New(env.Config, manager.Options{
-		Scheme:             scheme,
-		MetricsBindAddress: "0",
+		Scheme: scheme,
 	})
 	if err != nil {
 		klog.Fatalf("Failed to start testenv manager: %v", err)
@@ -119,8 +118,8 @@ func NewTestEnvironment() *TestEnvironment {
 }
 
 // StartManager starts the test environment manager and blocks until the context is canceled.
-func (t *TestEnvironment) StartManager() error {
-	return t.Manager.Start(context.Background())
+func (t *TestEnvironment) StartManager(ctx context.Context) error {
+	return t.Manager.Start(ctx)
 }
 
 // Stop stops the test environment.

@@ -24,12 +24,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
@@ -45,14 +46,11 @@ type AKSNodeTaintsSpecInput struct {
 func AKSNodeTaintsSpec(ctx context.Context, inputGetter func() AKSNodeTaintsSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := settings.GetAuthorizer()
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	agentpoolsClient := containerservice.NewAgentPoolsClient(subscriptionID)
-	agentpoolsClient.Authorizer = auth
+	agentpoolsClient, err := armcontainerservice.NewAgentPoolsClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
@@ -81,24 +79,33 @@ func AKSNodeTaintsSpec(ctx context.Context, inputGetter func() AKSNodeTaintsSpec
 
 			var expectedTaints infrav1.Taints
 			checkTaints := func(g Gomega) {
-				var expectedTaintStrs *[]string
+				var expectedTaintStrs []*string
 				if expectedTaints != nil {
-					expectedTaintStrs = new([]string)
-					*expectedTaintStrs = make([]string, 0, len(expectedTaints))
+					expectedTaintStrs = make([]*string, 0, len(expectedTaints))
 					for _, taint := range expectedTaints {
-						*expectedTaintStrs = append(*expectedTaintStrs, fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect))
+						expectedTaintStrs = append(expectedTaintStrs, ptr.To(fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect)))
 					}
 				}
 
-				agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
+				resp, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name, nil)
 				g.Expect(err).NotTo(HaveOccurred())
-				actualTaintStrs := agentpool.NodeTaints
+				g.Expect(resp.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+				actualTaintStrs := resp.AgentPool.Properties.NodeTaints
 				if expectedTaintStrs == nil {
 					g.Expect(actualTaintStrs).To(BeNil())
 				} else {
 					g.Expect(actualTaintStrs).To(Equal(expectedTaintStrs))
 				}
 			}
+
+			Byf("Deleting all node taints for machine pool %s", mp.Name)
+			expectedTaints = nil
+			Eventually(func(g Gomega) {
+				g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
+				ammp.Spec.Taints = expectedTaints
+				g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
+			}, inputGetter().WaitForUpdate...).Should(Succeed())
+			Eventually(checkTaints, input.WaitForUpdate...).Should(Succeed())
 
 			Byf("Creating taints for machine pool %s", mp.Name)
 			expectedTaints = infrav1.Taints{
@@ -129,16 +136,14 @@ func AKSNodeTaintsSpec(ctx context.Context, inputGetter func() AKSNodeTaintsSpec
 			}, input.WaitForUpdate...).Should(Succeed())
 			Eventually(checkTaints, input.WaitForUpdate...).Should(Succeed())
 
-			if initialTaints != nil {
-				Byf("Restoring initial taints for machine pool %s", mp.Name)
-				expectedTaints = initialTaints
-				Eventually(func(g Gomega) {
-					g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
-					ammp.Spec.Taints = expectedTaints
-					g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
-				}, input.WaitForUpdate...).Should(Succeed())
-				Eventually(checkTaints, input.WaitForUpdate...).Should(Succeed())
-			}
+			Byf("Restoring initial taints for machine pool %s", mp.Name)
+			expectedTaints = initialTaints
+			Eventually(func(g Gomega) {
+				g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(ammp), ammp)).To(Succeed())
+				ammp.Spec.Taints = expectedTaints
+				g.Expect(mgmtClient.Update(ctx, ammp)).To(Succeed())
+			}, input.WaitForUpdate...).Should(Succeed())
+			Eventually(checkTaints, input.WaitForUpdate...).Should(Succeed())
 		}(mp)
 	}
 

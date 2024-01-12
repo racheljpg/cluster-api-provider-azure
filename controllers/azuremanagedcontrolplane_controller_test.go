@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,12 +13,14 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package controllers
 
 import (
 	"context"
 	"testing"
 
+	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230201"
 	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -56,7 +58,7 @@ func TestClusterToAzureManagedControlPlane(t *testing.T) {
 		{
 			name: "ok",
 			controlPlaneRef: &corev1.ObjectReference{
-				Kind:      "AzureManagedControlPlane",
+				Kind:      infrav1.AzureManagedControlPlaneKind,
 				Name:      "name",
 				Namespace: "namespace",
 			},
@@ -97,6 +99,7 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 		clusterv1.AddToScheme,
 		infrav1.AddToScheme,
 		asoresourcesv1.AddToScheme,
+		asocontainerservicev1.AddToScheme,
 	)
 	s := runtime.NewScheme()
 	g.Expect(sb.AddToScheme(s)).To(Succeed())
@@ -139,7 +142,9 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 			},
 		},
 		Spec: infrav1.AzureManagedControlPlaneSpec{
-			SubscriptionID:    "something",
+			AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+				SubscriptionID: "something",
+			},
 			ResourceGroupName: name,
 		},
 	}
@@ -152,6 +157,14 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 		},
 	}
 	g.Expect(c.Create(ctx, rg)).To(Succeed())
+
+	mc := &asocontainerservicev1.ManagedCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+	g.Expect(c.Create(ctx, mc)).To(Succeed())
 
 	result, err := reconciler.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: client.ObjectKey{

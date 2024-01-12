@@ -20,7 +20,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest"
+	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230201"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -55,8 +55,10 @@ func TestManagedControlPlaneScope_OutboundType(t *testing.T) {
 				},
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
-						OutboundType:   &explicitOutboundType,
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							OutboundType:   &explicitOutboundType,
+						},
 					},
 				},
 			},
@@ -73,7 +75,9 @@ func TestManagedControlPlaneScope_OutboundType(t *testing.T) {
 				},
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 			},
@@ -103,15 +107,12 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected []azure.ResourceSpecGetter
+		Expected []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
 		Err      string
 	}{
 		{
 			Name: "Without Version",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -124,7 +125,9 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -134,24 +137,22 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ResourceSpecGetter{
+			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
+					AzureName:    "pool0",
+					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Replicas:     1,
 					Mode:         "System",
 					Cluster:      "cluster1",
 					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
-					Headers:      map[string]string{},
 				},
 			},
 		},
 		{
 			Name: "With Version",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -164,8 +165,10 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.22.0",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.22.0",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -175,25 +178,23 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ResourceSpecGetter{
+			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
+					AzureName:    "pool0",
+					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "System",
 					Replicas:     1,
 					Version:      ptr.To("1.21.1"),
 					Cluster:      "cluster1",
 					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
-					Headers:      map[string]string{},
 				},
 			},
 		},
 		{
 			Name: "With bad version",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -206,8 +207,10 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -252,9 +255,6 @@ func TestManagedControlPlaneScope_AddonProfiles(t *testing.T) {
 		{
 			Name: "Without add-ons",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -267,7 +267,9 @@ func TestManagedControlPlaneScope_AddonProfiles(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -282,9 +284,6 @@ func TestManagedControlPlaneScope_AddonProfiles(t *testing.T) {
 		{
 			Name: "With add-ons",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -297,10 +296,12 @@ func TestManagedControlPlaneScope_AddonProfiles(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
-						AddonProfiles: []infrav1.AddonProfile{
-							{Name: "addon1", Config: nil, Enabled: false},
-							{Name: "addon2", Config: map[string]string{"k1": "v1", "k2": "v2"}, Enabled: true},
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AddonProfiles: []infrav1.AddonProfile{
+								{Name: "addon1", Config: nil, Enabled: false},
+								{Name: "addon2", Config: map[string]string{"k1": "v1", "k2": "v2"}, Enabled: true},
+							},
 						},
 					},
 				},
@@ -340,15 +341,12 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected []azure.ResourceSpecGetter
+		Expected []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
 		Err      string
 	}{
 		{
 			Name: "with Linux and Windows pools",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -361,8 +359,10 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -380,44 +380,44 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ResourceSpecGetter{
+			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
+					AzureName:    "pool0",
+					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "System",
 					Replicas:     1,
 					Cluster:      "cluster1",
 					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
-					Headers:      map[string]string{},
 				},
 				&agentpools.AgentPoolSpec{
 					Name:         "pool1",
+					AzureName:    "pool1",
+					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "User",
 					Replicas:     1,
 					Cluster:      "cluster1",
 					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
 					OSType:       ptr.To(azure.LinuxOS),
-					Headers:      map[string]string{},
 				},
 				&agentpools.AgentPoolSpec{
 					Name:         "pool2",
+					AzureName:    "pool2",
+					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "User",
 					Replicas:     1,
 					Cluster:      "cluster1",
 					VnetSubnetID: "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups//providers/Microsoft.Network/virtualNetworks//subnets/",
 					OSType:       ptr.To(azure.WindowsOS),
-					Headers:      map[string]string{},
 				},
 			},
 		},
 		{
 			Name: "system pool required",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -430,8 +430,10 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -486,9 +488,6 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 		{
 			Name: "no Cache value",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -501,8 +500,10 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -522,9 +523,6 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 		{
 			Name: "with Cache value of true",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -537,8 +535,10 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -560,9 +560,6 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 		{
 			Name: "with Cache value of false",
 			Input: ManagedControlPlaneScopeParams{
-				AzureClients: AzureClients{
-					Authorizer: autorest.NullAuthorizer{},
-				},
 				Cluster: &clusterv1.Cluster{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -575,8 +572,10 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 						Namespace: "default",
 					},
 					Spec: infrav1.AzureManagedControlPlaneSpec{
-						Version:        "v1.20.1",
-						SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Version:        "v1.20.1",
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
 					},
 				},
 				ManagedMachinePools: []ManagedMachinePool{
@@ -607,6 +606,424 @@ func TestManagedControlPlaneScope_IsVnetManagedCache(t *testing.T) {
 			g.Expect(err).To(Succeed())
 			isVnetManaged := s.IsVnetManaged()
 			g.Expect(isVnetManaged).To(Equal(c.Expected))
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_AADProfile(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = infrav1.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected *managedclusters.AADProfile
+	}{
+		{
+			Name: "Without AADProfile",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: nil,
+		},
+		{
+			Name: "With AADProfile",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AADProfile: &infrav1.AADProfile{
+								Managed:             true,
+								AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+							},
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: &managedclusters.AADProfile{
+				Managed:             true,
+				EnableAzureRBAC:     true,
+				AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+			},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			managedClusterGetter := s.ManagedClusterSpec()
+			managedCluster, ok := managedClusterGetter.(*managedclusters.ManagedClusterSpec)
+			g.Expect(ok).To(BeTrue())
+			g.Expect(managedCluster.AADProfile).To(Equal(c.Expected))
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_DisableLocalAccounts(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = infrav1.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected *bool
+	}{
+		{
+			Name: "Without DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: nil,
+		},
+		{
+			Name: "Without AAdProfile and With DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID:       "00000000-0000-0000-0000-000000000000",
+							DisableLocalAccounts: ptr.To[bool](true),
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: nil,
+		},
+		{
+			Name: "With AAdProfile and With DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AADProfile: &infrav1.AADProfile{
+								Managed:             true,
+								AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+							},
+							DisableLocalAccounts: ptr.To[bool](true),
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: ptr.To[bool](true),
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			managedClusterGetter := s.ManagedClusterSpec()
+			managedCluster, ok := managedClusterGetter.(*managedclusters.ManagedClusterSpec)
+			g.Expect(ok).To(BeTrue())
+			g.Expect(managedCluster.DisableLocalAccounts).To(Equal(c.Expected))
+		})
+	}
+}
+
+func TestIsAADEnabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = infrav1.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected bool
+	}{
+		{
+			Name: "AAD is not enabled",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: false,
+		},
+		{
+			Name: "AAdProfile and With DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AADProfile: &infrav1.AADProfile{
+								Managed:             true,
+								AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+							},
+							DisableLocalAccounts: ptr.To[bool](true),
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: true,
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			aadEnabled := s.IsAADEnabled()
+			g.Expect(aadEnabled).To(Equal(c.Expected))
+		})
+	}
+}
+
+func TestAreLocalAccountsDisabled(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = infrav1.AddToScheme(scheme)
+
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected bool
+	}{
+		{
+			Name: "DisbaleLocalAccount is not enabled",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: false,
+		},
+		{
+			Name: "With AAdProfile and Without DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AADProfile: &infrav1.AADProfile{
+								Managed:             true,
+								AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+							},
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: false,
+		},
+		{
+			Name: "With AAdProfile and With DisableLocalAccounts",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AADProfile: &infrav1.AADProfile{
+								Managed:             true,
+								AdminGroupObjectIDs: []string{"00000000-0000-0000-0000-000000000000"},
+							},
+							DisableLocalAccounts: ptr.To[bool](true),
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			Expected: true,
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.ControlPlane).Build()
+			c.Input.Client = fakeClient
+			s, err := NewManagedControlPlaneScope(context.TODO(), c.Input)
+			g.Expect(err).To(Succeed())
+			localAccountsDisabled := s.AreLocalAccountsDisabled()
+			g.Expect(localAccountsDisabled).To(Equal(c.Expected))
 		})
 	}
 }

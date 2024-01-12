@@ -25,7 +25,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Azure/go-autorest/autorest"
+	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20220701"
+	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
 	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/net"
@@ -130,14 +131,14 @@ func (s *ClusterScope) BaseURI() string {
 	return s.ResourceManagerEndpoint
 }
 
-// Authorizer returns the Azure client Authorizer which is used for SDKv1 services.
-func (s *ClusterScope) Authorizer() autorest.Authorizer {
-	return s.AzureClients.Authorizer
-}
-
 // GetClient returns the controller-runtime client.
 func (s *ClusterScope) GetClient() client.Client {
 	return s.Client
+}
+
+// GetDeletionTimestamp returns the deletion timestamp of the Cluster.
+func (s *ClusterScope) GetDeletionTimestamp() *metav1.Time {
+	return s.Cluster.DeletionTimestamp
 }
 
 // PublicIPSpecs returns the public IP specs.
@@ -314,7 +315,7 @@ func (s *ClusterScope) RouteTableSpecs() []azure.ResourceSpecGetter {
 			specs = append(specs, &routetables.RouteTableSpec{
 				Name:           subnet.RouteTable.Name,
 				Location:       s.Location(),
-				ResourceGroup:  s.ResourceGroup(),
+				ResourceGroup:  s.Vnet().ResourceGroup,
 				ClusterName:    s.ClusterName(),
 				AdditionalTags: s.AdditionalTags(),
 			})
@@ -325,9 +326,9 @@ func (s *ClusterScope) RouteTableSpecs() []azure.ResourceSpecGetter {
 }
 
 // NatGatewaySpecs returns the node NAT gateway.
-func (s *ClusterScope) NatGatewaySpecs() []azure.ResourceSpecGetter {
+func (s *ClusterScope) NatGatewaySpecs() []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway] {
 	natGatewaySet := make(map[string]struct{})
-	var natGateways []azure.ResourceSpecGetter
+	var natGateways []azure.ASOResourceSpecGetter[*asonetworkv1.NatGateway]
 
 	// We ignore the control plane NAT gateway, as we will always use a LB to enable egress on the control plane.
 	for _, subnet := range s.NodeSubnets() {
@@ -336,6 +337,7 @@ func (s *ClusterScope) NatGatewaySpecs() []azure.ResourceSpecGetter {
 				natGatewaySet[subnet.NatGateway.Name] = struct{}{} // empty struct to represent hash set
 				natGateways = append(natGateways, &natgateways.NatGatewaySpec{
 					Name:           subnet.NatGateway.Name,
+					Namespace:      s.Namespace(),
 					ResourceGroup:  s.ResourceGroup(),
 					SubscriptionID: s.SubscriptionID(),
 					Location:       s.Location(),
@@ -344,6 +346,8 @@ func (s *ClusterScope) NatGatewaySpecs() []azure.ResourceSpecGetter {
 						Name: subnet.NatGateway.NatGatewayIP.Name,
 					},
 					AdditionalTags: s.AdditionalTags(),
+					// We need to know if the VNet is managed to decide if this NAT Gateway was-managed or not.
+					IsVnetManaged: s.IsVnetManaged(),
 				})
 			}
 		}
@@ -359,7 +363,7 @@ func (s *ClusterScope) NSGSpecs() []azure.ResourceSpecGetter {
 		nsgspecs[i] = &securitygroups.NSGSpec{
 			Name:                     subnet.SecurityGroup.Name,
 			SecurityRules:            subnet.SecurityGroup.SecurityRules,
-			ResourceGroup:            s.ResourceGroup(),
+			ResourceGroup:            s.Vnet().ResourceGroup,
 			Location:                 s.Location(),
 			ClusterName:              s.ClusterName(),
 			AdditionalTags:           s.AdditionalTags(),
@@ -417,15 +421,17 @@ func (s *ClusterScope) SubnetSpecs() []azure.ResourceSpecGetter {
 	return subnetSpecs
 }
 
-// GroupSpec returns the resource group spec.
-func (s *ClusterScope) GroupSpec() azure.ASOResourceSpecGetter {
-	return &groups.GroupSpec{
-		Name:           s.ResourceGroup(),
-		Namespace:      s.Namespace(),
-		Location:       s.Location(),
-		ClusterName:    s.ClusterName(),
-		AdditionalTags: s.AdditionalTags(),
-		Owner:          *metav1.NewControllerRef(s.AzureCluster, infrav1.GroupVersion.WithKind("AzureCluster")),
+// GroupSpecs returns the resource group spec.
+func (s *ClusterScope) GroupSpecs() []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup] {
+	return []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]{
+		&groups.GroupSpec{
+			Name:           s.ResourceGroup(),
+			Namespace:      s.Namespace(),
+			Location:       s.Location(),
+			ClusterName:    s.ClusterName(),
+			AdditionalTags: s.AdditionalTags(),
+			Owner:          *metav1.NewControllerRef(s.AzureCluster, infrav1.GroupVersion.WithKind(infrav1.AzureClusterKind)),
+		},
 	}
 }
 
@@ -739,6 +745,12 @@ func (s *ClusterScope) ResourceGroup() string {
 	return s.AzureCluster.Spec.ResourceGroup
 }
 
+// NodeResourceGroup returns the resource group where nodes live.
+// For AzureClusters this is the same as the cluster RG.
+func (s *ClusterScope) NodeResourceGroup() string {
+	return s.ResourceGroup()
+}
+
 // ClusterName returns the cluster name.
 func (s *ClusterScope) ClusterName() string {
 	return s.Cluster.Name
@@ -874,11 +886,17 @@ func (s *ClusterScope) APIServerHost() string {
 	return s.APIServerPublicIP().DNSName
 }
 
-// SetFailureDomain will set the spec for a for a given key.
+// SetFailureDomain sets a failure domain in a cluster's status by its id.
+// The provided failure domain spec may be overridden to false by cluster's spec property.
 func (s *ClusterScope) SetFailureDomain(id string, spec clusterv1.FailureDomainSpec) {
 	if s.AzureCluster.Status.FailureDomains == nil {
 		s.AzureCluster.Status.FailureDomains = make(clusterv1.FailureDomains)
 	}
+
+	if fd, ok := s.AzureCluster.Spec.FailureDomains[id]; ok && !fd.ControlPlane {
+		spec.ControlPlane = false
+	}
+
 	s.AzureCluster.Status.FailureDomains[id] = spec
 }
 

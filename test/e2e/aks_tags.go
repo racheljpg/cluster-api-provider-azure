@@ -23,11 +23,13 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Azure/azure-sdk-for-go/services/containerservice/mgmt/2021-05-01/containerservice"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"golang.org/x/exp/maps"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -44,17 +46,14 @@ type AKSAdditionalTagsSpecInput struct {
 func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditionalTagsSpecInput) {
 	input := inputGetter()
 
-	settings, err := auth.GetSettingsFromEnvironment()
-	Expect(err).NotTo(HaveOccurred())
-	subscriptionID := settings.GetSubscriptionID()
-	auth, err := settings.GetAuthorizer()
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	managedclustersClient := containerservice.NewManagedClustersClient(subscriptionID)
-	managedclustersClient.Authorizer = auth
+	managedclustersClient, err := armcontainerservice.NewManagedClustersClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
-	agentpoolsClient := containerservice.NewAgentPoolsClient(subscriptionID)
-	agentpoolsClient.Authorizer = auth
+	agentpoolsClient, err := armcontainerservice.NewAgentPoolsClient(getSubscriptionID(Default), cred, nil)
+	Expect(err).NotTo(HaveOccurred())
 
 	mgmtClient := bootstrapClusterProxy.GetClient()
 	Expect(mgmtClient).NotTo(BeNil())
@@ -74,9 +73,9 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 		defer wg.Done()
 
 		nonAdditionalTagKeys := map[string]struct{}{}
-		managedcluster, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
+		resp, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, nil)
 		Expect(err).NotTo(HaveOccurred())
-		for k := range managedcluster.Tags {
+		for k := range resp.ManagedCluster.Tags {
 			if _, exists := infraControlPlane.Spec.AdditionalTags[k]; !exists {
 				nonAdditionalTagKeys[k] = struct{}{}
 			}
@@ -84,9 +83,10 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 
 		var expectedTags infrav1.Tags
 		checkTags := func(g Gomega) {
-			managedcluster, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name)
+			resp, err := managedclustersClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, nil)
 			g.Expect(err).NotTo(HaveOccurred())
-			actualTags := converters.MapToTags(managedcluster.Tags)
+			g.Expect(resp.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+			actualTags := converters.MapToTags(resp.ManagedCluster.Tags)
 			// Ignore tags not originally specified in spec.additionalTags
 			for k := range nonAdditionalTagKeys {
 				delete(actualTags, k)
@@ -101,22 +101,17 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 			}
 		}
 
-		By("Deleting all tags for control plane")
-		expectedTags = nil
 		var initialTags infrav1.Tags
 		Eventually(func(g Gomega) {
 			g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(infraControlPlane), infraControlPlane)).To(Succeed())
 			initialTags = infraControlPlane.Spec.AdditionalTags
-			infraControlPlane.Spec.AdditionalTags = expectedTags
-			g.Expect(mgmtClient.Update(ctx, infraControlPlane)).To(Succeed())
 		}, inputGetter().WaitForUpdate...).Should(Succeed())
-		Eventually(checkTags, input.WaitForUpdate...).Should(Succeed())
 
 		By("Creating tags for control plane")
-		expectedTags = infrav1.Tags{
-			"test":    "tag",
-			"another": "value",
-		}
+		// Preserve "creationTimestamp" so the RG cleanup doesn't fire on this cluster during this test.
+		expectedTags = maps.Clone(initialTags)
+		expectedTags["test"] = "tag"
+		expectedTags["another"] = "value"
 		Eventually(func(g Gomega) {
 			g.Expect(mgmtClient.Get(ctx, client.ObjectKeyFromObject(infraControlPlane), infraControlPlane)).To(Succeed())
 			infraControlPlane.Spec.AdditionalTags = expectedTags
@@ -158,9 +153,9 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 			}, ammp)).To(Succeed())
 
 			nonAdditionalTagKeys := map[string]struct{}{}
-			agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
+			resp, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name, nil)
 			Expect(err).NotTo(HaveOccurred())
-			for k := range agentpool.Tags {
+			for k := range resp.AgentPool.Properties.Tags {
 				if _, exists := infraControlPlane.Spec.AdditionalTags[k]; !exists {
 					nonAdditionalTagKeys[k] = struct{}{}
 				}
@@ -168,9 +163,10 @@ func AKSAdditionalTagsSpec(ctx context.Context, inputGetter func() AKSAdditional
 
 			var expectedTags infrav1.Tags
 			checkTags := func(g Gomega) {
-				agentpool, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name)
+				resp, err := agentpoolsClient.Get(ctx, infraControlPlane.Spec.ResourceGroupName, infraControlPlane.Name, *ammp.Spec.Name, nil)
 				g.Expect(err).NotTo(HaveOccurred())
-				actualTags := converters.MapToTags(agentpool.Tags)
+				g.Expect(resp.Properties.ProvisioningState).To(Equal(ptr.To("Succeeded")))
+				actualTags := converters.MapToTags(resp.AgentPool.Properties.Tags)
 				// Ignore tags not originally specified in spec.additionalTags
 				for k := range nonAdditionalTagKeys {
 					delete(actualTags, k)

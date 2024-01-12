@@ -22,6 +22,7 @@ package e2e
 import (
 	"context"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -53,8 +54,8 @@ func AKSSpotSpec(ctx context.Context, inputGetter func() AKSSpotSpecInput) {
 	Expect(err).NotTo(HaveOccurred())
 
 	scaling := infrav1.ManagedMachinePoolScaling{
-		MaxSize: ptr.To[int32](9),
-		MinSize: ptr.To[int32](0),
+		MaxSize: ptr.To(9),
+		MinSize: ptr.To(0),
 	}
 	spotMaxPrice := resource.MustParse("123.456789")
 
@@ -65,12 +66,14 @@ func AKSSpotSpec(ctx context.Context, inputGetter func() AKSSpotSpecInput) {
 			Namespace: input.Cluster.Namespace,
 		},
 		Spec: infrav1.AzureManagedMachinePoolSpec{
-			Mode:             "User",
-			SKU:              "Standard_D2s_v3",
-			ScaleSetPriority: ptr.To("Spot"),
-			Scaling:          &scaling,
-			SpotMaxPrice:     &spotMaxPrice,
-			ScaleDownMode:    ptr.To("Deallocate"),
+			AzureManagedMachinePoolClassSpec: infrav1.AzureManagedMachinePoolClassSpec{
+				Mode:             "User",
+				SKU:              "Standard_D2s_v3",
+				ScaleSetPriority: ptr.To(string(armcontainerservice.ScaleSetPrioritySpot)),
+				Scaling:          &scaling,
+				SpotMaxPrice:     &spotMaxPrice,
+				ScaleDownMode:    ptr.To("Deallocate"),
+			},
 		},
 	}
 	err = mgmtClient.Create(ctx, infraMachinePool)

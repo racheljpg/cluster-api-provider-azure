@@ -49,7 +49,6 @@ func Test_newAzureMachinePoolService(t *testing.T) {
 	clusterMock := mock_azure.NewMockClusterScoper(mockCtrl)
 	clusterMock.EXPECT().SubscriptionID().AnyTimes()
 	clusterMock.EXPECT().BaseURI().AnyTimes()
-	clusterMock.EXPECT().Authorizer().AnyTimes()
 	clusterMock.EXPECT().CloudEnvironment().AnyTimes()
 	clusterMock.EXPECT().Token().AnyTimes()
 	clusterMock.EXPECT().Location().Return(cluster.Spec.Location)
@@ -118,7 +117,7 @@ func newAzureMachinePool(clusterName, poolName string) *infrav1exp.AzureMachineP
 func newMachinePoolWithInfrastructureRef(clusterName, poolName string) *expv1.MachinePool {
 	m := newMachinePool(clusterName, poolName)
 	m.Spec.Template.Spec.InfrastructureRef = corev1.ObjectReference{
-		Kind:       "AzureMachinePool",
+		Kind:       infrav1.AzureMachinePoolKind,
 		Namespace:  m.Namespace,
 		Name:       "azure" + poolName,
 		APIVersion: infrav1exp.GroupVersion.String(),

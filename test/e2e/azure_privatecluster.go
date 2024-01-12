@@ -95,6 +95,7 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 		ClusterProxy:            publicClusterProxy,
 		ClusterctlConfigPath:    input.ClusterctlConfigPath,
 		InfrastructureProviders: input.E2EConfig.InfrastructureProviders(),
+		AddonProviders:          input.E2EConfig.AddonProviders(),
 		LogFolder:               filepath.Join(input.ArtifactFolder, "clusters", input.ClusterName),
 	}, input.E2EConfig.GetIntervals(specName, "wait-controllers")...)
 
@@ -133,7 +134,7 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 	result := &clusterctl.ApplyClusterTemplateAndWaitResult{}
 
 	// NOTE: We don't add control plane waiters here because Helm install will fail since the apiserver is private and not reachable from the prow cluster.
-	// As a workaround, we use in-tree cloud-provider-azure and ClusterResourceSet to install CNI on the private cluster until a Helm integration is available.
+	// As a workaround, we use in-tree cloud-provider-azure on the private cluster until a Helm integration is available.
 	clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
 		specName,
 		withClusterProxy(publicClusterProxy),
@@ -227,7 +228,7 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 	routetableClient.Authorizer = authorizer
 
 	By("creating a resource group")
-	groupName := os.Getenv(AzureResourceGroup)
+	groupName := os.Getenv(AzureCustomVnetResourceGroup)
 	_, err = groupClient.CreateOrUpdate(ctx, groupName, resources.Group{
 		Location: ptr.To(os.Getenv(AzureLocation)),
 		Tags: map[string]*string{

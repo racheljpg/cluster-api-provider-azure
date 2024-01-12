@@ -4,16 +4,18 @@ namespace: default
 resources:
   - ../../../flavors/private
   - cni-resource-set.yaml
+  - ../../../addons/cluster-api-helm/calico.yaml
+  - ../../../addons/cluster-api-helm/azuredisk-csi-driver.yaml
 patchesStrategicMerge:
   - ../patches/tags.yaml
   - ../patches/controller-manager.yaml
-  - patches/cluster-cni.yaml
   - patches/bastion.yaml
   - patches/vnet-peerings.yaml
   - ../patches/uami-md-0.yaml
   - ../patches/uami-control-plane.yaml
   - ../prow-intree-cloud-provider/patches/intree-cp.yaml # TODO: remove once CAPI supports Helm addons
   - ../prow-intree-cloud-provider/patches/intree-md-0.yaml # TODO: remove once CAPI supports Helm addons
+  - ../patches/cluster-label-calico.yaml
 patches:
   - path: patches/user-assigned.yaml
     target:

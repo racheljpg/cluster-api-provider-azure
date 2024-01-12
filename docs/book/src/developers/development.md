@@ -531,6 +531,7 @@ Optional settings are:
 | `WINDOWS`            | `false`       | Run conformance against Windows nodes                                                              |
 | `CONFORMANCE_NODES`  | `1`           | Number of parallel ginkgo nodes to run                                                             |
 | `CONFORMANCE_FLAVOR` | `""`          | The flavor of the cluster to run conformance against. If not set, the default flavor will be used. |
+| `IP_FAMILY`          | `IPv4`        | Set to `IPv6` to run conformance against single-stack IPv6, or `dual` for dual-stack.              |
 
 With the following environment variables defined, you can build a CAPZ cluster from the HEAD of Kubernetes main branch or release branch, and run the Conformance test suite against it.
 
@@ -548,7 +549,6 @@ With the following environment variables defined, CAPZ runs `./scripts/ci-build-
 | ------------------------- | ------------------------------------------------------------------------ |
 | `AZURE_STORAGE_ACCOUNT`   | Your Azure storage account name                                          |
 | `AZURE_STORAGE_KEY`       | Your Azure storage key                                                   |
-| `JOB_NAME`                | `test` (an environment variable used by CI, can be any non-empty string) |
 | `USE_LOCAL_KIND_REGISTRY` | `false`                                                                  |
 | `REGISTRY`                | Your Registry                                                            |
 | `TEST_K8S`                | `true`                                                                   |
