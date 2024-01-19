@@ -109,7 +109,6 @@ spec:
         bindPort: 6443
       nodeRegistration:
         kubeletExtraArgs:
-          azure-container-registry-config: /etc/kubernetes/azure.json
           cloud-provider: external
         name: '{{ ds.meta_data["local_hostname"] }}'
     joinConfiguration:
@@ -118,17 +117,12 @@ spec:
           bindPort: 6443
       nodeRegistration:
         kubeletExtraArgs:
-          azure-container-registry-config: /etc/kubernetes/azure.json
           cloud-provider: external
         name: '{{ ds.meta_data["local_hostname"] }}'
     mounts:
     - - LABEL=etcd_disk
       - /var/lib/etcddisk
-    postKubeadmCommands:
-    - echo "DNSStubListener=no" >> /etc/systemd/resolved.conf
-    - mv /etc/resolv.conf /etc/resolv.conf.OLD && ln -s /run/systemd/resolve/resolv.conf
-      /etc/resolv.conf
-    - systemctl restart systemd-resolved containerd
+    postKubeadmCommands: []
     preKubeadmCommands: []
   machineTemplate:
     infrastructureRef:
@@ -233,11 +227,5 @@ spec:
       joinConfiguration:
         nodeRegistration:
           kubeletExtraArgs:
-            azure-container-registry-config: /etc/kubernetes/azure.json
             cloud-provider: external
           name: '{{ ds.meta_data["local_hostname"] }}'
-      postKubeadmCommands:
-      - echo "DNSStubListener=no" >> /etc/systemd/resolved.conf
-      - mv /etc/resolv.conf /etc/resolv.conf.OLD && ln -s /run/systemd/resolve/resolv.conf
-        /etc/resolv.conf
-      - systemctl restart systemd-resolved containerd
