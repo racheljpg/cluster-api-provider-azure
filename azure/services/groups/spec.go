@@ -29,6 +29,7 @@ import (
 // GroupSpec defines the specification for a Resource Group.
 type GroupSpec struct {
 	Name           string
+	AzureName      string
 	Namespace      string
 	Location       string
 	ClusterName    string
@@ -52,7 +53,7 @@ func (s *GroupSpec) Parameters(ctx context.Context, existing *asoresourcesv1.Res
 		return existing, nil
 	}
 
-	return &asoresourcesv1.ResourceGroup{
+	resourceGroup := &asoresourcesv1.ResourceGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			OwnerReferences: []metav1.OwnerReference{s.Owner},
 		},
@@ -66,7 +67,11 @@ func (s *GroupSpec) Parameters(ctx context.Context, existing *asoresourcesv1.Res
 				Additional:  s.AdditionalTags,
 			}),
 		},
-	}, nil
+	}
+	if s.AzureName != "" {
+		resourceGroup.Spec.AzureName = s.AzureName
+	}
+	return resourceGroup, nil
 }
 
 // WasManaged implements azure.ASOResourceSpecGetter.
@@ -84,11 +89,6 @@ func (s *GroupSpec) GetAdditionalTags() infrav1.Tags {
 // GetDesiredTags implements aso.TagsGetterSetter.
 func (*GroupSpec) GetDesiredTags(resource *asoresourcesv1.ResourceGroup) infrav1.Tags {
 	return resource.Spec.Tags
-}
-
-// GetActualTags implements aso.TagsGetterSetter.
-func (*GroupSpec) GetActualTags(resource *asoresourcesv1.ResourceGroup) infrav1.Tags {
-	return resource.Status.Tags
 }
 
 // SetTags implements aso.TagsGetterSetter.
