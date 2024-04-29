@@ -113,15 +113,15 @@ KUBECTL_VER := v1.28.4
 KUBECTL_BIN := kubectl
 KUBECTL := $(TOOLS_BIN_DIR)/$(KUBECTL_BIN)-$(KUBECTL_VER)
 
-HELM_VER := v3.12.2
+HELM_VER := v3.14.4
 HELM_BIN := helm
 HELM := $(TOOLS_BIN_DIR)/$(HELM_BIN)-$(HELM_VER)
 
-YQ_VER := v4.14.2
+YQ_VER := v4.35.2
 YQ_BIN := yq
 YQ :=  $(TOOLS_BIN_DIR)/$(YQ_BIN)-$(YQ_VER)
 
-KIND_VER := v0.20.0
+KIND_VER := v0.22.0
 KIND_BIN := kind
 KIND :=  $(TOOLS_BIN_DIR)/$(KIND_BIN)-$(KIND_VER)
 
@@ -301,14 +301,14 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 	./hack/create-custom-cloud-provider-config.sh
 
 	# Deploy CAPI
-	curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.6.1/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -
+	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.6.4/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
 
 	# Deploy CAAPH
-	curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/releases/download/v0.1.0-alpha.10/addon-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -
+	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/releases/download/v0.1.0-alpha.10/addon-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
 
 	# Deploy CAPZ
 	$(KIND) load docker-image $(CONTROLLER_IMG)-$(ARCH):$(TAG) --name=$(KIND_CLUSTER_NAME)
-	$(KUSTOMIZE) build config/default | $(ENVSUBST) | $(KUBECTL) apply -f - --server-side=true
+	timeout --foreground 300 bash -c "until $(KUSTOMIZE) build config/default | $(ENVSUBST) | $(KUBECTL) apply -f - --server-side=true; do sleep 5; done"
 
 	# Wait for CAPI deployments
 	$(KUBECTL) wait --for=condition=Available --timeout=5m -n capi-system deployment -l cluster.x-k8s.io/provider=cluster-api
@@ -322,8 +322,8 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 	timeout --foreground 300 bash -c "until $(KUBECTL) get clusterresourcesets -A; do sleep 3; done"
 
 	# install Windows Calico cluster resource set
-	$(KUBECTL) create configmap calico-windows-addon --from-file="$(ADDONS_DIR)/windows/calico" --dry-run=client -o yaml | kubectl apply -f -
-	$(KUBECTL) apply -f templates/addons/windows/calico-resource-set.yaml
+	timeout --foreground 300 bash -c "until $(KUBECTL) create configmap calico-windows-addon --from-file="$(ADDONS_DIR)/windows/calico" --dry-run=client -o yaml | kubectl apply -f -; do sleep 5; done"
+	timeout --foreground 300 bash -c "until $(KUBECTL) apply -f templates/addons/windows/calico-resource-set.yaml; do sleep 5; done"
 
 	# Wait for CAPZ deployments
 	$(KUBECTL) wait --for=condition=Available --timeout=5m -n capz-system deployment --all
@@ -339,18 +339,18 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 create-workload-cluster: $(ENVSUBST) $(KUBECTL) ## Create a workload cluster.
 	# Create workload Cluster.
 	@if [ -f "$(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE)" ]; then \
-		$(ENVSUBST) < "$(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE)" | $(KUBECTL) apply -f -; \
+		timeout --foreground 300 bash -c "until $(ENVSUBST) < $(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE) | $(KUBECTL) apply -f -; do sleep 5; done"; \
 	elif [ -f "$(CLUSTER_TEMPLATE)" ]; then \
-		$(ENVSUBST) < "$(CLUSTER_TEMPLATE)" | $(KUBECTL) apply -f -; \
+		timeout --foreground 300 bash -c "until $(ENVSUBST) < "$(CLUSTER_TEMPLATE)" | $(KUBECTL) apply -f -; do sleep 5; done"; \
 	else \
-		curl --retry "$(CURL_RETRIES)" "$(CLUSTER_TEMPLATE)" | "$(ENVSUBST)" | $(KUBECTL) apply -f -; \
+		timeout --foreground 300 bash -c "until curl --retry "$(CURL_RETRIES)" "$(CLUSTER_TEMPLATE)" | "$(ENVSUBST)" | $(KUBECTL) apply -f -; do sleep 5; done"; \
 	fi
 
 	# Wait for the kubeconfig to become available.
 	timeout --foreground 300 bash -c "while ! $(KUBECTL) get secrets | grep $(CLUSTER_NAME)-kubeconfig; do sleep 1; done"
 	# Get kubeconfig and store it locally.
 	$(KUBECTL) get secrets $(CLUSTER_NAME)-kubeconfig -o json | jq -r .data.value | base64 --decode > ./kubeconfig
-	timeout --foreground 600 bash -c "while ! $(KUBECTL) --kubeconfig=./kubeconfig get nodes | grep control-plane; do sleep 1; done"
+	$(KUBECTL) wait --for=condition=Ready --timeout=10m cluster "$(CLUSTER_NAME)"
 
 	@echo 'run "$(KUBECTL) --kubeconfig=./kubeconfig ..." to work with the new target cluster'
 
