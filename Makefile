@@ -44,7 +44,7 @@ export DOCKER_CLI_EXPERIMENTAL := enabled
 CURL_RETRIES=3
 
 # Directories.
-ROOT_DIR:=$(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+ROOT_DIR := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 TOOLS_DIR := hack/tools
 TOOLS_BIN_DIR := $(abspath $(TOOLS_DIR)/bin)
 TEMPLATES_DIR := $(ROOT_DIR)/templates
@@ -69,23 +69,23 @@ ifneq ($(abspath $(ROOT_DIR)),$(GOPATH)/src/sigs.k8s.io/cluster-api-provider-azu
 endif
 
 # Binaries.
-CONTROLLER_GEN_VER := v0.13.0
+CONTROLLER_GEN_VER := v0.14.0
 CONTROLLER_GEN_BIN := controller-gen
 CONTROLLER_GEN := $(TOOLS_BIN_DIR)/$(CONTROLLER_GEN_BIN)-$(CONTROLLER_GEN_VER)
 
-CONVERSION_GEN_VER := v0.28.0
+CONVERSION_GEN_VER := v0.29.2
 CONVERSION_GEN_BIN := conversion-gen
 CONVERSION_GEN := $(TOOLS_BIN_DIR)/$(CONVERSION_GEN_BIN)-$(CONVERSION_GEN_VER)
 
-ENVSUBST_VER := v2.0.0-20210730161058-179042472c46
+ENVSUBST_VER := $(shell go list -m -f '{{.Version}}' github.com/drone/envsubst/v2)
 ENVSUBST_BIN := envsubst
 ENVSUBST := $(TOOLS_BIN_DIR)/$(ENVSUBST_BIN)-$(ENVSUBST_VER)
 
-GOLANGCI_LINT_VER := v1.52.1
+GOLANGCI_LINT_VER := v1.55.2
 GOLANGCI_LINT_BIN := golangci-lint
 GOLANGCI_LINT := $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_BIN)-$(GOLANGCI_LINT_VER)
 
-KUSTOMIZE_VER := v4.5.2
+KUSTOMIZE_VER := v5.4.1
 KUSTOMIZE_BIN := kustomize
 KUSTOMIZE := $(TOOLS_BIN_DIR)/$(KUSTOMIZE_BIN)-$(KUSTOMIZE_VER)
 
@@ -93,7 +93,7 @@ MOCKGEN_VER := v0.4.0
 MOCKGEN_BIN := mockgen
 MOCKGEN := $(TOOLS_BIN_DIR)/$(MOCKGEN_BIN)-$(MOCKGEN_VER)
 
-RELEASE_NOTES_VER := v0.12.0
+RELEASE_NOTES_VER := v0.16.6-0.20240222112346-71feb57b59a4
 RELEASE_NOTES_BIN := release-notes
 RELEASE_NOTES := $(TOOLS_BIN_DIR)/$(RELEASE_NOTES_BIN)-$(RELEASE_NOTES_VER)
 
@@ -101,11 +101,11 @@ KPROMO_VER := v4.0.4
 KPROMO_BIN := kpromo
 KPROMO := $(TOOLS_BIN_DIR)/$(KPROMO_BIN)-$(KPROMO_VER)
 
-GO_APIDIFF_VER := v0.7.0
+GO_APIDIFF_VER := v0.8.2
 GO_APIDIFF_BIN := go-apidiff
 GO_APIDIFF := $(TOOLS_BIN_DIR)/$(GO_APIDIFF_BIN)
 
-GINKGO_VER := v2.14.0
+GINKGO_VER := $(shell go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
 GINKGO_BIN := ginkgo
 GINKGO := $(TOOLS_BIN_DIR)/$(GINKGO_BIN)-$(GINKGO_VER)
 
@@ -121,7 +121,7 @@ YQ_VER := v4.35.2
 YQ_BIN := yq
 YQ :=  $(TOOLS_BIN_DIR)/$(YQ_BIN)-$(YQ_VER)
 
-KIND_VER := v0.22.0
+KIND_VER := $(shell go list -m -f '{{.Version}}' sigs.k8s.io/kind)
 KIND_BIN := kind
 KIND :=  $(TOOLS_BIN_DIR)/$(KIND_BIN)-$(KIND_VER)
 
@@ -157,8 +157,8 @@ CRD_ROOT ?= $(MANIFEST_ROOT)/crd/bases
 WEBHOOK_ROOT ?= $(MANIFEST_ROOT)/webhook
 RBAC_ROOT ?= $(MANIFEST_ROOT)/rbac
 ASO_CRDS_PATH := $(MANIFEST_ROOT)/aso/crds.yaml
-ASO_VERSION := v2.5.0
-ASO_CRDS := resourcegroups.resources.azure.com natgateways.network.azure.com managedclusters.containerservice.azure.com managedclustersagentpools.containerservice.azure.com bastionhosts.network.azure.com virtualnetworks.network.azure.com virtualnetworkssubnets.network.azure.com privateendpoints.network.azure.com fleetsmembers.containerservice.azure.com
+ASO_VERSION := v2.6.0
+ASO_CRDS := resourcegroups.resources.azure.com natgateways.network.azure.com managedclusters.containerservice.azure.com managedclustersagentpools.containerservice.azure.com bastionhosts.network.azure.com virtualnetworks.network.azure.com virtualnetworkssubnets.network.azure.com privateendpoints.network.azure.com fleetsmembers.containerservice.azure.com extensions.kubernetesconfiguration.azure.com
 
 # Allow overriding the imagePullPolicy
 PULL_POLICY ?= Always
@@ -185,7 +185,6 @@ WIN_REPO_URL ?=
 LDFLAGS := $(shell hack/version.sh)
 
 CLUSTER_TEMPLATE ?= cluster-template.yaml
-MANAGED_CLUSTER_TEMPLATE ?= cluster-template-aks.yaml
 
 export KIND_CLUSTER_NAME ?= capz
 
@@ -301,7 +300,7 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 	./hack/create-custom-cloud-provider-config.sh
 
 	# Deploy CAPI
-	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.6.4/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
+	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.7.1/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
 
 	# Deploy CAAPH
 	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/releases/download/v0.1.0-alpha.10/addon-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
@@ -354,20 +353,6 @@ create-workload-cluster: $(ENVSUBST) $(KUBECTL) ## Create a workload cluster.
 
 	@echo 'run "$(KUBECTL) --kubeconfig=./kubeconfig ..." to work with the new target cluster'
 
-.PHONY: create-aks-cluster
-create-aks-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) ## Create a aks cluster.
-	# Create managed Cluster.
-	$(ENVSUBST) < $(TEMPLATES_DIR)/$(MANAGED_CLUSTER_TEMPLATE) | $(KUBECTL) apply -f -
-
-	# Wait for the kubeconfig to become available.
-	timeout --foreground 300 bash -c "while ! $(KUBECTL) get secrets | grep $(CLUSTER_NAME)-kubeconfig; do sleep 1; done"
-	# Get kubeconfig and store it locally.
-	$(KUBECTL) get secrets $(CLUSTER_NAME)-kubeconfig -o json | jq -r .data.value | base64 --decode > ./kubeconfig
-	timeout --foreground 600 bash -c "while ! $(KUBECTL) --kubeconfig=./kubeconfig get nodes | grep control-plane; do sleep 1; done"
-
-	@echo 'run "$(KUBECTL) --kubeconfig=./kubeconfig ..." to work with the new target cluster'
-
-
 .PHONY: create-cluster
 create-cluster: ## Create a workload development Kubernetes cluster on Azure in a kind management cluster.
 	EXP_CLUSTER_RESOURCE_SET=true \
@@ -390,7 +375,7 @@ delete-workload-cluster: $(KUBECTL) ## Deletes the example workload Kubernetes c
 .PHONY: docker-pull-prerequisites
 docker-pull-prerequisites: ## Pull prerequisites for building controller-manager.
 	docker pull docker/dockerfile:1.4
-	docker pull docker.io/library/golang:1.20
+	docker pull docker.io/library/golang:1.21
 	docker pull gcr.io/distroless/static:latest
 
 .PHONY: docker-build
@@ -644,7 +629,7 @@ release-binary: $(RELEASE_DIR) ## Compile and build release binaries.
 		-e GOARCH=$(GOARCH) \
 		-v "$$(pwd):/workspace" \
 		-w /workspace \
-		golang:1.20 \
+		golang:1.21 \
 		go build -a -ldflags '$(LDFLAGS) -extldflags "-static"' \
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(RELEASE_BINARY)
 
@@ -662,7 +647,7 @@ release-alias-tag: ## Adds the tag to the last build tag.
 release-notes: $(RELEASE_NOTES) $(RELEASE_NOTES_DIR) ## Generate/update release notes.
 	@echo "generating release notes from $(PREVIOUS_TAG) to $(RELEASE_TAG) with start sha $(START_SHA) and end sha $(END_SHA)"
 	@if [ -n "${PRE_RELEASE}" ]; then echo ":rotating_light: This is a RELEASE CANDIDATE. Use it only for testing purposes. If you find any bugs, file an [issue](https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/new)." > $(RELEASE_NOTES_DIR)/release-notes-$(RELEASE_TAG).md; \
-	else $(RELEASE_NOTES) --org $(GIT_ORG_NAME) --repo $(GIT_REPO_NAME) --branch $(RELEASE_BRANCH)  --start-sha $(START_SHA) --end-sha $(END_SHA) --markdown-links true --output $(RELEASE_NOTES_DIR)/$(RELEASE_TAG).md --list-v2; \
+	else $(RELEASE_NOTES) --org $(GIT_ORG_NAME) --repo $(GIT_REPO_NAME) --branch $(RELEASE_BRANCH) --repo-path $(ROOT_DIR) --start-sha $(START_SHA) --end-sha $(END_SHA) --markdown-links true --output $(RELEASE_NOTES_DIR)/$(RELEASE_TAG).md --list-v2; \
 	sed 's/\[SIG Cluster Lifecycle\]//g' $(RELEASE_NOTES_DIR)/$(RELEASE_TAG).md > $(RELEASE_NOTES_DIR)/tmp-release-notes.md; \
 	cp $(RELEASE_NOTES_DIR)/tmp-release-notes.md $(RELEASE_NOTES_DIR)/$(RELEASE_TAG).md; \
 	rm -f $(RELEASE_NOTES_DIR)/tmp-release-notes.md; \
@@ -698,52 +683,6 @@ test-cover: test ## Run tests with code coverage and generate reports.
 .PHONY: kind-create-bootstrap
 kind-create-bootstrap: $(KUBECTL) ## Create capz kind bootstrap cluster.
 	export AZWI=$${AZWI:-true} KIND_CLUSTER_NAME=capz-e2e && ./scripts/kind-with-registry.sh
-
-.PHONY: test-e2e-run
-test-e2e-run: generate-e2e-templates install-tools kind-create-bootstrap ## Run e2e tests.
-	$(ENVSUBST) < $(E2E_CONF_FILE) > $(E2E_CONF_FILE_ENVSUBST) && \
-    $(GINKGO) -v --trace --timeout=4h --tags=e2e --focus="$(GINKGO_FOCUS)" --skip="$(GINKGO_SKIP)" --nodes=$(GINKGO_NODES) --no-color=$(GINKGO_NOCOLOR) --output-dir="$(ARTIFACTS)" --junit-report="junit.e2e_suite.1.xml" $(GINKGO_ARGS) ./test/e2e -- \
-    	-e2e.artifacts-folder="$(ARTIFACTS)" \
-    	-e2e.config="$(E2E_CONF_FILE_ENVSUBST)" \
-    	-e2e.skip-log-collection="$(SKIP_LOG_COLLECTION)" \
-    	-e2e.skip-resource-cleanup=$(SKIP_CLEANUP) -e2e.use-existing-cluster=$(SKIP_CREATE_MGMT_CLUSTER) $(E2E_ARGS)
-	$(MAKE) clean-release-git
-
-.PHONY: test-e2e
-test-e2e: ## Run "docker-build" and "docker-push" rules then run e2e tests.
-	PULL_POLICY=IfNotPresent MANAGER_IMAGE=$(CONTROLLER_IMG)-$(ARCH):$(TAG) \
-	$(MAKE) docker-build docker-push \
-	test-e2e-run
-
-.PHONY: test-e2e-skip-push
-test-e2e-skip-push: ## Run "docker-build" rule then run e2e tests.
-	PULL_POLICY=IfNotPresent MANAGER_IMAGE=$(CONTROLLER_IMG)-$(ARCH):$(TAG) \
-	$(MAKE) docker-build \
-	test-e2e-run
-
-.PHONY: test-e2e-skip-build-and-push
-test-e2e-skip-build-and-push:
-	$(MAKE) set-manifest-image MANIFEST_IMG=$(CONTROLLER_IMG)-$(ARCH) MANIFEST_TAG=$(TAG) TARGET_RESOURCE="./config/capz/manager_image_patch.yaml"
-	$(MAKE) set-manifest-pull-policy TARGET_RESOURCE="./config/capz/manager_pull_policy.yaml" PULL_POLICY=IfNotPresent
-	MANAGER_IMAGE=$(CONTROLLER_IMG)-$(ARCH):$(TAG) \
-	$(MAKE) test-e2e-run
-
-CONFORMANCE_FLAVOR ?=
-CONFORMANCE_E2E_ARGS ?= -kubetest.config-file=$(KUBETEST_CONF_PATH)
-CONFORMANCE_E2E_ARGS += $(E2E_ARGS)
-.PHONY: test-conformance
-test-conformance: ## Run conformance test on workload cluster.
-	$(MAKE) test-e2e-skip-push GINKGO_FOCUS="Conformance" E2E_ARGS='$(CONFORMANCE_E2E_ARGS)' CONFORMANCE_FLAVOR='$(CONFORMANCE_FLAVOR)'
-
-test-conformance-fast: ## Run conformance test on workload cluster using a subset of the conformance suite in parallel.
-	$(MAKE) test-conformance CONFORMANCE_E2E_ARGS="-kubetest.config-file=$(KUBETEST_FAST_CONF_PATH) -kubetest.ginkgo-nodes=5 $(E2E_ARGS)"
-
-.PHONY: test-windows-upstream
-test-windows-upstream: ## Run windows upstream tests on workload cluster.
-ifneq ($(WIN_REPO_URL), )
-	curl --retry $(CURL_RETRIES) $(WIN_REPO_URL) -o $(KUBETEST_REPO_LIST_PATH)/custom-repo-list.yaml
-endif
-	$(MAKE) test-conformance CONFORMANCE_E2E_ARGS="-kubetest.config-file=$(KUBETEST_WINDOWS_CONF_PATH) -kubetest.repo-list-path=$(KUBETEST_REPO_LIST_PATH) $(E2E_ARGS)"
 
 ## --------------------------------------
 ## Security Scanning
@@ -816,13 +755,13 @@ $(GOLANGCI_LINT): ## Build golangci-lint from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/golangci/golangci-lint/cmd/golangci-lint $(GOLANGCI_LINT_BIN) $(GOLANGCI_LINT_VER)
 
 $(KUSTOMIZE): ## Build kustomize from tools folder.
-	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/kustomize/kustomize/v4 $(KUSTOMIZE_BIN) $(KUSTOMIZE_VER)
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/kustomize/kustomize/v5 $(KUSTOMIZE_BIN) $(KUSTOMIZE_VER)
 
 $(MOCKGEN): ## Build mockgen from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) go.uber.org/mock/mockgen $(MOCKGEN_BIN) $(MOCKGEN_VER)
 
 $(KPROMO): ## Build kpromo from tools folder.
-	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/promo-tools/v3/cmd/kpromo $(KPROMO_BIN) $(KPROMO_VER)
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/promo-tools/v4/cmd/kpromo $(KPROMO_BIN) $(KPROMO_VER)
 
 $(RELEASE_NOTES): ## Build release notes from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) k8s.io/release/cmd/release-notes $(RELEASE_NOTES_BIN) $(RELEASE_NOTES_VER)
@@ -886,3 +825,6 @@ $(CODESPELL): ## Build codespell from tools folder.
 		mv $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin/$(CODESPELL_BIN) $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR); \
 		rm -r $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin; \
     )
+
+include conformance.mk
+include e2e.mk

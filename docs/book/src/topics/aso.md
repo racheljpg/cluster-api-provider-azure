@@ -56,13 +56,78 @@ Cluster API.
 
 ### Installing more CRDs
 
-CAPZ's installation of ASO configures only the ASO CRDs that are required by CAPZ. To make more resource types
-available, install their corresponding CRDs. ASO publishes a manifest containing all CRDs for each
-[release](https://github.com/Azure/azure-service-operator/releases). Extract only the ones you need using tool
-like [`yq`](https://mikefarah.gitbook.io/yq/), then make the following modifications to each CRD to account
-for CAPZ installing ASO in the `capz-system` namespace:
+#### For a fresh installation
+Before performing a `clusterctl init`, users can specify additional ASO CRDs to be installed in the management cluster by exporting `ADDITIONAL_ASO_CRDS` variable.
+For example, to install all the CRDs of `cache.azure.com` and `MongodbDatabase.documentdb.azure.com`:
+- `export ADDITIONAL_ASO_CRDS="cache.azure.com/*;documentdb.azure.com/MongodbDatabase"`
+- continue with the installation of CAPZ as specified here [Cluster API Quick Start](https://cluster-api.sigs.k8s.io/user/quick-start.html).
 
-- Change `metadata.annotations."cert-manager.io/inject-ca-from"` to `capz-system/azureserviceoperator-serving-cert`
-- Change `spec.conversion.webhook.clientConfig.service.namespace` to `capz-system`
+#### For an existing CAPZ installation being upgraded to v1.14.0(or beyond)
+CAPZ's installation of ASO configures only the ASO CRDs that are required by CAPZ. To make more resource types available, export `ADDITIONAL_ASO_CRDS` and then upgrade CAPZ.
+For example, to install the all CRDs of `cache.azure.com` and `MongodbDatabase.documentdb.azure.com`, follow these steps:
+- `export ADDITIONAL_ASO_CRDS="cache.azure.com/*;documentdb.azure.com/MongodbDatabase"`
+- continue with the upgrade of CAPZ as specified [here](https://cluster-api.sigs.k8s.io/tasks/upgrading-cluster-api-versions.html?highlight=upgrade#when-to-upgrade]
+
+You will see that the `--crd-pattern` in Azure Service Operator's Deployment (in the `capz-system` namespace) looks like below:
+   ```
+   .
+   - --crd-names=cache.azure.com/*;documentdb.azure.com/MongodbDatabase
+   .
+   ```
 
 More details about how ASO manages CRDs can be found [here](https://azure.github.io/azure-service-operator/guide/crd-management/).
+
+**Note:** To install the resource for the newly installed CRDs, make sure that the ASO operator has the authentication to install the resources. Refer [authentication in ASO](https://azure.github.io/azure-service-operator/guide/authentication/) for more details.
+An example configuration file and demo for `Azure Cache for Redis` can be found [here](https://github.com/Azure-Samples/azure-service-operator-samples/tree/master/azure-votes-redis).
+
+## Experimental ASO API
+
+New in CAPZ v1.15.0 is a new flavor of APIs that addresses the following limitations of
+the existing CAPZ APIs for advanced use cases:
+
+- A limited set of Azure resource types can be represented.
+- A limited set of Azure resource topologies can be expressed. e.g. Only a single Virtual Network resource can
+  be reconciled for each CAPZ-managed AKS cluster.
+- For each Azure resource type supported by CAPZ, CAPZ generally only uses a single Azure API version to
+  define resources of that type.
+- For each Azure API version known by CAPZ, only a subset of fields defined in that version by the Azure API
+  spec are exposed by the CAPZ API.
+
+This new experimental API defines new AzureASOManagedCluster, AzureASOManagedControlPlane, and
+AzureASOManagedMachinePool resources. An AzureASOManagedCluster might look like this:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: AzureASOManagedCluster
+metadata:
+  name: my-cluster
+  namespace: default
+spec:
+  resources:
+  - apiVersion: resources.azure.com/v1api20200601
+    kind: ResourceGroup
+    metadata:
+      name: my-resource-group
+    spec:
+      location: eastus
+```
+
+See [here](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/templates/cluster-template-aks-aso.yaml) for a full AKS example using all the new resources.
+
+The main element of the new API is `spec.resources` in each new resource, which defines arbitrary, literal ASO
+resources inline to be managed by CAPZ. These inline ASO resource definitions take the place of almost all
+other configuration currently defined by CAPZ. e.g. Instead of a CAPZ-specific `spec.location` field on the
+existing AzureManagedControlPlane, the same value would be expected to be set on an ASO ManagedCluster
+resource defined in an AzureASOManagedControlPlane's `spec.resources`. This pattern allows users to define, in
+full, any ASO-supported version of a resource type in any of these new CAPZ resources.
+
+The obvious tradeoff with this new style of API is that CAPZ resource definitions can become more verbose for
+basic use cases. To address this, CAPZ still offers flavor templates that use this API with all of the
+boilerplate predefined to serve as a starting point for customization.
+
+The overall theme of this API is to leverage ASO as much as possible for representing Azure resources in the
+Kubernetes API, thereby making CAPZ the thinnest possible translation layer between ASO and Cluster API.
+
+This experiment will help inform CAPZ whether this pattern may be a candidate for a potential v2 API. This
+functionality is available behind the `ASOAPI` feature flag (set by the `EXP_ASO_API` environment variable).
+Please try it out and offer any feedback!

@@ -21,6 +21,7 @@ import (
 	"encoding/base64"
 	"testing"
 
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/google/go-cmp/cmp"
@@ -38,7 +39,6 @@ func TestParameters(t *testing.T) {
 
 		spec := &ManagedClusterSpec{
 			Name:              "name",
-			Namespace:         "namespace",
 			ResourceGroup:     "rg",
 			NodeResourceGroup: "node rg",
 			ClusterName:       "cluster",
@@ -52,12 +52,13 @@ func TestParameters(t *testing.T) {
 			NetworkPolicy:     "network policy",
 			OutboundType:      ptr.To(infrav1.ManagedControlPlaneOutboundType("outbound type")),
 			SSHPublicKey:      base64.StdEncoding.EncodeToString([]byte("ssh")),
-			GetAllAgentPools: func() ([]azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool], error) {
-				return []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
+			GetAllAgentPools: func() ([]azure.ASOResourceSpecGetter[genruntime.MetaObject], error) {
+				return []azure.ASOResourceSpecGetter[genruntime.MetaObject]{
 					&agentpools.AgentPoolSpec{
 						Replicas:  5,
 						Mode:      "mode",
 						AzureName: "agentpool",
+						Patches:   []string{`{"spec": {"tags": {"from": "patches"}}}`},
 					},
 				}, nil
 			},
@@ -88,9 +89,12 @@ func TestParameters(t *testing.T) {
 			AutoScalerProfile: &AutoScalerProfile{
 				Expander: ptr.To("expander"),
 			},
+			AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+				UpgradeChannel: ptr.To(infrav1.UpgradeChannelRapid),
+			},
 			Identity: &infrav1.Identity{
 				Type:                           infrav1.ManagedControlPlaneIdentityType(asocontainerservicev1.ManagedClusterIdentity_Type_UserAssigned),
-				UserAssignedIdentityResourceID: "user assigned id id",
+				UserAssignedIdentityResourceID: "user assigned id",
 			},
 			KubeletUserAssignedIdentity: "kubelet id",
 			HTTPProxyConfig: &HTTPProxyConfig{
@@ -101,6 +105,26 @@ func TestParameters(t *testing.T) {
 			},
 			DNSPrefix:            ptr.To("dns prefix"),
 			DisableLocalAccounts: ptr.To(true),
+			SecurityProfile: &ManagedClusterSecurityProfile{
+				AzureKeyVaultKms: &AzureKeyVaultKms{
+					Enabled:               ptr.To(true),
+					KeyID:                 ptr.To("KeyID"),
+					KeyVaultNetworkAccess: ptr.To(infrav1.KeyVaultNetworkAccessTypesPublic),
+				},
+				Defender: &ManagedClusterSecurityProfileDefender{
+					LogAnalyticsWorkspaceResourceID: ptr.To("LogAnalyticsWorkspaceResourceID"),
+					SecurityMonitoring: &ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+						Enabled: ptr.To(true),
+					},
+				},
+				ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+					Enabled:       ptr.To(true),
+					IntervalHours: ptr.To(24),
+				},
+				WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+					Enabled: ptr.To(true),
+				},
+			},
 		}
 
 		expected := &asocontainerservicev1.ManagedCluster{
@@ -123,6 +147,7 @@ func TestParameters(t *testing.T) {
 						Name:              ptr.To("agentpool"),
 						OsDiskSizeGB:      ptr.To(asocontainerservicev1.ContainerServiceOSDisk(0)),
 						Type:              ptr.To(asocontainerservicev1.AgentPoolType_VirtualMachineScaleSets),
+						Tags:              map[string]string{"from": "patches"},
 					},
 				},
 				ApiServerAccessProfile: &asocontainerservicev1.ManagedClusterAPIServerAccessProfile{
@@ -130,6 +155,9 @@ func TestParameters(t *testing.T) {
 				},
 				AutoScalerProfile: &asocontainerservicev1.ManagedClusterProperties_AutoScalerProfile{
 					Expander: ptr.To(asocontainerservicev1.ManagedClusterProperties_AutoScalerProfile_Expander("expander")),
+				},
+				AutoUpgradeProfile: &asocontainerservicev1.ManagedClusterAutoUpgradeProfile{
+					UpgradeChannel: ptr.To(asocontainerservicev1.ManagedClusterAutoUpgradeProfile_UpgradeChannel_Rapid),
 				},
 				AzureName:            "name",
 				DisableLocalAccounts: ptr.To(true),
@@ -143,7 +171,7 @@ func TestParameters(t *testing.T) {
 					UserAssignedIdentities: []asocontainerservicev1.UserAssignedIdentityDetails{
 						{
 							Reference: genruntime.ResourceReference{
-								ARMID: "user assigned id id",
+								ARMID: "user assigned id",
 							},
 						},
 					},
@@ -207,8 +235,14 @@ func TestParameters(t *testing.T) {
 				OperatorSpec: &asocontainerservicev1.ManagedClusterOperatorSpec{
 					Secrets: &asocontainerservicev1.ManagedClusterOperatorSecrets{
 						UserCredentials: &genruntime.SecretDestination{
-							Name: "cluster-user-aso-kubeconfig",
+							Name: userKubeconfigSecretName("cluster"),
 							Key:  secret.KubeconfigDataName,
+						},
+					},
+					ConfigMaps: &asocontainerservicev1.ManagedClusterOperatorConfigMaps{
+						OIDCIssuerProfile: &genruntime.ConfigMapDestination{
+							Name: oidcIssuerURLConfigMapName("cluster"),
+							Key:  oidcIssuerProfileURL,
 						},
 					},
 				},
@@ -227,6 +261,28 @@ func TestParameters(t *testing.T) {
 					"sigs.k8s.io_cluster-api-provider-azure_cluster_cluster": "owned",
 					"sigs.k8s.io_cluster-api-provider-azure_role":            "common",
 				},
+				SecurityProfile: &asocontainerservicev1.ManagedClusterSecurityProfile{
+					AzureKeyVaultKms: &asocontainerservicev1.AzureKeyVaultKms{
+						Enabled:               ptr.To(true),
+						KeyId:                 ptr.To("KeyID"),
+						KeyVaultNetworkAccess: ptr.To(asocontainerservicev1.AzureKeyVaultKms_KeyVaultNetworkAccess_Public),
+					},
+					Defender: &asocontainerservicev1.ManagedClusterSecurityProfileDefender{
+						LogAnalyticsWorkspaceResourceReference: &genruntime.ResourceReference{
+							ARMID: "LogAnalyticsWorkspaceResourceID",
+						},
+						SecurityMonitoring: &asocontainerservicev1.ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+							Enabled: ptr.To(true),
+						},
+					},
+					ImageCleaner: &asocontainerservicev1.ManagedClusterSecurityProfileImageCleaner{
+						Enabled:       ptr.To(true),
+						IntervalHours: ptr.To(24),
+					},
+					WorkloadIdentity: &asocontainerservicev1.ManagedClusterSecurityProfileWorkloadIdentity{
+						Enabled: ptr.To(true),
+					},
+				},
 			},
 		}
 
@@ -236,12 +292,38 @@ func TestParameters(t *testing.T) {
 		g.Expect(cmp.Diff(actual, expected)).To(BeEmpty())
 	})
 
+	t.Run("no existing preview managed cluster", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+
+		spec := &ManagedClusterSpec{
+			Name:    "name",
+			Preview: true,
+			GetAllAgentPools: func() ([]azure.ASOResourceSpecGetter[genruntime.MetaObject], error) {
+				return []azure.ASOResourceSpecGetter[genruntime.MetaObject]{
+					&agentpools.AgentPoolSpec{
+						Replicas:  5,
+						Mode:      "mode",
+						AzureName: "agentpool",
+						Patches:   []string{`{"spec": {"tags": {"from": "patches"}}}`},
+						Preview:   true,
+					},
+				}, nil
+			},
+		}
+
+		actual, err := spec.Parameters(context.Background(), nil)
+		g.Expect(err).NotTo(HaveOccurred())
+		_, ok := actual.(*asocontainerservicev1preview.ManagedCluster)
+		g.Expect(ok).To(BeTrue())
+	})
+
 	t.Run("with existing managed cluster", func(t *testing.T) {
 		g := NewGomegaWithT(t)
 
 		spec := &ManagedClusterSpec{
 			DNSPrefix: ptr.To("managed by CAPZ"),
 			Tags:      map[string]string{"additional": "tags"},
+			Version:   "1.25.9",
 		}
 		existing := &asocontainerservicev1.ManagedCluster{
 			Spec: asocontainerservicev1.ManagedCluster_Spec{
@@ -249,19 +331,24 @@ func TestParameters(t *testing.T) {
 				EnablePodSecurityPolicy: ptr.To(true), // set by the user
 			},
 			Status: asocontainerservicev1.ManagedCluster_STATUS{
-				AgentPoolProfiles: []asocontainerservicev1.ManagedClusterAgentPoolProfile_STATUS{},
-				Tags:              map[string]string{},
+				AgentPoolProfiles:        []asocontainerservicev1.ManagedClusterAgentPoolProfile_STATUS{},
+				Tags:                     map[string]string{},
+				CurrentKubernetesVersion: ptr.To("1.26.6"),
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), existing)
+		actualObj, err := spec.Parameters(context.Background(), existing)
+		actual := actualObj.(*asocontainerservicev1.ManagedCluster)
 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(actual.Spec.AgentPoolProfiles).To(BeNil())
 		g.Expect(actual.Spec.Tags).To(BeNil())
 		g.Expect(actual.Spec.DnsPrefix).To(Equal(ptr.To("managed by CAPZ")))
 		g.Expect(actual.Spec.EnablePodSecurityPolicy).To(Equal(ptr.To(true)))
+		g.Expect(actual.Spec.KubernetesVersion).NotTo(BeNil())
+		g.Expect(*actual.Spec.KubernetesVersion).To(Equal("1.26.6"))
 	})
+
 	t.Run("updating existing managed cluster to a non nil DNS Service IP", func(t *testing.T) {
 		g := NewGomegaWithT(t)
 
@@ -283,7 +370,8 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), existing)
+		actualObj, err := spec.Parameters(context.Background(), existing)
+		actual := actualObj.(*asocontainerservicev1.ManagedCluster)
 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(actual.Spec.AgentPoolProfiles).To(BeNil())
@@ -292,5 +380,16 @@ func TestParameters(t *testing.T) {
 		g.Expect(actual.Spec.EnablePodSecurityPolicy).To(Equal(ptr.To(true)))
 		g.Expect(actual.Spec.NetworkProfile.DnsServiceIP).To(Equal(ptr.To("123.200.198.99")))
 		g.Expect(actual.Spec.NetworkProfile.ServiceCidr).To(Equal(ptr.To("123.200.198.0/10")))
+	})
+}
+
+func TestOIDCIssuerURLConfigMap(t *testing.T) {
+	t.Run("get oidc issuer profile", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+
+		clusterName := "my-cluster"
+		actualOIDCIssuerConfigMapName := oidcIssuerURLConfigMapName(clusterName)
+
+		g.Expect(actualOIDCIssuerConfigMapName).To(Equal("my-cluster-aso-oidc-issuer-profile"))
 	})
 }

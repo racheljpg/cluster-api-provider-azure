@@ -29,8 +29,7 @@ import (
 	reflect "reflect"
 	time "time"
 
-	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
-	v1api20231001 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	genruntime "github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -61,25 +60,25 @@ func (m *MockAgentPoolScope) EXPECT() *MockAgentPoolScopeMockRecorder {
 	return m.recorder
 }
 
-// AdditionalTags mocks base method.
-func (m *MockAgentPoolScope) AdditionalTags() v1beta1.Tags {
+// ASOOwner mocks base method.
+func (m *MockAgentPoolScope) ASOOwner() client.Object {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AdditionalTags")
-	ret0, _ := ret[0].(v1beta1.Tags)
+	ret := m.ctrl.Call(m, "ASOOwner")
+	ret0, _ := ret[0].(client.Object)
 	return ret0
 }
 
-// AdditionalTags indicates an expected call of AdditionalTags.
-func (mr *MockAgentPoolScopeMockRecorder) AdditionalTags() *gomock.Call {
+// ASOOwner indicates an expected call of ASOOwner.
+func (mr *MockAgentPoolScopeMockRecorder) ASOOwner() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AdditionalTags", reflect.TypeOf((*MockAgentPoolScope)(nil).AdditionalTags))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ASOOwner", reflect.TypeOf((*MockAgentPoolScope)(nil).ASOOwner))
 }
 
 // AgentPoolSpec mocks base method.
-func (m *MockAgentPoolScope) AgentPoolSpec() azure.ASOResourceSpecGetter[*v1api20231001.ManagedClustersAgentPool] {
+func (m *MockAgentPoolScope) AgentPoolSpec() azure.ASOResourceSpecGetter[genruntime.MetaObject] {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AgentPoolSpec")
-	ret0, _ := ret[0].(azure.ASOResourceSpecGetter[*v1api20231001.ManagedClustersAgentPool])
+	ret0, _ := ret[0].(azure.ASOResourceSpecGetter[genruntime.MetaObject])
 	return ret0
 }
 
@@ -87,90 +86,6 @@ func (m *MockAgentPoolScope) AgentPoolSpec() azure.ASOResourceSpecGetter[*v1api2
 func (mr *MockAgentPoolScopeMockRecorder) AgentPoolSpec() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AgentPoolSpec", reflect.TypeOf((*MockAgentPoolScope)(nil).AgentPoolSpec))
-}
-
-// AvailabilitySetEnabled mocks base method.
-func (m *MockAgentPoolScope) AvailabilitySetEnabled() bool {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "AvailabilitySetEnabled")
-	ret0, _ := ret[0].(bool)
-	return ret0
-}
-
-// AvailabilitySetEnabled indicates an expected call of AvailabilitySetEnabled.
-func (mr *MockAgentPoolScopeMockRecorder) AvailabilitySetEnabled() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AvailabilitySetEnabled", reflect.TypeOf((*MockAgentPoolScope)(nil).AvailabilitySetEnabled))
-}
-
-// BaseURI mocks base method.
-func (m *MockAgentPoolScope) BaseURI() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "BaseURI")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// BaseURI indicates an expected call of BaseURI.
-func (mr *MockAgentPoolScopeMockRecorder) BaseURI() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BaseURI", reflect.TypeOf((*MockAgentPoolScope)(nil).BaseURI))
-}
-
-// ClientID mocks base method.
-func (m *MockAgentPoolScope) ClientID() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ClientID")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// ClientID indicates an expected call of ClientID.
-func (mr *MockAgentPoolScopeMockRecorder) ClientID() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClientID", reflect.TypeOf((*MockAgentPoolScope)(nil).ClientID))
-}
-
-// ClientSecret mocks base method.
-func (m *MockAgentPoolScope) ClientSecret() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ClientSecret")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// ClientSecret indicates an expected call of ClientSecret.
-func (mr *MockAgentPoolScopeMockRecorder) ClientSecret() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClientSecret", reflect.TypeOf((*MockAgentPoolScope)(nil).ClientSecret))
-}
-
-// CloudEnvironment mocks base method.
-func (m *MockAgentPoolScope) CloudEnvironment() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CloudEnvironment")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// CloudEnvironment indicates an expected call of CloudEnvironment.
-func (mr *MockAgentPoolScopeMockRecorder) CloudEnvironment() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloudEnvironment", reflect.TypeOf((*MockAgentPoolScope)(nil).CloudEnvironment))
-}
-
-// CloudProviderConfigOverrides mocks base method.
-func (m *MockAgentPoolScope) CloudProviderConfigOverrides() *v1beta1.CloudProviderConfigOverrides {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CloudProviderConfigOverrides")
-	ret0, _ := ret[0].(*v1beta1.CloudProviderConfigOverrides)
-	return ret0
-}
-
-// CloudProviderConfigOverrides indicates an expected call of CloudProviderConfigOverrides.
-func (mr *MockAgentPoolScopeMockRecorder) CloudProviderConfigOverrides() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloudProviderConfigOverrides", reflect.TypeOf((*MockAgentPoolScope)(nil).CloudProviderConfigOverrides))
 }
 
 // ClusterName mocks base method.
@@ -241,62 +156,6 @@ func (mr *MockAgentPoolScopeMockRecorder) DeleteLongRunningOperationState(arg0, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteLongRunningOperationState", reflect.TypeOf((*MockAgentPoolScope)(nil).DeleteLongRunningOperationState), arg0, arg1, arg2)
 }
 
-// ExtendedLocation mocks base method.
-func (m *MockAgentPoolScope) ExtendedLocation() *v1beta1.ExtendedLocationSpec {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExtendedLocation")
-	ret0, _ := ret[0].(*v1beta1.ExtendedLocationSpec)
-	return ret0
-}
-
-// ExtendedLocation indicates an expected call of ExtendedLocation.
-func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocation() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocation", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocation))
-}
-
-// ExtendedLocationName mocks base method.
-func (m *MockAgentPoolScope) ExtendedLocationName() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExtendedLocationName")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// ExtendedLocationName indicates an expected call of ExtendedLocationName.
-func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocationName() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationName", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocationName))
-}
-
-// ExtendedLocationType mocks base method.
-func (m *MockAgentPoolScope) ExtendedLocationType() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExtendedLocationType")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// ExtendedLocationType indicates an expected call of ExtendedLocationType.
-func (mr *MockAgentPoolScopeMockRecorder) ExtendedLocationType() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtendedLocationType", reflect.TypeOf((*MockAgentPoolScope)(nil).ExtendedLocationType))
-}
-
-// FailureDomains mocks base method.
-func (m *MockAgentPoolScope) FailureDomains() []*string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FailureDomains")
-	ret0, _ := ret[0].([]*string)
-	return ret0
-}
-
-// FailureDomains indicates an expected call of FailureDomains.
-func (mr *MockAgentPoolScopeMockRecorder) FailureDomains() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FailureDomains", reflect.TypeOf((*MockAgentPoolScope)(nil).FailureDomains))
-}
-
 // GetClient mocks base method.
 func (m *MockAgentPoolScope) GetClient() client.Client {
 	m.ctrl.T.Helper()
@@ -325,32 +184,18 @@ func (mr *MockAgentPoolScopeMockRecorder) GetLongRunningOperationState(arg0, arg
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLongRunningOperationState", reflect.TypeOf((*MockAgentPoolScope)(nil).GetLongRunningOperationState), arg0, arg1, arg2)
 }
 
-// HashKey mocks base method.
-func (m *MockAgentPoolScope) HashKey() string {
+// IsPreviewEnabled mocks base method.
+func (m *MockAgentPoolScope) IsPreviewEnabled() bool {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "HashKey")
-	ret0, _ := ret[0].(string)
+	ret := m.ctrl.Call(m, "IsPreviewEnabled")
+	ret0, _ := ret[0].(bool)
 	return ret0
 }
 
-// HashKey indicates an expected call of HashKey.
-func (mr *MockAgentPoolScopeMockRecorder) HashKey() *gomock.Call {
+// IsPreviewEnabled indicates an expected call of IsPreviewEnabled.
+func (mr *MockAgentPoolScopeMockRecorder) IsPreviewEnabled() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HashKey", reflect.TypeOf((*MockAgentPoolScope)(nil).HashKey))
-}
-
-// Location mocks base method.
-func (m *MockAgentPoolScope) Location() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Location")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// Location indicates an expected call of Location.
-func (mr *MockAgentPoolScopeMockRecorder) Location() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Location", reflect.TypeOf((*MockAgentPoolScope)(nil).Location))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsPreviewEnabled", reflect.TypeOf((*MockAgentPoolScope)(nil).IsPreviewEnabled))
 }
 
 // Name mocks base method.
@@ -391,20 +236,6 @@ func (m *MockAgentPoolScope) RemoveCAPIMachinePoolAnnotation(key string) {
 func (mr *MockAgentPoolScopeMockRecorder) RemoveCAPIMachinePoolAnnotation(key any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RemoveCAPIMachinePoolAnnotation", reflect.TypeOf((*MockAgentPoolScope)(nil).RemoveCAPIMachinePoolAnnotation), key)
-}
-
-// ResourceGroup mocks base method.
-func (m *MockAgentPoolScope) ResourceGroup() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ResourceGroup")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// ResourceGroup indicates an expected call of ResourceGroup.
-func (mr *MockAgentPoolScopeMockRecorder) ResourceGroup() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ResourceGroup", reflect.TypeOf((*MockAgentPoolScope)(nil).ResourceGroup))
 }
 
 // SetAgentPoolProviderIDList mocks base method.
@@ -489,48 +320,6 @@ func (m *MockAgentPoolScope) SetSubnetName() {
 func (mr *MockAgentPoolScopeMockRecorder) SetSubnetName() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetSubnetName", reflect.TypeOf((*MockAgentPoolScope)(nil).SetSubnetName))
-}
-
-// SubscriptionID mocks base method.
-func (m *MockAgentPoolScope) SubscriptionID() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SubscriptionID")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// SubscriptionID indicates an expected call of SubscriptionID.
-func (mr *MockAgentPoolScopeMockRecorder) SubscriptionID() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubscriptionID", reflect.TypeOf((*MockAgentPoolScope)(nil).SubscriptionID))
-}
-
-// TenantID mocks base method.
-func (m *MockAgentPoolScope) TenantID() string {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "TenantID")
-	ret0, _ := ret[0].(string)
-	return ret0
-}
-
-// TenantID indicates an expected call of TenantID.
-func (mr *MockAgentPoolScopeMockRecorder) TenantID() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TenantID", reflect.TypeOf((*MockAgentPoolScope)(nil).TenantID))
-}
-
-// Token mocks base method.
-func (m *MockAgentPoolScope) Token() azcore.TokenCredential {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Token")
-	ret0, _ := ret[0].(azcore.TokenCredential)
-	return ret0
-}
-
-// Token indicates an expected call of Token.
-func (mr *MockAgentPoolScopeMockRecorder) Token() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Token", reflect.TypeOf((*MockAgentPoolScope)(nil).Token))
 }
 
 // UpdateDeleteStatus mocks base method.

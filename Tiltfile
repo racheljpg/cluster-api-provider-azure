@@ -20,7 +20,7 @@ settings = {
     "deploy_cert_manager": True,
     "preload_images_for_kind": True,
     "kind_cluster_name": "capz",
-    "capi_version": "v1.6.4",
+    "capi_version": "v1.7.1",
     "cert_manager_version": "v1.14.4",
     "kubernetes_version": "v1.28.3",
     "aks_kubernetes_version": "v1.28.3",
@@ -113,7 +113,7 @@ def validate_auth():
 
 tilt_helper_dockerfile_header = """
 # Tilt image
-FROM golang:1.20 as tilt-helper
+FROM golang:1.21 as tilt-helper
 # Support live reloading with Tilt
 RUN wget --output-document /restart.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/restart.sh  && \
     wget --output-document /start.sh --quiet https://raw.githubusercontent.com/windmilleng/rerun-process-wrapper/master/start.sh && \
@@ -255,9 +255,11 @@ def create_identity_secret():
     os.putenv("AZURE_CLUSTER_IDENTITY_SECRET_NAME", "cluster-identity-secret")
     os.putenv("AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE", "default")
     os.putenv("CLUSTER_IDENTITY_NAME", "cluster-identity")
+    os.putenv("ASO_CREDENTIAL_SECRET_NAME", "aso-credentials")
 
     os.putenv("AZURE_CLIENT_SECRET_B64", base64_encode(os.environ.get("AZURE_CLIENT_SECRET")))
     local("cat templates/azure-cluster-identity/secret.yaml | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f -", quiet = True, echo_off = True)
+    local("cat templates/flavors/aks-aso/credentials.yaml | " + envsubst_cmd + " | " + kubectl_cmd + " apply -f -", quiet = True, echo_off = True)
     os.unsetenv("AZURE_CLIENT_SECRET_B64")
 
 def create_crs():

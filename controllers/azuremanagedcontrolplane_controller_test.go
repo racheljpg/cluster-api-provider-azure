@@ -182,8 +182,8 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 			AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
 				SubscriptionID: "something",
 				VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+					Name: name,
 					ManagedControlPlaneVirtualNetworkClassSpec: infrav1.ManagedControlPlaneVirtualNetworkClassSpec{
-						Name: name,
 						Subnet: infrav1.ManagedControlPlaneSubnet{
 							Name: "subnet",
 						},
@@ -199,8 +199,8 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 					Namespace: "default",
 					Kind:      "AzureClusterIdentity",
 				},
+				ResourceGroupName: name,
 			},
-			ResourceGroupName: name,
 		},
 	}
 	g.Expect(c.Create(ctx, instance)).To(Succeed())
@@ -252,7 +252,7 @@ func TestAzureManagedControlPlaneReconcilePaused(t *testing.T) {
 		},
 	})
 
-	g.Expect(err).To(BeNil())
+	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(result.RequeueAfter).To(BeZero())
 }
 
@@ -275,7 +275,7 @@ func TestAzureManagedControlPlaneReconcileNormal(t *testing.T) {
 		},
 	}
 	scheme, err := newScheme()
-	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(cp).WithStatusSubresource(cp).Build()
 	amcpr := &AzureManagedControlPlaneReconciler{
@@ -283,7 +283,7 @@ func TestAzureManagedControlPlaneReconcileNormal(t *testing.T) {
 	}
 
 	helper, err := patch.NewHelper(cp, client)
-	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(err).NotTo(HaveOccurred())
 
 	scopes := &scope.ManagedControlPlaneScope{
 		Cluster: &clusterv1.Cluster{

@@ -654,9 +654,6 @@ func TestAzureManagedMachinePoolUpdatingWebhook(t *testing.T) {
 }
 
 func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
-	// NOTE: AzureManagedMachinePool is behind AKS feature gate flag; the webhook
-	// must prevent creating new objects in case the feature flag is disabled.
-	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
 	tests := []struct {
 		name     string
 		ammp     *AzureManagedMachinePool
@@ -736,11 +733,11 @@ func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
 			errorLen: 1,
 		},
 		{
-			name: "invalid subnetname",
+			name: "invalid subnetname with versioning",
 			ammp: &AzureManagedMachinePool{
 				Spec: AzureManagedMachinePoolSpec{
 					AzureManagedMachinePoolClassSpec: AzureManagedMachinePoolClassSpec{
-						SubnetName: ptr.To("E-a_b-c"),
+						SubnetName: ptr.To("workload-ampt-v0.1.0."),
 					},
 				},
 			},
@@ -789,6 +786,17 @@ func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
 				Spec: AzureManagedMachinePoolSpec{
 					AzureManagedMachinePoolClassSpec: AzureManagedMachinePoolClassSpec{
 						SubnetName: ptr.To("3DgIb8EZMkLs0KlyPaTcNxoJU9ufmW6jvXrweqz1hVp5nS4RtH2QY7AFOiC5nS4RtH2QY7AFOiC3DgIb"),
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid subnetname with versioning",
+			ammp: &AzureManagedMachinePool{
+				Spec: AzureManagedMachinePoolSpec{
+					AzureManagedMachinePoolClassSpec: AzureManagedMachinePoolClassSpec{
+						SubnetName: ptr.To("workload-ampt-v0.1.0"),
 					},
 				},
 			},
@@ -1299,19 +1307,22 @@ func TestAzureManagedMachinePool_ValidateCreate(t *testing.T) {
 
 func TestAzureManagedMachinePool_ValidateCreateFailure(t *testing.T) {
 	tests := []struct {
-		name      string
-		ammp      *AzureManagedMachinePool
-		deferFunc func()
+		name        string
+		ammp        *AzureManagedMachinePool
+		deferFunc   func()
+		expectError bool
 	}{
 		{
-			name:      "feature gate explicitly disabled",
-			ammp:      getKnownValidAzureManagedMachinePool(),
-			deferFunc: utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
+			name:        "feature gate explicitly disabled",
+			ammp:        getKnownValidAzureManagedMachinePool(),
+			deferFunc:   utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
+			expectError: true,
 		},
 		{
-			name:      "feature gate implicitly disabled",
-			ammp:      getKnownValidAzureManagedMachinePool(),
-			deferFunc: func() {},
+			name:        "feature gate implicitly enabled",
+			ammp:        getKnownValidAzureManagedMachinePool(),
+			deferFunc:   func() {},
+			expectError: false,
 		},
 	}
 	for _, tc := range tests {
@@ -1320,7 +1331,11 @@ func TestAzureManagedMachinePool_ValidateCreateFailure(t *testing.T) {
 			g := NewWithT(t)
 			mw := &azureManagedMachinePoolWebhook{}
 			_, err := mw.ValidateCreate(context.Background(), tc.ammp)
-			g.Expect(err).To(HaveOccurred())
+			if tc.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
 		})
 	}
 }

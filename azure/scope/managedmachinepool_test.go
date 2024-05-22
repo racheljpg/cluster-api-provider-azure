@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,7 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without Autoscaling",
@@ -74,7 +75,6 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -110,7 +110,6 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:              "pool1",
 				AzureName:         "pool1",
-				Namespace:         "default",
 				SKU:               "Standard_D2s_v3",
 				Mode:              "User",
 				Cluster:           "cluster1",
@@ -147,7 +146,7 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without node labels",
@@ -177,7 +176,6 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -215,7 +213,6 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:      "pool1",
 				AzureName: "pool1",
-				Namespace: "default",
 				SKU:       "Standard_D2s_v3",
 				Mode:      "System",
 				Cluster:   "cluster1",
@@ -252,7 +249,7 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without additional tags",
@@ -282,7 +279,6 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -320,7 +316,6 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:      "pool1",
 				AzureName: "pool1",
-				Namespace: "default",
 				SKU:       "Standard_D2s_v3",
 				Mode:      "System",
 				Cluster:   "cluster1",
@@ -357,7 +352,7 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without MaxPods",
@@ -387,7 +382,6 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -423,7 +417,6 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
 				AzureName:    "pool1",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Mode:         "System",
 				Cluster:      "cluster1",
@@ -458,7 +451,7 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without taints",
@@ -489,7 +482,6 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -531,7 +523,6 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
 				AzureName:    "pool1",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Mode:         "User",
 				Cluster:      "cluster1",
@@ -566,7 +557,7 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without OsDiskType",
@@ -596,7 +587,6 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -632,7 +622,6 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
 				AzureName:    "pool1",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Mode:         "User",
 				Cluster:      "cluster1",
@@ -667,7 +656,7 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without Vnet and SubnetName",
@@ -697,7 +686,6 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -723,8 +711,8 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
 							SubscriptionID: "00000000-0000-0000-0000-000000000000",
 							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								Name: "my-vnet",
 								ManagedControlPlaneVirtualNetworkClassSpec: infrav1.ManagedControlPlaneVirtualNetworkClassSpec{
-									Name: "my-vnet",
 									Subnet: infrav1.ManagedControlPlaneSubnet{
 										Name: "my-vnet-subnet",
 									},
@@ -742,7 +730,6 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
 				AzureName:    "pool1",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Mode:         "User",
 				Cluster:      "cluster1",
@@ -768,8 +755,8 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
 							SubscriptionID: "00000000-0000-0000-0000-000000000000",
 							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								Name: "my-vnet",
 								ManagedControlPlaneVirtualNetworkClassSpec: infrav1.ManagedControlPlaneVirtualNetworkClassSpec{
-									Name: "my-vnet",
 									Subnet: infrav1.ManagedControlPlaneSubnet{
 										Name: "my-vnet-subnet",
 									},
@@ -787,7 +774,6 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
 				AzureName:    "pool1",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Mode:         "User",
 				Cluster:      "cluster1",
@@ -822,7 +808,7 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedMachinePoolScopeParams
-		Expected azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without KubeletDiskType",
@@ -852,7 +838,6 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
 				AzureName:    "pool0",
-				Namespace:    "default",
 				SKU:          "Standard_D2s_v3",
 				Replicas:     1,
 				Mode:         "System",
@@ -888,7 +873,6 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 			Expected: &agentpools.AgentPoolSpec{
 				Name:            "pool1",
 				AzureName:       "pool1",
-				Namespace:       "default",
 				SKU:             "Standard_D2s_v3",
 				Mode:            "User",
 				Cluster:         "cluster1",
@@ -910,6 +894,168 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 			agentPool := s.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
+			}
+		})
+	}
+}
+
+func TestManagedMachinePoolScope_EnablePreviewFeatures(t *testing.T) {
+	cases := []struct {
+		Name           string
+		previewEnabled *bool
+		Expected       bool
+	}{
+		{
+			Name:           "Without EnablePreviewFeatures",
+			previewEnabled: nil,
+			Expected:       false,
+		},
+		{
+			Name:           "With EnablePreviewFeatures false",
+			previewEnabled: ptr.To(false),
+			Expected:       false,
+		},
+		{
+			Name:           "With EnablePreviewFeatures true",
+			previewEnabled: ptr.To(true),
+			Expected:       true,
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			g := NewWithT(t)
+			s := &ManagedMachinePoolScope{
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							EnablePreviewFeatures: c.previewEnabled,
+						},
+					},
+				},
+				MachinePool:      &expv1.MachinePool{},
+				InfraMachinePool: &infrav1.AzureManagedMachinePool{},
+			}
+			agentPoolGetter := s.AgentPoolSpec()
+			agentPool, ok := agentPoolGetter.(*agentpools.AgentPoolSpec)
+			g.Expect(ok).To(BeTrue())
+			g.Expect(agentPool.Preview).To(Equal(c.Expected))
+			g.Expect(s.IsPreviewEnabled()).To(Equal(c.Expected))
+		})
+	}
+}
+
+func Test_getManagedMachinePoolVersion(t *testing.T) {
+	cases := []struct {
+		name                string
+		managedControlPlane *infrav1.AzureManagedControlPlane
+		machinePool         *expv1.MachinePool
+		expected            *string
+	}{
+		{
+			name:                "Empty configs",
+			managedControlPlane: nil,
+			machinePool:         nil,
+			expected:            nil,
+		},
+		{
+			name:                "Empty mp",
+			managedControlPlane: &infrav1.AzureManagedControlPlane{},
+			machinePool:         nil,
+			expected:            nil,
+		},
+		{
+			name:                "Only machine pool is available",
+			managedControlPlane: nil,
+			machinePool: &expv1.MachinePool{
+				Spec: expv1.MachinePoolSpec{
+					Template: clusterv1.MachineTemplateSpec{
+						Spec: clusterv1.MachineSpec{
+							Version: ptr.To("v1.15.0"),
+						},
+					},
+				},
+			},
+			expected: ptr.To("1.15.0"),
+		},
+		{
+			name:                "Only machine pool is available and cp is nil",
+			managedControlPlane: nil,
+			machinePool: &expv1.MachinePool{
+				Spec: expv1.MachinePoolSpec{
+					Template: clusterv1.MachineTemplateSpec{
+						Spec: clusterv1.MachineSpec{
+							Version: ptr.To("v1.15.0"),
+						},
+					},
+				},
+			},
+			expected: ptr.To("1.15.0"),
+		},
+		{
+			name: "mcp.status.autoUpgradeVersion > mp.spec.template.spec.version",
+			managedControlPlane: &infrav1.AzureManagedControlPlane{
+				Status: infrav1.AzureManagedControlPlaneStatus{
+					AutoUpgradeVersion: "1.20.3",
+				},
+			},
+			machinePool: &expv1.MachinePool{
+				Spec: expv1.MachinePoolSpec{
+					Template: clusterv1.MachineTemplateSpec{
+						Spec: clusterv1.MachineSpec{
+							Version: ptr.To("v1.15.0"),
+						},
+					},
+				},
+			},
+			expected: ptr.To("1.20.3"),
+		},
+		{
+			name: "suffix + mcp.status.autoUpgradeVersion > mp.spec.template.spec.version",
+			managedControlPlane: &infrav1.AzureManagedControlPlane{
+				Status: infrav1.AzureManagedControlPlaneStatus{
+					AutoUpgradeVersion: "v1.20.3",
+				},
+			},
+			machinePool: &expv1.MachinePool{
+				Spec: expv1.MachinePoolSpec{
+					Template: clusterv1.MachineTemplateSpec{
+						Spec: clusterv1.MachineSpec{
+							Version: ptr.To("v1.15.0"),
+						},
+					},
+				},
+			},
+			expected: ptr.To("1.20.3"),
+		},
+		{
+			name: "mcp.status.autoUpgradeVersion < mp.spec.template.spec.version",
+			managedControlPlane: &infrav1.AzureManagedControlPlane{
+				Status: infrav1.AzureManagedControlPlaneStatus{
+					AutoUpgradeVersion: "v1.20.3",
+				},
+			},
+			machinePool: &expv1.MachinePool{
+				Spec: expv1.MachinePoolSpec{
+					Template: clusterv1.MachineTemplateSpec{
+						Spec: clusterv1.MachineSpec{
+							Version: ptr.To("v1.21.0"),
+						},
+					},
+				},
+			},
+			expected: ptr.To("1.21.0"),
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := NewWithT(t)
+			v := getManagedMachinePoolVersion(c.managedControlPlane, c.machinePool)
+			if c.expected != nil {
+				g.Expect(*v).To(Equal(*c.expected))
+			} else {
+				g.Expect(v).To(BeNil())
 			}
 		})
 	}

@@ -160,27 +160,28 @@ func (m *MachineScope) InitMachineCache(ctx context.Context) error {
 // VMSpec returns the VM spec.
 func (m *MachineScope) VMSpec() azure.ResourceSpecGetter {
 	spec := &virtualmachines.VMSpec{
-		Name:                   m.Name(),
-		Location:               m.Location(),
-		ExtendedLocation:       m.ExtendedLocation(),
-		ResourceGroup:          m.NodeResourceGroup(),
-		ClusterName:            m.ClusterName(),
-		Role:                   m.Role(),
-		NICIDs:                 m.NICIDs(),
-		SSHKeyData:             m.AzureMachine.Spec.SSHPublicKey,
-		Size:                   m.AzureMachine.Spec.VMSize,
-		OSDisk:                 m.AzureMachine.Spec.OSDisk,
-		DataDisks:              m.AzureMachine.Spec.DataDisks,
-		AvailabilitySetID:      m.AvailabilitySetID(),
-		Zone:                   m.AvailabilityZone(),
-		Identity:               m.AzureMachine.Spec.Identity,
-		UserAssignedIdentities: m.AzureMachine.Spec.UserAssignedIdentities,
-		SpotVMOptions:          m.AzureMachine.Spec.SpotVMOptions,
-		SecurityProfile:        m.AzureMachine.Spec.SecurityProfile,
-		DiagnosticsProfile:     m.AzureMachine.Spec.Diagnostics,
-		AdditionalTags:         m.AdditionalTags(),
-		AdditionalCapabilities: m.AzureMachine.Spec.AdditionalCapabilities,
-		ProviderID:             m.ProviderID(),
+		Name:                       m.Name(),
+		Location:                   m.Location(),
+		ExtendedLocation:           m.ExtendedLocation(),
+		ResourceGroup:              m.NodeResourceGroup(),
+		ClusterName:                m.ClusterName(),
+		Role:                       m.Role(),
+		NICIDs:                     m.NICIDs(),
+		SSHKeyData:                 m.AzureMachine.Spec.SSHPublicKey,
+		Size:                       m.AzureMachine.Spec.VMSize,
+		OSDisk:                     m.AzureMachine.Spec.OSDisk,
+		DataDisks:                  m.AzureMachine.Spec.DataDisks,
+		AvailabilitySetID:          m.AvailabilitySetID(),
+		Zone:                       m.AvailabilityZone(),
+		Identity:                   m.AzureMachine.Spec.Identity,
+		UserAssignedIdentities:     m.AzureMachine.Spec.UserAssignedIdentities,
+		SpotVMOptions:              m.AzureMachine.Spec.SpotVMOptions,
+		SecurityProfile:            m.AzureMachine.Spec.SecurityProfile,
+		DiagnosticsProfile:         m.AzureMachine.Spec.Diagnostics,
+		AdditionalTags:             m.AdditionalTags(),
+		AdditionalCapabilities:     m.AzureMachine.Spec.AdditionalCapabilities,
+		CapacityReservationGroupID: m.GetCapacityReservationGroupID(),
+		ProviderID:                 m.ProviderID(),
 	}
 	if m.cache != nil {
 		spec.SKU = m.cache.VMSKU
@@ -728,12 +729,22 @@ func (m *MachineScope) SetSubnetName() error {
 		subnetName := ""
 		subnets := m.Subnets()
 		var subnetCount int
+		clusterSubnetName := ""
 		for _, subnet := range subnets {
 			if string(subnet.Role) == m.Role() {
 				subnetCount++
 				subnetName = subnet.Name
 			}
+			if subnet.Role == infrav1.SubnetCluster {
+				clusterSubnetName = subnet.Name
+			}
 		}
+
+		if subnetName == "" && clusterSubnetName != "" {
+			subnetName = clusterSubnetName
+			subnetCount = 1
+		}
+
 		if subnetCount == 0 || subnetCount > 1 || subnetName == "" {
 			return errors.New("a subnet name must be specified when no subnets are specified or more than 1 subnet of the same role exist")
 		}
@@ -794,4 +805,10 @@ func (m *MachineScope) UpdatePatchStatus(condition clusterv1.ConditionType, serv
 	default:
 		conditions.MarkFalse(m.AzureMachine, condition, infrav1.FailedReason, clusterv1.ConditionSeverityError, "%s failed to update. err: %s", service, err.Error())
 	}
+}
+
+// GetCapacityReservationGroupID returns the CapacityReservationGroupID from the spec if the
+// value is assigned, or else returns an empty string.
+func (m *MachineScope) GetCapacityReservationGroupID() string {
+	return ptr.Deref(m.AzureMachine.Spec.CapacityReservationGroupID, "")
 }

@@ -348,7 +348,7 @@ func TestCheckUserAssignedIdentities(t *testing.T) {
 				s.SubscriptionID().AnyTimes().Return("123")
 				i.GetClientID(gomockinternal.AContext(), fakeUserAssignedIdentity.ProviderID).AnyTimes().Return(fakeUserAssignedIdentity.ProviderID, nil)
 				i.GetClientID(gomockinternal.AContext(), fakeUserAssignedIdentity2.ProviderID).AnyTimes().Return(fakeUserAssignedIdentity2.ProviderID, nil)
-				s.SetConditionFalse(infrav1.VMIdentitiesReadyCondition, infrav1.UserAssignedIdentityMissingReason, clusterv1.ConditionSeverityWarning, "VM is missing expected user assigned identity with client ID: "+fakeUserAssignedIdentity2.ProviderID).Times(1)
+				s.SetConditionFalse(infrav1.VMIdentitiesReadyCondition, infrav1.UserAssignedIdentityMissingReason, clusterv1.ConditionSeverityWarning, vmMissingUAI+fakeUserAssignedIdentity2.ProviderID).Times(1)
 			},
 			expectedError: "",
 		},
@@ -369,7 +369,7 @@ func TestCheckUserAssignedIdentities(t *testing.T) {
 			expect: func(s *mock_virtualmachines.MockVMScopeMockRecorder, i *mock_identities.MockClientMockRecorder) {
 				s.SubscriptionID().Return("123")
 				i.GetClientID(gomockinternal.AContext(), fakeUserAssignedIdentity.ProviderID).AnyTimes().Return(fakeUserAssignedIdentity.ProviderID, nil)
-				s.SetConditionFalse(infrav1.VMIdentitiesReadyCondition, infrav1.UserAssignedIdentityMissingReason, clusterv1.ConditionSeverityWarning, "VM is missing expected user assigned identity with client ID: "+fakeUserAssignedIdentity.ProviderID).Times(1)
+				s.SetConditionFalse(infrav1.VMIdentitiesReadyCondition, infrav1.UserAssignedIdentityMissingReason, clusterv1.ConditionSeverityWarning, vmMissingUAI+fakeUserAssignedIdentity.ProviderID).Times(1)
 			},
 			expectedError: "",
 		},

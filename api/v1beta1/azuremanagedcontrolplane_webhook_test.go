@@ -45,19 +45,28 @@ func TestDefaultingWebhook(t *testing.T) {
 			AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
 				Location: "fooLocation",
 				Version:  "1.17.5",
+				Extensions: []AKSExtension{
+					{
+						Name: "test-extension",
+						Plan: &ExtensionPlan{
+							Product:   "test-product",
+							Publisher: "test-publisher",
+						},
+					},
+				},
 			},
-			ResourceGroupName: "fooRg",
-			SSHPublicKey:      ptr.To(""),
+			SSHPublicKey: ptr.To(""),
 		},
 	}
 	mcpw := &azureManagedControlPlaneWebhook{}
 	err := mcpw.Default(context.Background(), amcp)
 	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(amcp.Spec.ResourceGroupName).To(Equal("fooCluster"))
 	g.Expect(amcp.Spec.NetworkPlugin).To(Equal(ptr.To(AzureNetworkPluginName)))
 	g.Expect(amcp.Spec.LoadBalancerSKU).To(Equal(ptr.To("Standard")))
 	g.Expect(amcp.Spec.Version).To(Equal("v1.17.5"))
 	g.Expect(*amcp.Spec.SSHPublicKey).NotTo(BeEmpty())
-	g.Expect(amcp.Spec.NodeResourceGroupName).To(Equal("MC_fooRg_fooName_fooLocation"))
+	g.Expect(amcp.Spec.NodeResourceGroupName).To(Equal("MC_fooCluster_fooName_fooLocation"))
 	g.Expect(amcp.Spec.VirtualNetwork.Name).To(Equal("fooName"))
 	g.Expect(amcp.Spec.VirtualNetwork.CIDRBlock).To(Equal(defaultAKSVnetCIDR))
 	g.Expect(amcp.Spec.VirtualNetwork.Subnet.Name).To(Equal("fooName"))
@@ -65,8 +74,11 @@ func TestDefaultingWebhook(t *testing.T) {
 	g.Expect(amcp.Spec.SKU.Tier).To(Equal(FreeManagedControlPlaneTier))
 	g.Expect(amcp.Spec.Identity.Type).To(Equal(ManagedControlPlaneIdentityTypeSystemAssigned))
 	g.Expect(*amcp.Spec.OIDCIssuerProfile.Enabled).To(BeFalse())
-	g.Expect(amcp.Spec.DNSPrefix).ToNot(BeNil())
+	g.Expect(amcp.Spec.DNSPrefix).NotTo(BeNil())
 	g.Expect(*amcp.Spec.DNSPrefix).To(Equal(amcp.Name))
+	g.Expect(amcp.Spec.Extensions[0].Plan.Name).To(Equal("fooName-test-product"))
+	g.Expect(amcp.Spec.EnablePreviewFeatures).NotTo(BeNil())
+	g.Expect(*amcp.Spec.EnablePreviewFeatures).To(BeFalse())
 
 	t.Logf("Testing amcp defaulting webhook with baseline")
 	netPlug := "kubenet"
@@ -75,6 +87,7 @@ func TestDefaultingWebhook(t *testing.T) {
 	amcp.Spec.NetworkPolicy = &netPol
 	amcp.Spec.Version = "9.99.99"
 	amcp.Spec.SSHPublicKey = nil
+	amcp.Spec.ResourceGroupName = "fooRg"
 	amcp.Spec.NodeResourceGroupName = "fooNodeRg"
 	amcp.Spec.VirtualNetwork.Name = "fooVnetName"
 	amcp.Spec.VirtualNetwork.Subnet.Name = "fooSubnetName"
@@ -84,6 +97,19 @@ func TestDefaultingWebhook(t *testing.T) {
 	}
 	amcp.Spec.DNSPrefix = ptr.To("test-prefix")
 	amcp.Spec.FleetsMember = &FleetsMember{}
+	amcp.Spec.AutoUpgradeProfile = &ManagedClusterAutoUpgradeProfile{
+		UpgradeChannel: ptr.To(UpgradeChannelPatch),
+	}
+	amcp.Spec.SecurityProfile = &ManagedClusterSecurityProfile{
+		AzureKeyVaultKms: &AzureKeyVaultKms{
+			Enabled: true,
+		},
+		ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+			Enabled:       true,
+			IntervalHours: ptr.To(48),
+		},
+	}
+	amcp.Spec.EnablePreviewFeatures = ptr.To(true)
 
 	err = mcpw.Default(context.Background(), amcp)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -91,14 +117,25 @@ func TestDefaultingWebhook(t *testing.T) {
 	g.Expect(*amcp.Spec.NetworkPolicy).To(Equal(netPol))
 	g.Expect(amcp.Spec.Version).To(Equal("v9.99.99"))
 	g.Expect(amcp.Spec.SSHPublicKey).To(BeNil())
+	g.Expect(amcp.Spec.ResourceGroupName).To(Equal("fooRg"))
 	g.Expect(amcp.Spec.NodeResourceGroupName).To(Equal("fooNodeRg"))
 	g.Expect(amcp.Spec.VirtualNetwork.Name).To(Equal("fooVnetName"))
 	g.Expect(amcp.Spec.VirtualNetwork.Subnet.Name).To(Equal("fooSubnetName"))
 	g.Expect(amcp.Spec.SKU.Tier).To(Equal(StandardManagedControlPlaneTier))
 	g.Expect(*amcp.Spec.OIDCIssuerProfile.Enabled).To(BeTrue())
-	g.Expect(amcp.Spec.DNSPrefix).ToNot(BeNil())
+	g.Expect(amcp.Spec.DNSPrefix).NotTo(BeNil())
 	g.Expect(*amcp.Spec.DNSPrefix).To(Equal("test-prefix"))
 	g.Expect(amcp.Spec.FleetsMember.Name).To(Equal("fooCluster"))
+	g.Expect(amcp.Spec.AutoUpgradeProfile).NotTo(BeNil())
+	g.Expect(amcp.Spec.AutoUpgradeProfile.UpgradeChannel).NotTo(BeNil())
+	g.Expect(*amcp.Spec.AutoUpgradeProfile.UpgradeChannel).To(Equal(UpgradeChannelPatch))
+	g.Expect(amcp.Spec.SecurityProfile).NotTo(BeNil())
+	g.Expect(amcp.Spec.SecurityProfile.AzureKeyVaultKms).NotTo(BeNil())
+	g.Expect(amcp.Spec.SecurityProfile.ImageCleaner).NotTo(BeNil())
+	g.Expect(amcp.Spec.SecurityProfile.ImageCleaner.IntervalHours).NotTo(BeNil())
+	g.Expect(*amcp.Spec.SecurityProfile.ImageCleaner.IntervalHours).To(Equal(48))
+	g.Expect(amcp.Spec.EnablePreviewFeatures).NotTo(BeNil())
+	g.Expect(*amcp.Spec.EnablePreviewFeatures).To(BeTrue())
 
 	t.Logf("Testing amcp defaulting webhook with overlay")
 	amcp = &AzureManagedControlPlane{
@@ -107,18 +144,35 @@ func TestDefaultingWebhook(t *testing.T) {
 		},
 		Spec: AzureManagedControlPlaneSpec{
 			AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+				ResourceGroupName: "fooRg",
 				Location:          "fooLocation",
 				Version:           "1.17.5",
 				NetworkPluginMode: ptr.To(NetworkPluginModeOverlay),
+				AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+					UpgradeChannel: ptr.To(UpgradeChannelRapid),
+				},
+				SecurityProfile: &ManagedClusterSecurityProfile{
+					Defender: &ManagedClusterSecurityProfileDefender{
+						LogAnalyticsWorkspaceResourceID: "not empty",
+						SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+							Enabled: true,
+						},
+					},
+					WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+						Enabled: true,
+					},
+				},
 			},
-			ResourceGroupName: "fooRg",
-			SSHPublicKey:      ptr.To(""),
+			SSHPublicKey: ptr.To(""),
 		},
 	}
 	err = mcpw.Default(context.Background(), amcp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(amcp.Spec.VirtualNetwork.CIDRBlock).To(Equal(defaultAKSVnetCIDRForOverlay))
 	g.Expect(amcp.Spec.VirtualNetwork.Subnet.CIDRBlock).To(Equal(defaultAKSNodeSubnetCIDRForOverlay))
+	g.Expect(amcp.Spec.AutoUpgradeProfile).NotTo(BeNil())
+	g.Expect(amcp.Spec.AutoUpgradeProfile.UpgradeChannel).NotTo(BeNil())
+	g.Expect(*amcp.Spec.AutoUpgradeProfile.UpgradeChannel).To(Equal(UpgradeChannelRapid))
 }
 
 func TestValidateVersion(t *testing.T) {
@@ -424,9 +478,6 @@ func TestValidateAutoScalerProfile(t *testing.T) {
 }
 
 func TestValidatingWebhook(t *testing.T) {
-	// NOTE: AzureManageControlPlane is behind AKS feature gate flag; the webhook
-	// must prevent creating new objects in case the feature flag is disabled.
-	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
 	tests := []struct {
 		name      string
 		amcp      AzureManagedControlPlane
@@ -1114,6 +1165,227 @@ func TestValidatingWebhook(t *testing.T) {
 			},
 			expectErr: false,
 		},
+		{
+			name: "Testing valid AKS Extension",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Extensions: []AKSExtension{
+							{
+								Name:          "extension1",
+								ExtensionType: ptr.To("test-type"),
+								Plan: &ExtensionPlan{
+									Name:      "test-plan",
+									Product:   "test-product",
+									Publisher: "test-publisher",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid AKS Extension: version given when AutoUpgradeMinorVersion is true",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension1",
+								ExtensionType:           ptr.To("test-type"),
+								Version:                 ptr.To("1.0.0"),
+								AutoUpgradeMinorVersion: ptr.To(true),
+								Plan: &ExtensionPlan{
+									Name:      "test-plan",
+									Product:   "test-product",
+									Publisher: "test-publisher",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid AKS Extension: missing plan.product and plan.publisher",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension1",
+								ExtensionType:           ptr.To("test-type"),
+								Version:                 ptr.To("1.0.0"),
+								AutoUpgradeMinorVersion: ptr.To(true),
+								Plan: &ExtensionPlan{
+									Name: "test-plan",
+								},
+							},
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Test invalid AzureKeyVaultKms",
+			amcp: AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+							},
+						},
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Valid NetworkDataplane: cilium",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version:           "v1.17.8",
+						NetworkPluginMode: ptr.To(NetworkPluginModeOverlay),
+						NetworkDataplane:  ptr.To(NetworkDataplaneTypeCilium),
+						NetworkPolicy:     ptr.To("cilium"),
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid NetworkDataplane: cilium dataplane requires overlay network plugin mode",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version:           "v1.17.8",
+						NetworkPluginMode: nil,
+						NetworkDataplane:  ptr.To(NetworkDataplaneTypeCilium),
+						NetworkPolicy:     ptr.To("cilium"),
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Test valid AzureKeyVaultKms",
+			amcp: AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+								KeyVaultResourceID:    ptr.To("0000-0000-0000-000"),
+							},
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Test valid AzureKeyVaultKms",
+			amcp: AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid NetworkDataplane: cilium dataplane requires network policy to be cilium",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version:           "v1.17.8",
+						NetworkPluginMode: nil,
+						NetworkDataplane:  ptr.To(NetworkDataplaneTypeCilium),
+						NetworkPolicy:     ptr.To("azure"),
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid NetworkPolicy: cilium network policy can only be used with cilium network dataplane",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version:           "v1.17.8",
+						NetworkPluginMode: nil,
+						NetworkDataplane:  ptr.To(NetworkDataplaneTypeAzure),
+						NetworkPolicy:     ptr.To("cilium"),
+					},
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing valid FleetsMember",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					FleetsMember: &FleetsMember{
+						Name: "fleetmember1",
+					},
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid FleetsMember: Fleets member name cannot contain capital letters",
+			amcp: AzureManagedControlPlane{
+				ObjectMeta: getAMCPMetaData(),
+				Spec: AzureManagedControlPlaneSpec{
+					FleetsMember: &FleetsMember{
+						Name: "FleetMember1",
+					},
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+					},
+				},
+			},
+			expectErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1136,10 +1408,6 @@ func TestValidatingWebhook(t *testing.T) {
 }
 
 func TestAzureManagedControlPlane_ValidateCreate(t *testing.T) {
-	// NOTE: AzureManageControlPlane is behind AKS feature gate flag; the webhook
-	// must prevent creating new objects in case the feature flag is disabled.
-	defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, true)()
-
 	tests := []struct {
 		name     string
 		amcp     *AzureManagedControlPlane
@@ -1394,19 +1662,22 @@ func TestAzureManagedControlPlane_ValidateCreate(t *testing.T) {
 
 func TestAzureManagedControlPlane_ValidateCreateFailure(t *testing.T) {
 	tests := []struct {
-		name      string
-		amcp      *AzureManagedControlPlane
-		deferFunc func()
+		name        string
+		amcp        *AzureManagedControlPlane
+		deferFunc   func()
+		expectError bool
 	}{
 		{
-			name:      "feature gate explicitly disabled",
-			amcp:      getKnownValidAzureManagedControlPlane(),
-			deferFunc: utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
+			name:        "feature gate explicitly disabled",
+			amcp:        getKnownValidAzureManagedControlPlane(),
+			deferFunc:   utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
+			expectError: true,
 		},
 		{
-			name:      "feature gate implicitly disabled",
-			amcp:      getKnownValidAzureManagedControlPlane(),
-			deferFunc: func() {},
+			name:        "feature gate implicitly enabled",
+			amcp:        getKnownValidAzureManagedControlPlane(),
+			deferFunc:   func() {},
+			expectError: false,
 		},
 	}
 	client := mockClient{ReturnError: false}
@@ -1418,7 +1689,11 @@ func TestAzureManagedControlPlane_ValidateCreateFailure(t *testing.T) {
 				Client: client,
 			}
 			_, err := mcpw.ValidateCreate(context.Background(), tc.amcp)
-			g.Expect(err).To(HaveOccurred())
+			if tc.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
 		})
 	}
 }
@@ -1574,6 +1849,124 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "AzureManagedControlPlane invalid version downgrade change",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.0",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane invalid version downgrade change",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+				Status: AzureManagedControlPlaneStatus{
+					AutoUpgradeVersion: "v1.18.3",
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.1",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane Autoupgrade cannot be set to nil",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:   ptr.To("192.168.0.10"),
+						SubscriptionID: "212ec1q8",
+						Version:        "v1.18.0",
+						AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+							UpgradeChannel: ptr.To(UpgradeChannelStable),
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:   ptr.To("192.168.0.10"),
+						SubscriptionID: "212ec1q8",
+						Version:        "v1.18.0",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane Autoupgrade cannot be set to nil",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:   ptr.To("192.168.0.10"),
+						SubscriptionID: "212ec1q8",
+						Version:        "v1.18.0",
+						AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+							UpgradeChannel: ptr.To(UpgradeChannelStable),
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:       ptr.To("192.168.0.10"),
+						SubscriptionID:     "212ec1q8",
+						Version:            "v1.18.0",
+						AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{},
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane Autoupgrade is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:   ptr.To("192.168.0.10"),
+						SubscriptionID: "212ec1q8",
+						Version:        "v1.18.0",
+						AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+							UpgradeChannel: ptr.To(UpgradeChannelStable),
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:   ptr.To("192.168.0.10"),
+						SubscriptionID: "212ec1q8",
+						Version:        "v1.18.0",
+						AutoUpgradeProfile: &ManagedClusterAutoUpgradeProfile{
+							UpgradeChannel: ptr.To(UpgradeChannelNone),
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "AzureManagedControlPlane SubscriptionID is immutable",
 			oldAMCP: &AzureManagedControlPlane{
 				Spec: AzureManagedControlPlaneSpec{
@@ -1600,19 +1993,19 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 			oldAMCP: &AzureManagedControlPlane{
 				Spec: AzureManagedControlPlaneSpec{
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
-						DNSServiceIP: ptr.To("192.168.0.10"),
-						Version:      "v1.18.0",
+						DNSServiceIP:      ptr.To("192.168.0.10"),
+						Version:           "v1.18.0",
+						ResourceGroupName: "hello-1",
 					},
-					ResourceGroupName: "hello-1",
 				},
 			},
 			amcp: &AzureManagedControlPlane{
 				Spec: AzureManagedControlPlaneSpec{
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
-						DNSServiceIP: ptr.To("192.168.0.10"),
-						Version:      "v1.18.0",
+						DNSServiceIP:      ptr.To("192.168.0.10"),
+						Version:           "v1.18.0",
+						ResourceGroupName: "hello-2",
 					},
-					ResourceGroupName: "hello-2",
 				},
 			},
 			wantErr: true,
@@ -1795,6 +2188,49 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 						DNSServiceIP:  ptr.To("192.168.0.10"),
 						NetworkPolicy: ptr.To("azure"),
 						Version:       "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP: ptr.To("192.168.0.10"),
+						Version:      "v1.18.0",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane NetworkPolicy is immutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:     ptr.To("192.168.0.10"),
+						NetworkDataplane: ptr.To(NetworkDataplaneTypeCilium),
+						Version:          "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:     ptr.To("192.168.0.10"),
+						NetworkDataplane: ptr.To(NetworkDataplaneTypeAzure),
+						Version:          "v1.18.0",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane NetworkDataplane is immutable, unsetting is not allowed",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						DNSServiceIP:     ptr.To("192.168.0.10"),
+						NetworkDataplane: ptr.To(NetworkDataplaneTypeCilium),
+						Version:          "v1.18.0",
 					},
 				},
 			},
@@ -2041,8 +2477,8 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 						DNSServiceIP: ptr.To("192.168.0.10"),
 						Version:      "v1.18.0",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
+							Name: "test-network",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "test-network",
 								CIDRBlock: "10.0.0.0/8",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "test-subnet",
@@ -2089,8 +2525,8 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 						DNSServiceIP: ptr.To("192.168.0.10"),
 						Version:      "v1.18.0",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
+							Name: "test-network",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "test-network",
 								CIDRBlock: "10.0.0.0/8",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "test-subnet",
@@ -2115,8 +2551,8 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 						DNSServiceIP: ptr.To("192.168.0.10"),
 						Version:      "v1.18.0",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
+							Name: "test-network",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "test-network",
 								CIDRBlock: "10.0.0.0/8",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "test-subnet",
@@ -2137,8 +2573,8 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 						DNSServiceIP: ptr.To("192.168.0.10"),
 						Version:      "v1.18.0",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
+							Name: "test-network",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "test-network",
 								CIDRBlock: "10.0.0.0/8",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "test-subnet",
@@ -2653,6 +3089,107 @@ func TestAzureManagedControlPlane_ValidateUpdate(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "AzureManagedControlPlane AKSExtensions ConfigurationSettings and AutoUpgradeMinorVersion are mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension1",
+								AutoUpgradeMinorVersion: ptr.To(false),
+								ConfigurationSettings: map[string]string{
+									"key1": "value1",
+								},
+								Plan: &ExtensionPlan{
+									Name:      "planName",
+									Product:   "planProduct",
+									Publisher: "planPublisher",
+								},
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension1",
+								AutoUpgradeMinorVersion: ptr.To(true),
+								ConfigurationSettings: map[string]string{
+									"key1": "value1",
+									"key2": "value2",
+								},
+								Plan: &ExtensionPlan{
+									Name:      "planName",
+									Product:   "planProduct",
+									Publisher: "planPublisher",
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "AzureManagedControlPlane all other fields are immutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension1",
+								AKSAssignedIdentityType: AKSAssignedIdentitySystemAssigned,
+								ExtensionType:           ptr.To("extensionType"),
+								Plan: &ExtensionPlan{
+									Name:      "planName",
+									Product:   "planProduct",
+									Publisher: "planPublisher",
+								},
+								Scope: &ExtensionScope{
+									ScopeType:        "Cluster",
+									ReleaseNamespace: "default",
+								},
+								ReleaseTrain: ptr.To("releaseTrain"),
+								Version:      ptr.To("v1.0.0"),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Extensions: []AKSExtension{
+							{
+								Name:                    "extension2",
+								AKSAssignedIdentityType: AKSAssignedIdentityUserAssigned,
+								ExtensionType:           ptr.To("extensionType1"),
+								Plan: &ExtensionPlan{
+									Name:      "planName1",
+									Product:   "planProduct1",
+									Publisher: "planPublisher1",
+								},
+								Scope: &ExtensionScope{
+									ScopeType:        "Namespace",
+									ReleaseNamespace: "default",
+								},
+								ReleaseTrain: ptr.To("releaseTrain1"),
+								Version:      ptr.To("v1.1.0"),
+							},
+						},
+					},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	client := mockClient{ReturnError: false}
 	for _, tc := range tests {
@@ -2713,6 +3250,796 @@ func getAMCPMetaData() metav1.ObjectMeta {
 	}
 }
 
+func TestAzureManagedClusterSecurityProfileValidateCreate(t *testing.T) {
+	testsCreate := []struct {
+		name    string
+		amcp    *AzureManagedControlPlane
+		wantErr string
+	}{
+		{
+			name: "Cannot enable Workload Identity without enabling OIDC issuer",
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.WorkloadIdentity: Invalid value: v1beta1.ManagedClusterSecurityProfileWorkloadIdentity{Enabled:true}: Spec.SecurityProfile.WorkloadIdentity cannot be enabled when Spec.OIDCIssuerProfile is disabled",
+		},
+		{
+			name: "Cannot enable AzureKms without user assigned identity",
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID: Invalid value: \"null\": Spec.SecurityProfile.AzureKeyVaultKms can be set only when Spec.Identity.Type is UserAssigned",
+		},
+		{
+			name: "When AzureKms.KeyVaultNetworkAccess is private AzureKeyVaultKms.KeyVaultResourceID cannot be empty",
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						Version: "v1.17.8",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "not empty",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID: Invalid value: \"null\": Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID cannot be empty when Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultNetworkAccess is Private",
+		},
+		{
+			name: "When AzureKms.KeyVaultNetworkAccess is public AzureKeyVaultKms.KeyVaultResourceID should be empty",
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "not empty",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+								KeyVaultResourceID:    ptr.To("not empty"),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID: Invalid value: \"not empty\": Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID should be empty when Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultNetworkAccess is Public",
+		},
+		{
+			name: "Valid profile",
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.17.8",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "not empty",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+							Defender: &ManagedClusterSecurityProfileDefender{
+								LogAnalyticsWorkspaceResourceID: "not empty",
+								SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+									Enabled: true,
+								},
+							},
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled:       true,
+								IntervalHours: ptr.To(24),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+	}
+	client := mockClient{ReturnError: false}
+	for _, tc := range testsCreate {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			mcpw := &azureManagedControlPlaneWebhook{
+				Client: client,
+			}
+			_, err := mcpw.ValidateCreate(context.Background(), tc.amcp)
+			if tc.wantErr != "" {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(Equal(tc.wantErr))
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestAzureClusterSecurityProfileValidateUpdate(t *testing.T) {
+	tests := []struct {
+		name    string
+		oldAMCP *AzureManagedControlPlane
+		amcp    *AzureManagedControlPlane
+		wantErr string
+	}{
+		{
+			name: "AzureManagedControlPlane SecurityProfile.Defender is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							Defender: &ManagedClusterSecurityProfileDefender{
+								LogAnalyticsWorkspaceResourceID: "0000-0000-0000-0000",
+								SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+									Enabled: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.Defender is mutable and cannot be unset",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							Defender: &ManagedClusterSecurityProfileDefender{
+								LogAnalyticsWorkspaceResourceID: "0000-0000-0000-0000",
+								SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+									Enabled: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			wantErr: "AzureManagedControlPlane.infrastructure.cluster.x-k8s.io \"\" is invalid: Spec.SecurityProfile.Defender: Invalid value: \"null\": cannot unset Spec.SecurityProfile.Defender, to disable defender please set Spec.SecurityProfile.Defender.SecurityMonitoring.Enabled to false",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.Defender is mutable and can be disabled",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							Defender: &ManagedClusterSecurityProfileDefender{
+								LogAnalyticsWorkspaceResourceID: "0000-0000-0000-0000",
+								SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+									Enabled: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							Defender: &ManagedClusterSecurityProfileDefender{
+								LogAnalyticsWorkspaceResourceID: "0000-0000-0000-0000",
+								SecurityMonitoring: ManagedClusterSecurityProfileDefenderSecurityMonitoring{
+									Enabled: false,
+								},
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.WorkloadIdentity is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.WorkloadIdentity cannot be enabled without OIDC issuer",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.WorkloadIdentity: Invalid value: v1beta1.ManagedClusterSecurityProfileWorkloadIdentity{Enabled:true}: Spec.SecurityProfile.WorkloadIdentity cannot be enabled when Spec.OIDCIssuerProfile is disabled",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.WorkloadIdentity cannot unset values",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+					},
+				},
+			},
+			wantErr: "AzureManagedControlPlane.infrastructure.cluster.x-k8s.io \"\" is invalid: Spec.SecurityProfile.WorkloadIdentity: Invalid value: \"null\": cannot unset Spec.SecurityProfile.WorkloadIdentity, to disable workloadIdentity please set Spec.SecurityProfile.WorkloadIdentity.Enabled to false",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.WorkloadIdentity can be disabled",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						OIDCIssuerProfile: &OIDCIssuerProfile{
+							Enabled: ptr.To(true),
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							WorkloadIdentity: &ManagedClusterSecurityProfileWorkloadIdentity{
+								Enabled: false,
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.AzureKeyVaultKms is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+								KeyVaultResourceID:    ptr.To("0000-0000-0000-0000"),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.AzureKeyVaultKms.KeyVaultNetworkAccess can be updated when KMS is enabled",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+								KeyVaultResourceID:    ptr.To("0000-0000-0000-0000"),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.AzureKeyVaultKms.Enabled can be disabled",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               false,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.AzureKeyVaultKms cannot unset",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPublic),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						Identity: &Identity{
+							Type:                           ManagedControlPlaneIdentityTypeUserAssigned,
+							UserAssignedIdentityResourceID: "not empty",
+						},
+					},
+				},
+			},
+			wantErr: "AzureManagedControlPlane.infrastructure.cluster.x-k8s.io \"\" is invalid: Spec.SecurityProfile.AzureKeyVaultKms: Invalid value: \"null\": cannot unset Spec.SecurityProfile.AzureKeyVaultKms profile to disable the profile please set Spec.SecurityProfile.AzureKeyVaultKms.Enabled to false",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.AzureKeyVaultKms cannot be enabled without UserAssigned Identity",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							AzureKeyVaultKms: &AzureKeyVaultKms{
+								Enabled:               true,
+								KeyID:                 "0000-0000-0000-0000",
+								KeyVaultNetworkAccess: ptr.To(KeyVaultNetworkAccessTypesPrivate),
+								KeyVaultResourceID:    ptr.To("0000-0000-0000-0000"),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "Spec.SecurityProfile.AzureKeyVaultKms.KeyVaultResourceID: Invalid value: \"0000-0000-0000-0000\": Spec.SecurityProfile.AzureKeyVaultKms can be set only when Spec.Identity.Type is UserAssigned",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.ImageCleaner is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled:       true,
+								IntervalHours: ptr.To(28),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.ImageCleaner cannot be unset",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled:       true,
+								IntervalHours: ptr.To(48),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version:         "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{},
+					},
+				},
+			},
+			wantErr: "AzureManagedControlPlane.infrastructure.cluster.x-k8s.io \"\" is invalid: Spec.SecurityProfile.ImageCleaner: Invalid value: \"null\": cannot unset Spec.SecurityProfile.ImageCleaner, to disable imageCleaner please set Spec.SecurityProfile.ImageCleaner.Enabled to false",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.ImageCleaner is mutable",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled: true,
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								IntervalHours: ptr.To(48),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+		{
+			name: "AzureManagedControlPlane SecurityProfile.ImageCleaner can be disabled",
+			oldAMCP: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled:       true,
+								IntervalHours: ptr.To(48),
+							},
+						},
+					},
+				},
+			},
+			amcp: &AzureManagedControlPlane{
+				Spec: AzureManagedControlPlaneSpec{
+					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						Version: "v1.18.0",
+						SecurityProfile: &ManagedClusterSecurityProfile{
+							ImageCleaner: &ManagedClusterSecurityProfileImageCleaner{
+								Enabled:       false,
+								IntervalHours: ptr.To(36),
+							},
+						},
+					},
+				},
+			},
+			wantErr: "",
+		},
+	}
+	client := mockClient{ReturnError: false}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			mcpw := &azureManagedControlPlaneWebhook{
+				Client: client,
+			}
+			_, err := mcpw.ValidateUpdate(context.Background(), tc.oldAMCP, tc.amcp)
+			if tc.wantErr != "" {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(Equal(tc.wantErr))
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestValidateAPIServerAccessProfile(t *testing.T) {
+	tests := []struct {
+		name      string
+		profile   *APIServerAccessProfile
+		expectErr bool
+	}{
+		{
+			name: "Testing valid PrivateDNSZone:System",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					PrivateDNSZone: ptr.To("System"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing valid PrivateDNSZone:None",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					PrivateDNSZone: ptr.To("None"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing valid PrivateDNSZone:With privatelink region",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/privatelink.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing valid PrivateDNSZone:With private region",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/private.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid EnablePrivateCluster and valid PrivateDNSZone",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(false),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/private.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing valid PrivateDNSZone:With privatelink region and sub-region",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/sublocation2.privatelink.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing valid PrivateDNSZone:With private region and sub-region",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/sublocation2.private.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: privatelink region: len(sub-region) > 32 characters",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/thissublocationismorethan32characters.privatelink.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: private region: len(sub-region) > 32 characters",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/thissublocationismorethan32characters.private.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: random string",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("WrongPrivateDNSZone"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: subzone has an invalid char %",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/subzone%1.privatelink.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: subzone has an invalid char _",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/subzone_1.privatelink.eastus.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+		{
+			name: "Testing invalid PrivateDNSZone: region has invalid char",
+			profile: &APIServerAccessProfile{
+				APIServerAccessProfileClassSpec: APIServerAccessProfileClassSpec{
+					EnablePrivateCluster: ptr.To(true),
+					PrivateDNSZone:       ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg1/providers/Microsoft.Network/privateDnsZones/subzone1.privatelink.location@1.azmk8s.io"),
+				},
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			errs := validateAPIServerAccessProfile(tc.profile, field.NewPath("profile"))
+			if tc.expectErr {
+				g.Expect(errs).To(HaveLen(1))
+			} else {
+				g.Expect(errs).To(BeEmpty())
+			}
+		})
+	}
+}
+
 func TestValidateAMCPVirtualNetwork(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -2729,12 +4056,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg1",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "vnet1",
 								CIDRBlock: defaultAKSVnetCIDR,
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
@@ -2757,12 +4084,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "vnet1",
 								CIDRBlock: defaultAKSVnetCIDR,
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
@@ -2785,12 +4112,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "vnet1",
 								CIDRBlock: "10.1.0.0/16",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
@@ -2813,12 +4140,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "vnet1",
 								CIDRBlock: "10.1.0.0/16",
 								Subnet: ManagedControlPlaneSubnet{
 									Name: "subnet1",
@@ -2840,12 +4167,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name: "vnet1",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
 									CIDRBlock: "11.0.0.0/24",
@@ -2867,12 +4194,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name:      "vnet1",
 								CIDRBlock: "invalid_vnet_CIDR",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
@@ -2895,12 +4222,12 @@ func TestValidateAMCPVirtualNetwork(t *testing.T) {
 					},
 				},
 				Spec: AzureManagedControlPlaneSpec{
-					ResourceGroupName: "rg1",
 					AzureManagedControlPlaneClassSpec: AzureManagedControlPlaneClassSpec{
+						ResourceGroupName: "rg1",
 						VirtualNetwork: ManagedControlPlaneVirtualNetwork{
 							ResourceGroup: "rg2",
+							Name:          "vnet1",
 							ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-								Name: "vnet1",
 								Subnet: ManagedControlPlaneSubnet{
 									Name:      "subnet1",
 									CIDRBlock: "invalid_subnet_CIDR",

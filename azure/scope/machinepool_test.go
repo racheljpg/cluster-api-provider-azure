@@ -1329,6 +1329,7 @@ func TestMachinePoolScope_SetInfrastructureMachineKind(t *testing.T) {
 	}
 
 	for _, tt := range testcases {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -1381,7 +1382,7 @@ func TestMachinePoolScope_applyAzureMachinePoolMachines(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 				list := clusterv1.MachineList{}
 				g.Expect(c.List(ctx, &list)).NotTo(HaveOccurred())
-				g.Expect(len(list.Items)).Should(Equal(2))
+				g.Expect(list.Items).Should(HaveLen(2))
 			},
 		},
 		{
@@ -1410,7 +1411,7 @@ func TestMachinePoolScope_applyAzureMachinePoolMachines(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 				list := clusterv1.MachineList{}
 				g.Expect(c.List(ctx, &list)).NotTo(HaveOccurred())
-				g.Expect(len(list.Items)).Should(Equal(1))
+				g.Expect(list.Items).Should(HaveLen(1))
 			},
 		},
 		{
@@ -1429,7 +1430,7 @@ func TestMachinePoolScope_applyAzureMachinePoolMachines(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 				list := infrav1exp.AzureMachinePoolMachineList{}
 				g.Expect(c.List(ctx, &list)).NotTo(HaveOccurred())
-				g.Expect(len(list.Items)).Should(Equal(1))
+				g.Expect(list.Items).Should(HaveLen(1))
 			},
 		},
 		{
