@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
@@ -73,5 +74,23 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 
 		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
 		g.Expect(err).NotTo(HaveOccurred())
+	})
+
+	t.Run("successful create or update, preview enabled", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+		mockCtrl := gomock.NewController(t)
+		scope := mock_agentpools.NewMockAgentPoolScope(mockCtrl)
+
+		scope.EXPECT().SetCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation, "true")
+		scope.EXPECT().SetCAPIMachinePoolReplicas(ptr.To(1234))
+
+		agentPool := &asocontainerservicev1preview.ManagedClustersAgentPool{
+			Status: asocontainerservicev1preview.ManagedClusters_AgentPool_STATUS{
+				EnableAutoScaling: ptr.To(true),
+				Count:             ptr.To(1234),
+			},
+		}
+
+		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, agentPool, nil)).To(Succeed())
 	})
 }

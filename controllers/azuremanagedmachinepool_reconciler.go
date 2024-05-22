@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
+	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
 	"github.com/pkg/errors"
 	azprovider "sigs.k8s.io/cloud-provider-azure/pkg/provider"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
@@ -112,7 +114,12 @@ func (s *azureManagedMachinePoolService) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(err, "failed to get agent pool parameters")
 	}
-	agentPoolName := agentPool.AzureName()
+	var agentPoolName string
+	if s.scope.IsPreviewEnabled() {
+		agentPoolName = agentPool.(*asocontainerservicev1preview.ManagedClustersAgentPool).AzureName()
+	} else {
+		agentPoolName = agentPool.(*asocontainerservicev1.ManagedClustersAgentPool).AzureName()
+	}
 
 	if err := s.agentPoolsSvc.Reconcile(ctx); err != nil {
 		return errors.Wrapf(err, "failed to reconcile machine pool %s", agentPoolName)

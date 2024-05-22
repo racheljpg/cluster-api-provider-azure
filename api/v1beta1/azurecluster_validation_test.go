@@ -103,21 +103,27 @@ func TestClusterNameValidation(t *testing.T) {
 }
 
 func TestClusterWithPreexistingVnetValid(t *testing.T) {
-	type test struct {
+	type tests struct {
 		name    string
 		cluster *AzureCluster
 	}
-
-	testCase := test{
-		name:    "azurecluster with pre-existing vnet - valid",
-		cluster: createValidCluster(),
+	testCase := []tests{
+		{
+			name:    "azurecluster with pre-existing vnet - valid",
+			cluster: createValidCluster(),
+		},
+		{
+			name:    "azurecluster with pre-existing vnet and cluster subnet - valid",
+			cluster: createValidClusterWithClusterSubnet(),
+		},
 	}
-
-	t.Run(testCase.name, func(t *testing.T) {
-		g := NewWithT(t)
-		_, err := testCase.cluster.validateCluster(nil)
-		g.Expect(err).To(BeNil())
-	})
+	for _, tc := range testCase {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := tc.cluster.validateCluster(nil)
+			g.Expect(err).NotTo(HaveOccurred())
+		})
+	}
 }
 
 func TestClusterWithPreexistingVnetInvalid(t *testing.T) {
@@ -142,48 +148,62 @@ func TestClusterWithPreexistingVnetInvalid(t *testing.T) {
 	t.Run(testCase.name, func(t *testing.T) {
 		g := NewWithT(t)
 		_, err := testCase.cluster.validateCluster(nil)
-		g.Expect(err).NotTo(BeNil())
+		g.Expect(err).To(HaveOccurred())
 	})
 }
 
 func TestClusterWithoutPreexistingVnetValid(t *testing.T) {
-	type test struct {
+	type tests struct {
 		name    string
 		cluster *AzureCluster
 	}
 
-	testCase := test{
-		name:    "azurecluster without pre-existing vnet - valid",
-		cluster: createValidCluster(),
+	testCase := []tests{
+		{
+			name:    "azurecluster without pre-existing vnet - valid",
+			cluster: createValidCluster(),
+		},
+		{
+			name:    "azurecluster without pre-existing vnet with cluster subnet  - valid",
+			cluster: createValidClusterWithClusterSubnet(),
+		},
 	}
+	for _, tc := range testCase {
+		// When ResourceGroup is an empty string, the cluster doesn't
+		// have a pre-existing vnet.
+		tc.cluster.Spec.NetworkSpec.Vnet.ResourceGroup = ""
 
-	// When ResourceGroup is an empty string, the cluster doesn't
-	// have a pre-existing vnet.
-	testCase.cluster.Spec.NetworkSpec.Vnet.ResourceGroup = ""
-
-	t.Run(testCase.name, func(t *testing.T) {
-		g := NewWithT(t)
-		_, err := testCase.cluster.validateCluster(nil)
-		g.Expect(err).To(BeNil())
-	})
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			_, err := tc.cluster.validateCluster(nil)
+			g.Expect(err).NotTo(HaveOccurred())
+		})
+	}
 }
 
 func TestClusterSpecWithPreexistingVnetValid(t *testing.T) {
-	type test struct {
+	type tests struct {
 		name    string
 		cluster *AzureCluster
 	}
 
-	testCase := test{
-		name:    "azurecluster spec with pre-existing vnet - valid",
-		cluster: createValidCluster(),
+	testCase := []tests{
+		{
+			name:    "azurecluster spec with pre-existing vnet - valid",
+			cluster: createValidCluster(),
+		},
+		{
+			name:    "azurecluster spec with pre-existing vnet with cluster subnet - valid",
+			cluster: createValidClusterWithClusterSubnet(),
+		},
 	}
-
-	t.Run(testCase.name, func(t *testing.T) {
-		g := NewWithT(t)
-		errs := testCase.cluster.validateClusterSpec(nil)
-		g.Expect(errs).To(BeNil())
-	})
+	for _, tc := range testCase {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			errs := tc.cluster.validateClusterSpec(nil)
+			g.Expect(errs).To(BeNil())
+		})
+	}
 }
 
 func TestClusterSpecWithPreexistingVnetInvalid(t *testing.T) {
@@ -208,7 +228,7 @@ func TestClusterSpecWithPreexistingVnetInvalid(t *testing.T) {
 	t.Run(testCase.name, func(t *testing.T) {
 		g := NewWithT(t)
 		errs := testCase.cluster.validateClusterSpec(nil)
-		g.Expect(len(errs)).To(BeNumerically(">", 0))
+		g.Expect(errs).NotTo(BeEmpty())
 	})
 }
 
@@ -251,7 +271,7 @@ func TestClusterSpecWithoutIdentityRefInvalid(t *testing.T) {
 	t.Run(testCase.name, func(t *testing.T) {
 		g := NewWithT(t)
 		errs := testCase.cluster.validateClusterSpec(nil)
-		g.Expect(len(errs)).To(BeNumerically(">", 0))
+		g.Expect(errs).NotTo(BeEmpty())
 	})
 }
 
@@ -272,26 +292,34 @@ func TestClusterSpecWithWrongKindInvalid(t *testing.T) {
 	t.Run(testCase.name, func(t *testing.T) {
 		g := NewWithT(t)
 		errs := testCase.cluster.validateClusterSpec(nil)
-		g.Expect(len(errs)).To(BeNumerically(">", 0))
+		g.Expect(errs).NotTo(BeEmpty())
 	})
 }
 
 func TestNetworkSpecWithPreexistingVnetValid(t *testing.T) {
-	type test struct {
+	type tests struct {
 		name        string
 		networkSpec NetworkSpec
 	}
 
-	testCase := test{
-		name:        "azurecluster networkspec with pre-existing vnet - valid",
-		networkSpec: createValidNetworkSpec(),
+	testCase := []tests{
+		{
+			name:        "azurecluster networkspec with pre-existing vnet - valid",
+			networkSpec: createValidNetworkSpec(),
+		},
+		{
+			name:        "azurecluster networkspec with pre-existing vnet only cluster subnet - valid",
+			networkSpec: createClusterNetworkSpec(),
+		},
 	}
 
-	t.Run(testCase.name, func(t *testing.T) {
-		g := NewWithT(t)
-		errs := validateNetworkSpec(testCase.networkSpec, NetworkSpec{}, field.NewPath("spec").Child("networkSpec"))
-		g.Expect(errs).To(BeNil())
-	})
+	for _, test := range testCase {
+		t.Run(test.name, func(t *testing.T) {
+			g := NewWithT(t)
+			errs := validateNetworkSpec(test.networkSpec, NetworkSpec{}, field.NewPath("spec").Child("networkSpec"))
+			g.Expect(errs).To(BeNil())
+		})
+	}
 }
 
 func TestNetworkSpecWithPreexistingVnetLackRequiredSubnets(t *testing.T) {
@@ -376,7 +404,7 @@ func TestResourceGroupValid(t *testing.T) {
 		g := NewWithT(t)
 		err := validateResourceGroup(testCase.resourceGroup,
 			field.NewPath("spec").Child("networkSpec").Child("vnet").Child("resourceGroup"))
-		g.Expect(err).To(BeNil())
+		g.Expect(err).NotTo(HaveOccurred())
 	})
 }
 
@@ -435,6 +463,97 @@ func TestValidateVnetCIDR(t *testing.T) {
 			} else {
 				g.Expect(err).To(BeEmpty())
 			}
+		})
+	}
+}
+
+func TestClusterSubnetsValid(t *testing.T) {
+	type test struct {
+		name    string
+		subnets Subnets
+		err     field.ErrorList
+	}
+	var nilList field.ErrorList
+	testCases := []test{
+		{
+			name: "subnets - valid",
+			subnets: Subnets{
+				{
+					SubnetClassSpec: SubnetClassSpec{
+						Role: SubnetCluster,
+						Name: "cluster-subnet-1",
+					},
+				},
+				{
+					SubnetClassSpec: SubnetClassSpec{
+						Role: SubnetCluster,
+						Name: "cluster-subnet-2",
+					},
+				},
+			},
+			err: nilList,
+		},
+		{
+			name: "duplicate subnets - invalid",
+			subnets: Subnets{
+				{
+					SubnetClassSpec: SubnetClassSpec{
+						Role: SubnetCluster,
+						Name: "cluster-subnet-1",
+					},
+				},
+				{
+					SubnetClassSpec: SubnetClassSpec{
+						Role: SubnetCluster,
+						Name: "cluster-subnet-1",
+					},
+				},
+				{
+					SubnetClassSpec: SubnetClassSpec{
+						Role: SubnetCluster,
+						Name: "#$cluster-subnet-1",
+					},
+				},
+			},
+			err: field.ErrorList{
+				{
+					Type:     "FieldValueDuplicate",
+					Field:    "spec.networkSpec.subnets",
+					BadValue: "cluster-subnet-1",
+				},
+				{
+					Type:     "FieldValueInvalid",
+					Field:    "spec.networkSpec.subnets[2].name",
+					BadValue: "#$cluster-subnet-1",
+					Detail:   "name of subnet doesn't match regex ^[-\\w\\._]+$",
+				},
+			},
+		},
+		{
+			name:    "no subnet",
+			subnets: Subnets{},
+			err: field.ErrorList{
+				{
+					Type:     "FieldValueRequired",
+					Field:    "spec.networkSpec.subnets",
+					BadValue: "",
+					Detail:   "required role control-plane not included in provided subnets",
+				},
+				{
+					Type:     "FieldValueRequired",
+					Field:    "spec.networkSpec.subnets",
+					BadValue: "",
+					Detail:   "required role node not included in provided subnets",
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			errs := validateSubnets(tc.subnets, createValidVnet(),
+				field.NewPath("spec").Child("networkSpec").Child("subnets"))
+			g.Expect(errs).To(ConsistOf(tc.err))
 		})
 	}
 }
@@ -545,7 +664,7 @@ func TestSubnetNameValid(t *testing.T) {
 		g := NewWithT(t)
 		err := validateSubnetName(testCase.subnetName,
 			field.NewPath("spec").Child("networkSpec").Child("subnets").Index(0).Child("name"))
-		g.Expect(err).To(BeNil())
+		g.Expect(err).NotTo(HaveOccurred())
 	})
 }
 
@@ -696,16 +815,16 @@ func TestValidateSecurityRule(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
-			err := validateSecurityRule(
+			errs := validateSecurityRule(
 				testCase.validRule,
 				field.NewPath("spec").Child("networkSpec").Child("subnets").Index(0).Child("securityGroup").Child("securityRules").Index(0),
 			)
 			if testCase.wantErr {
-				g.Expect(err).NotTo(BeNil())
-				g.Expect(len(err)).To(Equal(1))
+				g.Expect(errs).NotTo(BeNil())
+				g.Expect(errs).To(HaveLen(1))
 			} else {
-				g.Expect(err).To(BeNil())
-				g.Expect(len(err)).To(Equal(0))
+				g.Expect(errs).To(BeNil())
+				g.Expect(errs).To(BeEmpty())
 			}
 		})
 	}
@@ -1332,6 +1451,22 @@ func TestValidateCloudProviderConfigOverrides(t *testing.T) {
 	}
 }
 
+func createValidClusterWithClusterSubnet() *AzureCluster {
+	return &AzureCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-cluster",
+		},
+		Spec: AzureClusterSpec{
+			NetworkSpec: createValidNetworkSpecWithClusterSubnet(),
+			AzureClusterClassSpec: AzureClusterClassSpec{
+				IdentityRef: &corev1.ObjectReference{
+					Kind: "AzureClusterIdentity",
+				},
+			},
+		},
+	}
+}
+
 func createValidCluster() *AzureCluster {
 	return &AzureCluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1345,6 +1480,44 @@ func createValidCluster() *AzureCluster {
 				},
 			},
 		},
+	}
+}
+
+func createClusterNetworkSpec() NetworkSpec {
+	return NetworkSpec{
+		Vnet: VnetSpec{
+			ResourceGroup: "custom-vnet",
+			Name:          "my-vnet",
+		},
+		Subnets: Subnets{
+			{
+				SubnetClassSpec: SubnetClassSpec{
+					Role: "cluster",
+					Name: "cluster-subnet",
+				},
+			},
+		},
+		APIServerLB:    createValidAPIServerLB(),
+		NodeOutboundLB: createValidNodeOutboundLB(),
+	}
+}
+
+func createValidNetworkSpecWithClusterSubnet() NetworkSpec {
+	return NetworkSpec{
+		Vnet: VnetSpec{
+			ResourceGroup: "custom-vnet",
+			Name:          "my-vnet",
+		},
+		Subnets: Subnets{
+			{
+				SubnetClassSpec: SubnetClassSpec{
+					Role: "cluster",
+					Name: "cluster-subnet",
+				},
+			},
+		},
+		APIServerLB:    createValidAPIServerLB(),
+		NodeOutboundLB: createValidNodeOutboundLB(),
 	}
 }
 

@@ -77,31 +77,31 @@ func (mr *MockReconcilerMockRecorder[T]) CreateOrUpdateResource(ctx, spec, servi
 }
 
 // DeleteResource mocks base method.
-func (m *MockReconciler[T]) DeleteResource(ctx context.Context, spec azure.ASOResourceSpecGetter[T], serviceName string) error {
+func (m *MockReconciler[T]) DeleteResource(ctx context.Context, resource T, serviceName string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteResource", ctx, spec, serviceName)
+	ret := m.ctrl.Call(m, "DeleteResource", ctx, resource, serviceName)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteResource indicates an expected call of DeleteResource.
-func (mr *MockReconcilerMockRecorder[T]) DeleteResource(ctx, spec, serviceName any) *gomock.Call {
+func (mr *MockReconcilerMockRecorder[T]) DeleteResource(ctx, resource, serviceName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteResource", reflect.TypeOf((*MockReconciler[T])(nil).DeleteResource), ctx, spec, serviceName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteResource", reflect.TypeOf((*MockReconciler[T])(nil).DeleteResource), ctx, resource, serviceName)
 }
 
 // PauseResource mocks base method.
-func (m *MockReconciler[T]) PauseResource(ctx context.Context, spec azure.ASOResourceSpecGetter[T], serviceName string) error {
+func (m *MockReconciler[T]) PauseResource(ctx context.Context, resource T, serviceName string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PauseResource", ctx, spec, serviceName)
+	ret := m.ctrl.Call(m, "PauseResource", ctx, resource, serviceName)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // PauseResource indicates an expected call of PauseResource.
-func (mr *MockReconcilerMockRecorder[T]) PauseResource(ctx, spec, serviceName any) *gomock.Call {
+func (mr *MockReconcilerMockRecorder[T]) PauseResource(ctx, resource, serviceName any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PauseResource", reflect.TypeOf((*MockReconciler[T])(nil).PauseResource), ctx, spec, serviceName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PauseResource", reflect.TypeOf((*MockReconciler[T])(nil).PauseResource), ctx, resource, serviceName)
 }
 
 // MockTagsGetterSetter is a mock of TagsGetterSetter interface.
@@ -167,6 +167,43 @@ func (mr *MockTagsGetterSetterMockRecorder[T]) SetTags(resource, tags any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetTags", reflect.TypeOf((*MockTagsGetterSetter[T])(nil).SetTags), resource, tags)
 }
 
+// MockPatcher is a mock of Patcher interface.
+type MockPatcher struct {
+	ctrl     *gomock.Controller
+	recorder *MockPatcherMockRecorder
+}
+
+// MockPatcherMockRecorder is the mock recorder for MockPatcher.
+type MockPatcherMockRecorder struct {
+	mock *MockPatcher
+}
+
+// NewMockPatcher creates a new mock instance.
+func NewMockPatcher(ctrl *gomock.Controller) *MockPatcher {
+	mock := &MockPatcher{ctrl: ctrl}
+	mock.recorder = &MockPatcherMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockPatcher) EXPECT() *MockPatcherMockRecorder {
+	return m.recorder
+}
+
+// ExtraPatches mocks base method.
+func (m *MockPatcher) ExtraPatches() []string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExtraPatches")
+	ret0, _ := ret[0].([]string)
+	return ret0
+}
+
+// ExtraPatches indicates an expected call of ExtraPatches.
+func (mr *MockPatcherMockRecorder) ExtraPatches() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExtraPatches", reflect.TypeOf((*MockPatcher)(nil).ExtraPatches))
+}
+
 // MockScope is a mock of Scope interface.
 type MockScope struct {
 	ctrl     *gomock.Controller
@@ -188,6 +225,20 @@ func NewMockScope(ctrl *gomock.Controller) *MockScope {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockScope) EXPECT() *MockScopeMockRecorder {
 	return m.recorder
+}
+
+// ASOOwner mocks base method.
+func (m *MockScope) ASOOwner() client.Object {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ASOOwner")
+	ret0, _ := ret[0].(client.Object)
+	return ret0
+}
+
+// ASOOwner indicates an expected call of ASOOwner.
+func (mr *MockScopeMockRecorder) ASOOwner() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ASOOwner", reflect.TypeOf((*MockScope)(nil).ASOOwner))
 }
 
 // ClusterName mocks base method.

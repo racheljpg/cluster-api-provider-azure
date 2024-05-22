@@ -35,6 +35,8 @@ export AZURE_LOCATION="southcentralus"
 export AZURE_RESOURCE_GROUP="${CLUSTER_NAME}"
 ```
 
+***NOTE***: `${CLUSTER_NAME}` should adhere to the RFC 1123 standard. This means that it must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character.
+
 Create a new service principal and save to a local file:
 
 ```bash
@@ -249,7 +251,7 @@ https://github.com/Azure/azure-rest-api-specs/pull/18232
 
 ### Disable Local Accounts in AKS when using Azure Active Directory
 
-When deploying an AKS cluster, local accounts are enabled by default. 
+When deploying an AKS cluster, local accounts are enabled by default.
 Even when you enable RBAC or Azure AD integration,
 --admin access still exists as a non-auditable backdoor option.
 Disabling local accounts closes the backdoor access to the cluster
@@ -265,16 +267,16 @@ spec:
     managed: true
     adminGroupObjectIDs:
     -  00000000-0000-0000-0000-000000000000 # group object id created in azure.
-  disableLocalAccounts: true  
+  disableLocalAccounts: true
   ...
 ```
 
-Note: CAPZ and CAPI requires access to the target cluster to maintain and manage the cluster. 
-Disabling local accounts will cut off direct access to the target cluster. 
-CAPZ and CAPI can access target cluster only via the Service Principal, 
-hence the user has to provide appropriate access to the Service Principal to access the target cluster. 
-User can do that by adding the Service Principal to the appropriate group defined in Azure and 
-add the corresponding group ID in `spec.aadProfile.adminGroupObjectIDs`. 
+Note: CAPZ and CAPI requires access to the target cluster to maintain and manage the cluster.
+Disabling local accounts will cut off direct access to the target cluster.
+CAPZ and CAPI can access target cluster only via the Service Principal,
+hence the user has to provide appropriate access to the Service Principal to access the target cluster.
+User can do that by adding the Service Principal to the appropriate group defined in Azure and
+add the corresponding group ID in `spec.aadProfile.adminGroupObjectIDs`.
 CAPI and CAPZ will be able to authenticate via AAD while accessing the target cluster.
 
 ### AKS Fleet Integration
@@ -292,7 +294,7 @@ metadata:
   name: ${CLUSTER_NAME}
   namespace: default
 spec:
-  fleetsMember: 
+  fleetsMember:
     group: fleet-update-group
     managerName: fleet-manager-name
     managerResourceGroup: fleet-manager-resource-group
@@ -301,6 +303,113 @@ spec:
 The `managerName` and `managerResourceGroup` fields are the name and resource group of your AKS fleet manager. The `group` field is the name of the update group for the cluster, not to be confused with the resource group.
 
 When the `fleetMember` field is included, CAPZ will create an AKS fleet member resource which will join the CAPZ cluster to the AKS fleet. The AKS fleet member resource will be created in the same resource group as the CAPZ cluster.
+
+### AKS Extensions
+
+CAPZ supports enabling AKS extensions on your managed AKS clusters. Cluster extensions provide an Azure Resource Manager driven experience for installation and lifecycle management of services like Azure Machine Learning or Kubernetes applications on an AKS cluster. For more documentation on AKS extensions, refer [AKS Docs](https://learn.microsoft.com/azure/aks/cluster-extensions).
+
+You can either provision official AKS extensions or Kubernetes applications through Marketplace. Please refer to [AKS Docs](https://learn.microsoft.com/en-us/azure/aks/cluster-extensions#currently-available-extensions) for the list of currently available extensions.
+
+To add an AKS extension to your managed cluster, simply add the `extensions` field to your AzureManagedControlPlane resource spec:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedControlPlane
+metadata:
+  name: ${CLUSTER_NAME}
+  namespace: default
+spec:
+  extensions:
+  - name: my-extension
+    extensionType: "TraefikLabs.TraefikProxy"
+    plan:
+      name: "traefik-proxy"
+      product: "traefik-proxy"
+      publisher: "containous"
+```
+
+To list all of the available extensions for your cluster as well as its plan details, use the following az cli command:
+
+```bash
+az k8s-extension extension-types list-by-cluster --resource-group my-resource-group --cluster-name mycluster --cluster-type managedClusters
+```
+
+For more details, please refer to the [az k8s-extension cli reference](https://learn.microsoft.com/cli/azure/k8s-extension).
+
+
+### Security Profile for AKS clusters.
+
+Example for configuring AzureManagedControlPlane with a security profile:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedControlPlane
+metadata:
+  name: my-cluster-control-plane
+spec:
+  location: southcentralus
+  resourceGroupName: foo-bar
+  sshPublicKey: ${AZURE_SSH_PUBLIC_KEY_B64:=""}
+  subscriptionID: 00000000-0000-0000-0000-000000000000 # fake uuid
+  version: v1.26.6
+  identity:
+    type: UserAssigned
+    userAssignedIdentityResourceID: /subscriptions/00000000-0000-0000-0000-00000000/resourcegroups/<your-resource-group>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<your-managed-identity>
+  oidcIssuerProfile:
+    enabled: true
+  securityProfile:
+    workloadIdentity:
+      enabled: true
+    imageCleaner:
+      enabled: true
+      intervalHours: 48
+    azureKeyVaultKms:
+      enabled: true
+      keyID: https://key-vault.vault.azure.net/keys/secret-key/00000000000000000
+    defender:
+      logAnalyticsWorkspaceResourceID: /subscriptions/00000000-0000-0000-0000-00000000/resourcegroups/<your-resource-group>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<your-managed-identity>
+      securityMonitoring:
+        enabled: true
+```
+
+### Enabling Preview API Features for ManagedClusters
+
+#### :warning: WARNING: This is meant to be used sparingly to enable features for development and testing that are not otherwise represented in the CAPZ API. Misconfiguration that conflicts with CAPZ's normal mode of operation is possible.
+
+To enable preview features for managed clusters, you can use the `enablePreviewFeatures` field in the `AzureManagedControlPlane` resource spec. To use any of the new fields included in the preview API version, use the `asoManagedClusterPatches` field in the `AzureManagedControlPlane` resource spec and the `asoManagedClustersAgentPoolPatches` field in the `AzureManagedMachinePool` resource spec to patch in the new fields.
+
+Please refer to the [ASO Docs](https://azure.github.io/azure-service-operator/reference/containerservice/) for the ContainerService API reference for the latest preview fields and their usage.
+
+Example for enabling preview features for managed clusters:
+
+```yaml
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedControlPlane
+metadata:
+  name: ${CLUSTER_NAME}
+  namespace: default
+spec:
+  enablePreviewFeatures: true
+  asoManagedClusterPatches:
+  - '{"spec": {"enableNamespaceResources": true}}'
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureManagedMachinePool
+metadata:
+  ...
+spec:
+  asoManagedClustersAgentPoolPatches:
+  - '{"spec": {"enableCustomCATrust": true}}'
+```
+
+#### OIDC Issuer on AKS
+
+Setting `AzureManagedControlPlane.Spec.oidcIssuerProfile.enabled` to `true` will enable OIDC issuer profile for the `AzureManagedControlPlane`. Once enabled, you will see a configmap named `<cluster-name>-aso-oidc-issuer-profile` in the same namespace as the `AzureManagedControlPlane` resource. This configmap will contain the OIDC issuer profile url under the `oidc-issuer-profile-url` key.
+
+Once OIDC issuer is enabled on the cluster, it's not supported to disable it.
+
+To learn more about OIDC and AKS refer [AKS Docs on OIDC issuer](https://learn.microsoft.com/en-us/azure/aks/use-oidc-issuer).
+
 
 ## Features
 
@@ -473,7 +582,7 @@ spec:
         name: ${CLUSTER_NAME}-kubeconfig
     owner: root:root
     path: /etc/kubernetes/admin.conf
-    permissions: "0644"  
+    permissions: "0644"
   joinConfiguration:
     discovery:
       file:
@@ -491,7 +600,7 @@ spec:
 In order for the nodes to become ready, you'll need to install Cloud Provider Azure and a CNI.
 
 AKS will install Cloud Provider Azure on the self-managed nodes as long as they have the appropriate labels. You can add the required label on the nodes by running the following command on the AKS cluster:
-  
+
 ```bash
 kubectl label node <node name> kubernetes.azure.com/cluster=<nodeResourceGroupName>
 ```
@@ -519,3 +628,89 @@ Some notes about how this works under the hood:
 - CAPZ will fetch the kubeconfig for the AKS cluster and store it in a secret named `${CLUSTER_NAME}-kubeconfig` in the management cluster. That secret is then used for discovery by the `KubeadmConfig` resource.
 - You can customize the `MachinePool`, `AzureMachinePool`, and `KubeadmConfig` resources to your liking. The example above is just a starting point. Note that the key configurations to keep are in the `KubeadmConfig` resource, namely the `files`, `joinConfiguration`, and `preKubeadmCommands` sections.
 - The `KubeadmConfig` resource will be used to generate a `kubeadm join` command that will be executed on each node in the VMSS. It uses the cluster kubeconfig for discovery. The `kubeadm init phase upload-config all` is run as a preKubeadmCommand to ensure that the kubeadm and kubelet configurations are uploaded to a ConfigMap. This step would normally be done by the `kubeadm init` command, but since we're not running `kubeadm init` we need to do it manually.
+
+## Adopting Existing AKS Clusters
+
+### Option 1: Using the experimental ASO-based API
+
+<!-- markdown-link-check-disable-next-line -->
+The [experimental AzureASOManagedControlPlane and related APIs](/topics/aso.html#experimental-aso-api) support
+adoption as a first-class use case. Going forward, this method is likely to be easier, more reliable, include
+more features, and better supported for adopting AKS clusters than Option 2 below.
+
+To adopt an AKS cluster into a full Cluster API Cluster, create an ASO ManagedCluster and associated
+ManagedClustersAgentPool resources annotated with `sigs.k8s.io/cluster-api-provider-azure-adopt=true`. The
+annotation may also be added to existing ASO resources to trigger adoption. CAPZ will automatically scaffold
+the Cluster API resources like the Cluster, AzureASOManagedCluster, AzureASOManagedControlPlane, MachinePools,
+and AzureASOManagedMachinePools. The [`asoctl import
+azure-resource`](https://azure.github.io/azure-service-operator/tools/asoctl/#import-azure-resource) command
+can help generate the required YAML.
+
+Caveats:
+- The `asoctl import azure-resource` command has at least [one known
+  bug](https://github.com/Azure/azure-service-operator/issues/3805) requiring the YAML it generates to be
+  edited before it can be applied to a cluster.
+- CAPZ currently only records the ASO resources in the CAPZ resources' `spec.resources` that it needs to
+  function, which include the ManagedCluster, its ResourceGroup, and associated ManagedClustersAgentPools.
+  Other resources owned by the ManagedCluster like Kubernetes extensions or Fleet memberships are not
+  currently imported to the CAPZ specs.
+- Configuring the automatically generated Cluster API resources is not currently possible. If you need to
+  change something like the `metadata.name` of a resource from what CAPZ generates, create the Cluster API
+  resources manually referencing the pre-existing resources.
+- Adopting existing clusters created with the GA AzureManagedControlPlane API to the experimental API with
+  this method is theoretically possible, but untested. Care should be taken to prevent CAPZ from reconciling
+  two different representations of the same underlying Azure resources.
+
+### Option 2: Using the current AzureManagedControlPlane API
+
+<aside class="note">
+
+<h1> Warning </h1>
+
+Note: This is a newly-supported feature in CAPZ that is less battle-tested than most other features. Potential
+bugs or misuse can result in misconfigured or deleted Azure resources. Use with caution.
+
+</aside>
+
+CAPZ can adopt some AKS clusters created by other means under its management. This works by crafting CAPI and
+CAPZ manifests which describe the existing cluster and creating those resources on the CAPI management
+cluster. This approach is limited to clusters which can be described by the CAPZ API, which includes the
+following constraints:
+
+- the cluster operates within a single Virtual Network and Subnet
+- the cluster's Virtual Network exists outside of the AKS-managed `MC_*` resource group
+- the cluster's Virtual Network and Subnet are not shared with any other resources outside the context of this cluster
+
+To ensure CAPZ does not introduce any unwarranted changes while adopting an existing cluster, carefully review
+the [entire AzureManagedControlPlane spec](../reference/v1beta1-api#infrastructure.cluster.x-k8s.io/v1beta1.AzureManagedControlPlaneSpec)
+and specify _every_ field in the CAPZ resource. CAPZ's webhooks apply defaults to many fields which may not
+match the existing cluster.
+
+Specific AKS features not represented in the CAPZ API, like those from a newer AKS API version than CAPZ uses,
+do not need to be specified in the CAPZ resources to remain configured the way they are. CAPZ will still not
+be able to manage that configuration, but it will not modify any settings beyond those for which it has
+knowledge.
+
+By default, CAPZ will not make any changes to or delete any pre-existing Resource Group, Virtual Network, or
+Subnet resources. To opt-in to CAPZ management for those clusters, tag those resources with the following
+before creating the CAPZ resources: `sigs.k8s.io_cluster-api-provider-azure_cluster_<CAPI Cluster name>: owned`.
+Managed Cluster and Agent Pool resources do not need this tag in order to be adopted.
+
+After applying the CAPI and CAPZ resources for the cluster, other means of managing the cluster should be
+disabled to avoid ongoing conflicts with CAPZ's reconciliation process.
+
+#### Pitfalls
+
+The following describes some specific pieces of configuration that deserve particularly careful attention,
+adapted from https://gist.github.com/mtougeron/1e5d7a30df396cd4728a26b2555e0ef0#file-capz-md.
+
+- Make sure `AzureManagedControlPlane.metadata.name` matches the AKS cluster name
+- Set the `AzureManagedControlPlane.spec.virtualNetwork` fields to match your existing VNET
+- Make sure the `AzureManagedControlPlane.spec.sshPublicKey` matches what was set on the AKS cluster. (including any potential newlines included in the base64 encoding)
+  - NOTE: This is a required field in CAPZ, if you don't know what public key was used, you can _change_ or _set_ it via the Azure CLI however before attempting to import the cluster.
+- Make sure the `Cluster.spec.clusterNetwork` settings match properly to what you are using in AKS
+- Make sure the `AzureManagedControlPlane.spec.dnsServiceIP` matches what is set in AKS
+- Set the tag `sigs.k8s.io_cluster-api-provider-azure_cluster_<clusterName>` = `owned` on the AKS cluster
+- Set the tag `sigs.k8s.io_cluster-api-provider-azure_role` = `common` on the AKS cluster
+
+NOTE: Several fields, like `networkPlugin`, if not set on the AKS cluster at creation time, will mean that CAPZ will not be able to set that field. AKS doesn't allow such fields to be changed if not set at creation. However, if it was set at creation time, CAPZ will be able to successfully change/manage the field.

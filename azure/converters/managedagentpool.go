@@ -17,14 +17,14 @@ limitations under the License.
 package converters
 
 import (
-	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1hub "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001/storage"
 	"k8s.io/utils/ptr"
 )
 
 // AgentPoolToManagedClusterAgentPoolProfile converts a AgentPoolSpec to an Azure SDK ManagedClusterAgentPoolProfile used in managedcluster reconcile.
-func AgentPoolToManagedClusterAgentPoolProfile(pool *asocontainerservicev1.ManagedClustersAgentPool) asocontainerservicev1.ManagedClusterAgentPoolProfile {
+func AgentPoolToManagedClusterAgentPoolProfile(pool *asocontainerservicev1hub.ManagedClustersAgentPool) asocontainerservicev1hub.ManagedClusterAgentPoolProfile {
 	properties := pool.Spec
-	agentPool := asocontainerservicev1.ManagedClusterAgentPoolProfile{
+	agentPool := asocontainerservicev1hub.ManagedClusterAgentPoolProfile{
 		Name:                        ptr.To(pool.AzureName()),
 		VmSize:                      properties.VmSize,
 		OsType:                      properties.OsType,

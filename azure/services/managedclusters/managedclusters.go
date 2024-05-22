@@ -18,8 +18,10 @@ package managedclusters
 
 import (
 	"context"
+	"fmt"
 
-	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1hub "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001/storage"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -31,6 +33,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/secret"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
 const (
@@ -40,13 +43,16 @@ const (
 	// The aadResourceID is the application-id used by the server side. The access token accessing AKS clusters need to be issued for this app.
 	// Refer: https://azure.github.io/kubelogin/concepts/aks.html?highlight=6dae42f8-4368-4678-94ff-3960e28e3630#azure-kubernetes-service-aad-server
 	aadResourceID = "6dae42f8-4368-4678-94ff-3960e28e3630"
+
+	// oidcIssuerProfileUrl is a constant representing the key name for the oidc-issuer-profile-url config map.
+	oidcIssuerProfileURL = "oidc-issuer-profile-url"
 )
 
 // ManagedClusterScope defines the scope interface for a managed cluster.
 type ManagedClusterScope interface {
 	aso.Scope
 	azure.Authorizer
-	ManagedClusterSpec() azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedCluster]
+	ManagedClusterSpec() azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	SetControlPlaneEndpoint(clusterv1.APIEndpoint)
 	MakeEmptyKubeConfigSecret() corev1.Secret
 	GetAdminKubeconfigData() []byte
@@ -58,19 +64,29 @@ type ManagedClusterScope interface {
 	SetOIDCIssuerProfileStatus(*infrav1.OIDCIssuerProfileStatus)
 	MakeClusterCA() *corev1.Secret
 	StoreClusterInfo(context.Context, []byte) error
+	SetAutoUpgradeVersionStatus(version string)
+	SetVersionStatus(version string)
+	IsManagedVersionUpgrade() bool
 }
 
 // New creates a new service.
-func New(scope ManagedClusterScope) *aso.Service[*asocontainerservicev1.ManagedCluster, ManagedClusterScope] {
-	svc := aso.NewService[*asocontainerservicev1.ManagedCluster](serviceName, scope)
-	svc.Specs = []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedCluster]{scope.ManagedClusterSpec()}
+func New(scope ManagedClusterScope) *aso.Service[genruntime.MetaObject, ManagedClusterScope] {
+	// genruntime.MetaObject is used here instead of an *asocontainerservicev1.ManagedCluster to better
+	// facilitate returning different API versions.
+	svc := aso.NewService[genruntime.MetaObject](serviceName, scope)
+	svc.Specs = []azure.ASOResourceSpecGetter[genruntime.MetaObject]{scope.ManagedClusterSpec()}
 	svc.ConditionType = infrav1.ManagedClusterRunningCondition
 	svc.PostCreateOrUpdateResourceHook = postCreateOrUpdateResourceHook
 	return svc
 }
 
-func postCreateOrUpdateResourceHook(ctx context.Context, scope ManagedClusterScope, managedCluster *asocontainerservicev1.ManagedCluster, err error) error {
+func postCreateOrUpdateResourceHook(ctx context.Context, scope ManagedClusterScope, obj genruntime.MetaObject, err error) error {
 	if err != nil {
+		return err
+	}
+
+	managedCluster := &asocontainerservicev1hub.ManagedCluster{}
+	if err := obj.(conversion.Convertible).ConvertTo(managedCluster); err != nil {
 		return err
 	}
 
@@ -104,6 +120,13 @@ func postCreateOrUpdateResourceHook(ctx context.Context, scope ManagedClusterSco
 			IssuerURL: managedCluster.Status.OidcIssuerProfile.IssuerURL,
 		})
 	}
+	if managedCluster.Status.CurrentKubernetesVersion != nil {
+		currentKubernetesVersion := fmt.Sprintf("v%s", *managedCluster.Status.CurrentKubernetesVersion)
+		scope.SetVersionStatus(currentKubernetesVersion)
+		if scope.IsManagedVersionUpgrade() {
+			scope.SetAutoUpgradeVersionStatus(currentKubernetesVersion)
+		}
+	}
 
 	return nil
 }
@@ -111,11 +134,11 @@ func postCreateOrUpdateResourceHook(ctx context.Context, scope ManagedClusterSco
 // reconcileKubeconfig will reconcile admin kubeconfig and user kubeconfig.
 /*
   Returns the admin kubeconfig and user kubeconfig
-  If aad is enabled a user kubeconfig will also get generated and stored in the secret <cluster-name>-kubeconfig-user
-  If we disable local accounts for aad clusters we do not have access to admin kubeconfig, hence we need to create
+  If AAD is enabled a user kubeconfig will also get generated and stored in the secret <cluster-name>-kubeconfig-user
+  If we disable local accounts for AAD clusters we do not have access to admin kubeconfig, hence we need to create
   the admin kubeconfig by authenticating with the user credentials and retrieving the token for kubeconfig.
   The token is used to create the admin kubeconfig.
-  The user needs to ensure to provide service principle with admin aad privileges.
+  The user needs to ensure to provide service principal with admin AAD privileges.
 */
 func reconcileKubeconfig(ctx context.Context, scope ManagedClusterScope, namespace string) (adminKubeConfigData []byte, userKubeConfigData []byte, err error) {
 	if scope.IsAADEnabled() {

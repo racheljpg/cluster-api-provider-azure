@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
@@ -46,51 +47,18 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 
 	t.Run("successful create or update", func(t *testing.T) {
 		g := NewGomegaWithT(t)
-		mockCtrl := gomock.NewController(t)
-		scope := mock_managedclusters.NewMockManagedClusterScope(mockCtrl)
 		namespace := "default"
-		clusterName := "cluster"
-
-		adminASOKubeconfig := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: namespace,
-				Name:      adminKubeconfigSecretName(clusterName),
-			},
-			Data: map[string][]byte{
-				secret.KubeconfigDataName: []byte("admin credentials"),
-			},
-		}
-		userASOKubeconfig := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: namespace,
-				Name:      userKubeconfigSecretName(clusterName),
-			},
-			Data: map[string][]byte{
-				secret.KubeconfigDataName: []byte("user credentials"),
-			},
-		}
-		kclient := fakeclient.NewClientBuilder().
-			WithObjects(adminASOKubeconfig, userASOKubeconfig).
-			Build()
-		scope.EXPECT().GetClient().Return(kclient).AnyTimes()
-
-		scope.EXPECT().SetControlPlaneEndpoint(clusterv1.APIEndpoint{
-			Host: "fdqn",
-			Port: 443,
-		})
-		scope.EXPECT().ClusterName().Return(clusterName).AnyTimes()
-		scope.EXPECT().IsAADEnabled().Return(true)
-		scope.EXPECT().AreLocalAccountsDisabled().Return(false)
-		scope.EXPECT().SetAdminKubeconfigData([]byte("admin credentials"))
-		scope.EXPECT().SetUserKubeconfigData([]byte("user credentials"))
-		scope.EXPECT().SetOIDCIssuerProfileStatus(gomock.Nil())
-		scope.EXPECT().SetOIDCIssuerProfileStatus(&infrav1.OIDCIssuerProfileStatus{
-			IssuerURL: ptr.To("oidc"),
-		})
+		scope := setupMockScope(t)
 
 		managedCluster := &asocontainerservicev1.ManagedCluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: namespace,
+			},
+			Spec: asocontainerservicev1.ManagedCluster_Spec{
+				KubernetesVersion: ptr.To("1.19.0"),
+				AutoUpgradeProfile: &asocontainerservicev1.ManagedClusterAutoUpgradeProfile{
+					UpgradeChannel: ptr.To(asocontainerservicev1.ManagedClusterAutoUpgradeProfile_UpgradeChannel_Stable),
+				},
 			},
 			Status: asocontainerservicev1.ManagedCluster_STATUS{
 				Fqdn:        ptr.To("fdqn"),
@@ -98,6 +66,36 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 				OidcIssuerProfile: &asocontainerservicev1.ManagedClusterOIDCIssuerProfile_STATUS{
 					IssuerURL: ptr.To("oidc"),
 				},
+				CurrentKubernetesVersion: ptr.To("1.19.0"),
+			},
+		}
+
+		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		g.Expect(err).NotTo(HaveOccurred())
+	})
+
+	t.Run("successful create or update, preview enabled", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+		namespace := "default"
+		scope := setupMockScope(t)
+
+		managedCluster := &asocontainerservicev1preview.ManagedCluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace,
+			},
+			Spec: asocontainerservicev1preview.ManagedCluster_Spec{
+				KubernetesVersion: ptr.To("1.19.0"),
+				AutoUpgradeProfile: &asocontainerservicev1preview.ManagedClusterAutoUpgradeProfile{
+					UpgradeChannel: ptr.To(asocontainerservicev1preview.ManagedClusterAutoUpgradeProfile_UpgradeChannel_Stable),
+				},
+			},
+			Status: asocontainerservicev1preview.ManagedCluster_STATUS{
+				Fqdn:        ptr.To("fdqn"),
+				PrivateFQDN: ptr.To("private fqdn"),
+				OidcIssuerProfile: &asocontainerservicev1preview.ManagedClusterOIDCIssuerProfile_STATUS{
+					IssuerURL: ptr.To("oidc"),
+				},
+				CurrentKubernetesVersion: ptr.To("1.19.0"),
 			},
 		}
 
@@ -140,4 +138,54 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
 		g.Expect(err).To(HaveOccurred())
 	})
+}
+
+func setupMockScope(t *testing.T) *mock_managedclusters.MockManagedClusterScope {
+	t.Helper()
+	mockCtrl := gomock.NewController(t)
+	scope := mock_managedclusters.NewMockManagedClusterScope(mockCtrl)
+	namespace := "default"
+	clusterName := "cluster"
+
+	adminASOKubeconfig := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      adminKubeconfigSecretName(clusterName),
+		},
+		Data: map[string][]byte{
+			secret.KubeconfigDataName: []byte("admin credentials"),
+		},
+	}
+	userASOKubeconfig := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      userKubeconfigSecretName(clusterName),
+		},
+		Data: map[string][]byte{
+			secret.KubeconfigDataName: []byte("user credentials"),
+		},
+	}
+	kclient := fakeclient.NewClientBuilder().
+		WithObjects(adminASOKubeconfig, userASOKubeconfig).
+		Build()
+	scope.EXPECT().GetClient().Return(kclient).AnyTimes()
+
+	scope.EXPECT().SetControlPlaneEndpoint(clusterv1.APIEndpoint{
+		Host: "fdqn",
+		Port: 443,
+	})
+	scope.EXPECT().ClusterName().Return(clusterName).AnyTimes()
+	scope.EXPECT().IsAADEnabled().Return(true)
+	scope.EXPECT().AreLocalAccountsDisabled().Return(false)
+	scope.EXPECT().SetAdminKubeconfigData([]byte("admin credentials"))
+	scope.EXPECT().SetUserKubeconfigData([]byte("user credentials"))
+	scope.EXPECT().SetOIDCIssuerProfileStatus(gomock.Nil())
+	scope.EXPECT().SetOIDCIssuerProfileStatus(&infrav1.OIDCIssuerProfileStatus{
+		IssuerURL: ptr.To("oidc"),
+	})
+	scope.EXPECT().SetVersionStatus("v1.19.0")
+	scope.EXPECT().IsManagedVersionUpgrade().Return(true)
+	scope.EXPECT().SetAutoUpgradeVersionStatus("v1.19.0")
+
+	return scope
 }

@@ -21,8 +21,10 @@ import (
 	"reflect"
 	"testing"
 
-	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asokubernetesconfigurationv1 "github.com/Azure/azure-service-operator/v2/api/kubernetesconfiguration/v1api20230501"
 	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20220701"
+	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +33,8 @@ import (
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aksextensions"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/privateendpoints"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
@@ -137,7 +141,7 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected []azure.ASOResourceSpecGetter[genruntime.MetaObject]
 		Err      string
 	}{
 		{
@@ -172,11 +176,10 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
+			Expected: []azure.ASOResourceSpecGetter[genruntime.MetaObject]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
 					AzureName:    "pool0",
-					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Replicas:     1,
 					Mode:         "System",
@@ -218,11 +221,10 @@ func TestManagedControlPlaneScope_PoolVersion(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
+			Expected: []azure.ASOResourceSpecGetter[genruntime.MetaObject]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
 					AzureName:    "pool0",
-					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "System",
 					Replicas:     1,
@@ -426,7 +428,7 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 	cases := []struct {
 		Name     string
 		Input    ManagedControlPlaneScopeParams
-		Expected []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]
+		Expected []azure.ASOResourceSpecGetter[genruntime.MetaObject]
 		Err      string
 	}{
 		{
@@ -470,11 +472,10 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 					},
 				},
 			},
-			Expected: []azure.ASOResourceSpecGetter[*asocontainerservicev1.ManagedClustersAgentPool]{
+			Expected: []azure.ASOResourceSpecGetter[genruntime.MetaObject]{
 				&agentpools.AgentPoolSpec{
 					Name:         "pool0",
 					AzureName:    "pool0",
-					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "System",
 					Replicas:     1,
@@ -484,7 +485,6 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 				&agentpools.AgentPoolSpec{
 					Name:         "pool1",
 					AzureName:    "pool1",
-					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "User",
 					Replicas:     1,
@@ -495,7 +495,6 @@ func TestManagedControlPlaneScope_OSType(t *testing.T) {
 				&agentpools.AgentPoolSpec{
 					Name:         "pool2",
 					AzureName:    "pool2",
-					Namespace:    "default",
 					SKU:          "Standard_D2s_v3",
 					Mode:         "User",
 					Replicas:     1,
@@ -1350,8 +1349,8 @@ func TestManagedControlPlaneScope_PrivateEndpointSpecs(t *testing.T) {
 							SubscriptionID: "00000000-0000-0000-0000-000000000001",
 							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
 								ResourceGroup: "dummy-rg",
+								Name:          "vnet1",
 								ManagedControlPlaneVirtualNetworkClassSpec: infrav1.ManagedControlPlaneVirtualNetworkClassSpec{
-									Name: "vnet1",
 									Subnet: infrav1.ManagedControlPlaneSubnet{
 										Name: "subnet1",
 										PrivateEndpoints: infrav1.PrivateEndpoints{
@@ -1390,7 +1389,6 @@ func TestManagedControlPlaneScope_PrivateEndpointSpecs(t *testing.T) {
 			Expected: []azure.ASOResourceSpecGetter[*asonetworkv1.PrivateEndpoint]{
 				&privateendpoints.PrivateEndpointSpec{
 					Name:                       "my-private-endpoint",
-					Namespace:                  "dummy-ns",
 					ResourceGroup:              "dummy-rg",
 					Location:                   "westus2",
 					CustomNetworkInterfaceName: "my-custom-nic",
@@ -1429,6 +1427,351 @@ func TestManagedControlPlaneScope_PrivateEndpointSpecs(t *testing.T) {
 			}
 			if got := s.PrivateEndpointSpecs(); !reflect.DeepEqual(got, c.Expected) {
 				t.Errorf("PrivateEndpointSpecs() = %s, want %s", specArrayToString(got), specArrayToString(c.Expected))
+			}
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_AKSExtensionSpecs(t *testing.T) {
+	cases := []struct {
+		Name     string
+		Input    ManagedControlPlaneScopeParams
+		Expected []azure.ASOResourceSpecGetter[*asokubernetesconfigurationv1.Extension]
+		Err      string
+	}{
+		{
+			Name: "returns empty AKS extensions list if no extensions are specified",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "dummy-ns",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-cluster",
+						Namespace: "dummy-ns",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{},
+					},
+				},
+			},
+		},
+		{
+			Name: "returns list of AKS extensions if extensions are specified",
+			Input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-cluster",
+						Namespace: "dummy-ns",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "my-cluster",
+						Namespace: "dummy-ns",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							Extensions: []infrav1.AKSExtension{
+								{
+									Name:                    "my-extension",
+									AutoUpgradeMinorVersion: ptr.To(true),
+									ConfigurationSettings: map[string]string{
+										"my-key": "my-value",
+									},
+									ExtensionType: ptr.To("my-extension-type"),
+									ReleaseTrain:  ptr.To("my-release-train"),
+									Version:       ptr.To("my-version"),
+									Plan: &infrav1.ExtensionPlan{
+										Name:      "my-plan-name",
+										Product:   "my-product",
+										Publisher: "my-publisher",
+									},
+									AKSAssignedIdentityType: infrav1.AKSAssignedIdentitySystemAssigned,
+									Identity:                infrav1.ExtensionIdentitySystemAssigned,
+								},
+							},
+						},
+					},
+				},
+			},
+			Expected: []azure.ASOResourceSpecGetter[*asokubernetesconfigurationv1.Extension]{
+				&aksextensions.AKSExtensionSpec{
+					Name:                    "my-extension",
+					Namespace:               "dummy-ns",
+					AutoUpgradeMinorVersion: ptr.To(true),
+					ConfigurationSettings: map[string]string{
+						"my-key": "my-value",
+					},
+					ExtensionType: ptr.To("my-extension-type"),
+					ReleaseTrain:  ptr.To("my-release-train"),
+					Version:       ptr.To("my-version"),
+					Owner:         "/subscriptions//resourceGroups//providers/Microsoft.ContainerService/managedClusters/my-cluster",
+					Plan: &infrav1.ExtensionPlan{
+						Name:      "my-plan-name",
+						Product:   "my-product",
+						Publisher: "my-publisher",
+					},
+					AKSAssignedIdentityType: infrav1.AKSAssignedIdentitySystemAssigned,
+					ExtensionIdentity:       infrav1.ExtensionIdentitySystemAssigned,
+				},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.Name, func(t *testing.T) {
+			s := &ManagedControlPlaneScope{
+				ControlPlane: c.Input.ControlPlane,
+				Cluster:      c.Input.Cluster,
+			}
+			if got := s.AKSExtensionSpecs(); !reflect.DeepEqual(got, c.Expected) {
+				t.Errorf("AKSExtensionSpecs() = %s, want %s", specArrayToString(got), specArrayToString(c.Expected))
+			}
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_AutoUpgradeProfile(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    ManagedControlPlaneScopeParams
+		expected *managedclusters.ManagedClusterAutoUpgradeProfile
+	}{
+		{
+			name: "Without AutoUpgradeProfile",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "With AutoUpgradeProfile UpgradeChannelNodeImage",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							SubscriptionID: "00000000-0000-0000-0000-000000000000",
+							AutoUpgradeProfile: &infrav1.ManagedClusterAutoUpgradeProfile{
+								UpgradeChannel: ptr.To(infrav1.UpgradeChannelNodeImage),
+							},
+						},
+					},
+				},
+				ManagedMachinePools: []ManagedMachinePool{
+					{
+						MachinePool:      getMachinePool("pool0"),
+						InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+					},
+				},
+			},
+			expected: &managedclusters.ManagedClusterAutoUpgradeProfile{
+				UpgradeChannel: ptr.To(infrav1.UpgradeChannelNodeImage),
+			},
+		},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			g := NewWithT(t)
+			s := &ManagedControlPlaneScope{
+				ControlPlane: c.input.ControlPlane,
+				Cluster:      c.input.Cluster,
+			}
+			managedClusterGetter := s.ManagedClusterSpec()
+			managedCluster, ok := managedClusterGetter.(*managedclusters.ManagedClusterSpec)
+			g.Expect(ok).To(BeTrue())
+			g.Expect(managedCluster.AutoUpgradeProfile).To(Equal(c.expected))
+		})
+	}
+}
+
+func TestManagedControlPlaneScope_GroupSpecs(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    ManagedControlPlaneScopeParams
+		expected []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]
+	}{
+		{
+			name: "virtualNetwork belongs to a different resource group",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "cluster1",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							ResourceGroupName: "dummy-rg",
+							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								ResourceGroup: "different-rg",
+							},
+						},
+					},
+				},
+			},
+			expected: []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]{
+				&groups.GroupSpec{
+					Name:           "dummy-rg",
+					AzureName:      "dummy-rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+				&groups.GroupSpec{
+					Name:           "different-rg",
+					AzureName:      "different-rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+			},
+		},
+		{
+			name: "virtualNetwork belongs to a same resource group",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "cluster1",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							ResourceGroupName: "dummy-rg",
+							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								ResourceGroup: "dummy-rg",
+							},
+						},
+					},
+				},
+			},
+			expected: []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]{
+				&groups.GroupSpec{
+					Name:           "dummy-rg",
+					AzureName:      "dummy-rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+			},
+		},
+		{
+			name: "virtualNetwork resource group not specified",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							ResourceGroupName: "dummy-rg",
+							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								Name: "vnet1",
+							},
+						},
+					},
+				},
+			},
+			expected: []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]{
+				&groups.GroupSpec{
+					Name:           "dummy-rg",
+					AzureName:      "dummy-rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+			},
+		},
+		{
+			name: "virtualNetwork belongs to different resource group with non-k8s name",
+			input: ManagedControlPlaneScopeParams{
+				Cluster: &clusterv1.Cluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "cluster1",
+						Namespace: "default",
+					},
+				},
+				ControlPlane: &infrav1.AzureManagedControlPlane{
+					Spec: infrav1.AzureManagedControlPlaneSpec{
+						AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+							ResourceGroupName: "dummy-rg",
+							VirtualNetwork: infrav1.ManagedControlPlaneVirtualNetwork{
+								ResourceGroup: "my_custom_rg",
+								Name:          "vnet1",
+							},
+						},
+					},
+				},
+			},
+			expected: []azure.ASOResourceSpecGetter[*asoresourcesv1.ResourceGroup]{
+				&groups.GroupSpec{
+					Name:           "dummy-rg",
+					AzureName:      "dummy-rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+				&groups.GroupSpec{
+					Name:           "my-custom-rg",
+					AzureName:      "my_custom_rg",
+					ClusterName:    "cluster1",
+					Location:       "",
+					AdditionalTags: make(infrav1.Tags, 0),
+				},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			s := &ManagedControlPlaneScope{
+				ControlPlane: c.input.ControlPlane,
+				Cluster:      c.input.Cluster,
+			}
+			if got := s.GroupSpecs(); !reflect.DeepEqual(got, c.expected) {
+				t.Errorf("GroupSpecs() = %s, want %s", specArrayToString(got), specArrayToString(c.expected))
 			}
 		})
 	}

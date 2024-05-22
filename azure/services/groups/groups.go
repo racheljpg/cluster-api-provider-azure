@@ -24,6 +24,7 @@ import (
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aso"
+	"sigs.k8s.io/cluster-api-provider-azure/util/slice"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -45,6 +46,7 @@ type GroupScope interface {
 // New creates a new service.
 func New(scope GroupScope) *Service {
 	svc := aso.NewService[*asoresourcesv1.ResourceGroup](ServiceName, scope)
+	svc.ListFunc = list
 	svc.Specs = scope.GroupSpecs()
 	svc.ConditionType = infrav1.ResourceGroupReadyCondition
 	return &Service{
@@ -59,7 +61,7 @@ func New(scope GroupScope) *Service {
 func (s *Service) IsManaged(ctx context.Context) (bool, error) {
 	// Unless all resource groups are managed by CAPZ and reconciled by ASO, resources need to be deleted individually.
 	for _, spec := range s.Specs {
-		managed, err := aso.IsManaged(ctx, s.Scope.GetClient(), spec, s.Scope.ClusterName())
+		managed, err := aso.IsManaged(ctx, s.Scope.GetClient(), spec.ResourceRef(), s.Scope.ASOOwner())
 		if err != nil || !managed {
 			return managed, err
 		}
@@ -68,10 +70,18 @@ func (s *Service) IsManaged(ctx context.Context) (bool, error) {
 		// resource. We also need to check that deleting the ASO resource will really
 		// delete the underlying resource group by checking the ASO reconcile-policy.
 		group := spec.ResourceRef()
-		err = s.Scope.GetClient().Get(ctx, client.ObjectKeyFromObject(group), group)
+		groupName := azure.GetNormalizedKubernetesName(group.Name)
+		groupNamespace := s.Scope.ASOOwner().GetNamespace()
+		err = s.Scope.GetClient().Get(ctx, client.ObjectKey{Namespace: groupNamespace, Name: groupName}, group)
 		if err != nil || group.GetAnnotations()[asoannotations.ReconcilePolicy] != string(asoannotations.ReconcilePolicyManage) {
 			return false, err
 		}
 	}
 	return true, nil
+}
+
+func list(ctx context.Context, client client.Client, opts ...client.ListOption) ([]*asoresourcesv1.ResourceGroup, error) {
+	list := &asoresourcesv1.ResourceGroupList{}
+	err := client.List(ctx, list, opts...)
+	return slice.ToPtrs(list.Items), err
 }

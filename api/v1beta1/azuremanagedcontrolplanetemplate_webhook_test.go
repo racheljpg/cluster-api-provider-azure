@@ -36,11 +36,11 @@ func TestControlPlaneTemplateDefaultingWebhook(t *testing.T) {
 	g.Expect(*amcpt.Spec.Template.Spec.NetworkPlugin).To(Equal("azure"))
 	g.Expect(*amcpt.Spec.Template.Spec.LoadBalancerSKU).To(Equal("Standard"))
 	g.Expect(amcpt.Spec.Template.Spec.Version).To(Equal("v1.17.5"))
-	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.Name).To(Equal("fooName"))
 	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.CIDRBlock).To(Equal(defaultAKSVnetCIDR))
 	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.Subnet.Name).To(Equal("fooName"))
 	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.Subnet.CIDRBlock).To(Equal(defaultAKSNodeSubnetCIDR))
 	g.Expect(amcpt.Spec.Template.Spec.SKU.Tier).To(Equal(FreeManagedControlPlaneTier))
+	g.Expect(*amcpt.Spec.Template.Spec.EnablePreviewFeatures).To(BeFalse())
 
 	t.Logf("Testing amcp defaulting webhook with baseline")
 	netPlug := "kubenet"
@@ -53,6 +53,7 @@ func TestControlPlaneTemplateDefaultingWebhook(t *testing.T) {
 	amcpt.Spec.Template.Spec.VirtualNetwork.Name = "fooVnetName"
 	amcpt.Spec.Template.Spec.VirtualNetwork.Subnet.Name = "fooSubnetName"
 	amcpt.Spec.Template.Spec.SKU.Tier = PaidManagedControlPlaneTier
+	amcpt.Spec.Template.Spec.EnablePreviewFeatures = ptr.To(true)
 
 	err = mcptw.Default(context.Background(), amcpt)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -63,6 +64,7 @@ func TestControlPlaneTemplateDefaultingWebhook(t *testing.T) {
 	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.Name).To(Equal("fooVnetName"))
 	g.Expect(amcpt.Spec.Template.Spec.VirtualNetwork.Subnet.Name).To(Equal("fooSubnetName"))
 	g.Expect(amcpt.Spec.Template.Spec.SKU.Tier).To(Equal(StandardManagedControlPlaneTier))
+	g.Expect(*amcpt.Spec.Template.Spec.EnablePreviewFeatures).To(BeTrue())
 }
 
 func TestControlPlaneTemplateUpdateWebhook(t *testing.T) {
@@ -186,6 +188,88 @@ func TestControlPlaneTemplateUpdateWebhook(t *testing.T) {
 			}),
 			wantErr: true,
 		},
+		{
+			name: "azuremanagedcontrolplanetemplate AKSExtension type and plan are immutable",
+			oldControlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Extensions = []AKSExtension{
+					{
+						Name:          "foo",
+						ExtensionType: ptr.To("foo-type"),
+						Plan: &ExtensionPlan{
+							Name:      "foo-name",
+							Product:   "foo-product",
+							Publisher: "foo-publisher",
+						},
+					},
+				}
+			}),
+			controlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Extensions = []AKSExtension{
+					{
+						Name:          "foo",
+						ExtensionType: ptr.To("bar"),
+						Plan: &ExtensionPlan{
+							Name:      "bar-name",
+							Product:   "bar-product",
+							Publisher: "bar-publisher",
+						},
+					},
+				}
+			}),
+			wantErr: true,
+		},
+		{
+			name: "azuremanagedcontrolplanetemplate AKSExtension autoUpgradeMinorVersion is mutable",
+			oldControlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Extensions = []AKSExtension{
+					{
+						Name:                    "foo",
+						ExtensionType:           ptr.To("foo"),
+						AutoUpgradeMinorVersion: ptr.To(true),
+						Plan: &ExtensionPlan{
+							Name:      "bar-name",
+							Product:   "bar-product",
+							Publisher: "bar-publisher",
+						},
+					},
+				}
+			}),
+			controlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Extensions = []AKSExtension{
+					{
+						Name:                    "foo",
+						ExtensionType:           ptr.To("foo"),
+						AutoUpgradeMinorVersion: ptr.To(false),
+						Plan: &ExtensionPlan{
+							Name:      "bar-name",
+							Product:   "bar-product",
+							Publisher: "bar-publisher",
+						},
+					},
+				}
+			}),
+			wantErr: false,
+		},
+		{
+			name: "azuremanagedcontrolplanetemplate networkDataplane is immutable",
+			oldControlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.NetworkDataplane = ptr.To(NetworkDataplaneTypeAzure)
+			}),
+			controlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.NetworkDataplane = ptr.To(NetworkDataplaneTypeCilium)
+			}),
+			wantErr: true,
+		},
+		{
+			name: "AzureManagedControlPlane invalid version downgrade change",
+			oldControlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Version = "v1.18.0"
+			}),
+			controlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
+				cpt.Spec.Template.Spec.Version = "v1.17.0"
+			}),
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,18 +299,18 @@ func TestValidateVirtualNetworkTemplateUpdate(t *testing.T) {
 			wantErr:                 false,
 		},
 		{
-			name: "azuremanagedcontrolplanetemplate name is immutable",
+			name: "azuremanagedcontrolplanetemplate vnet is immutable",
 			oldControlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
 				cpt.Spec.Template.Spec.VirtualNetwork = ManagedControlPlaneVirtualNetwork{
 					ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-						Name: "fooName",
+						CIDRBlock: "fooCIDRBlock",
 					},
 				}
 			}),
 			controlPlaneTemplate: getAzureManagedControlPlaneTemplate(func(cpt *AzureManagedControlPlaneTemplate) {
 				cpt.Spec.Template.Spec.VirtualNetwork = ManagedControlPlaneVirtualNetwork{
 					ManagedControlPlaneVirtualNetworkClassSpec: ManagedControlPlaneVirtualNetworkClassSpec{
-						Name: "barName",
+						CIDRBlock: "barCIDRBlock",
 					},
 				}
 			}),

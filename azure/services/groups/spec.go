@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aso"
 )
 
@@ -30,19 +31,16 @@ import (
 type GroupSpec struct {
 	Name           string
 	AzureName      string
-	Namespace      string
 	Location       string
 	ClusterName    string
 	AdditionalTags infrav1.Tags
-	Owner          metav1.OwnerReference
 }
 
 // ResourceRef implements aso.ResourceSpecGetter.
 func (s *GroupSpec) ResourceRef() *asoresourcesv1.ResourceGroup {
 	return &asoresourcesv1.ResourceGroup{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.Name,
-			Namespace: s.Namespace,
+			Name: azure.GetNormalizedKubernetesName(s.Name),
 		},
 	}
 }
@@ -54,9 +52,6 @@ func (s *GroupSpec) Parameters(ctx context.Context, existing *asoresourcesv1.Res
 	}
 
 	resourceGroup := &asoresourcesv1.ResourceGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			OwnerReferences: []metav1.OwnerReference{s.Owner},
-		},
 		Spec: asoresourcesv1.ResourceGroup_Spec{
 			Location: ptr.To(s.Location),
 			Tags: infrav1.Build(infrav1.BuildParams{

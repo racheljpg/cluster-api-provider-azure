@@ -25,6 +25,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Azure/azure-service-operator/v2/pkg/common/config"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
@@ -35,6 +36,7 @@ import (
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("Workload cluster creation", func() {
@@ -92,7 +94,7 @@ var _ = Describe("Workload cluster creation", func() {
 		}
 		_, err = bootstrapClusterProxy.GetClientSet().CoreV1().Secrets(defaultNamespace).Get(ctx, secret.Name, metav1.GetOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 		}
 		if err != nil {
 			Logf("Creating cluster identity secret \"%s\"", secret.Name)
@@ -103,6 +105,22 @@ var _ = Describe("Workload cluster creation", func() {
 		} else {
 			Logf("Using existing cluster identity secret")
 		}
+
+		asoSecretName := e2eConfig.GetVariable("ASO_CREDENTIAL_SECRET_NAME")
+		asoSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: namespace.Name,
+				Name:      asoSecretName,
+			},
+			StringData: map[string]string{
+				config.AzureSubscriptionID: e2eConfig.GetVariable(AzureSubscriptionID),
+				config.AzureTenantID:       e2eConfig.GetVariable(AzureTenantID),
+				config.AzureClientID:       e2eConfig.GetVariable(AzureClientID),
+				config.AuthMode:            e2eConfig.GetVariable("ASO_CREDENTIAL_SECRET_MODE"),
+			},
+		}
+		err = bootstrapClusterProxy.GetClient().Create(ctx, asoSecret)
+		Expect(client.IgnoreAlreadyExists(err)).NotTo(HaveOccurred())
 
 		identityName := e2eConfig.GetVariable(ClusterIdentityName)
 		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
@@ -407,6 +425,44 @@ var _ = Describe("Workload cluster creation", func() {
 		})
 	})
 
+	Context("Creating a cluster with spot vms [OPTIONAL]", func() {
+		It("With spot vm machine deployments", func() {
+			clusterName = getClusterName(clusterNamePrefix, "spot")
+			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+				specName,
+				withFlavor("spot"),
+				withNamespace(namespace.Name),
+				withClusterName(clusterName),
+				withKubernetesVersion(e2eConfig.GetVariable(FlatcarKubernetesVersion)),
+				withControlPlaneMachineCount(1),
+				withWorkerMachineCount(1),
+				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
+				}),
+				withPostMachinesProvisioned(func() {
+					EnsureDaemonsets(ctx, func() DaemonsetsSpecInput {
+						return DaemonsetsSpecInput{
+							BootstrapClusterProxy: bootstrapClusterProxy,
+							Namespace:             namespace,
+							ClusterName:           clusterName,
+						}
+					})
+				}),
+			), result)
+
+			By("can create and access a load balancer", func() {
+				AzureLBSpec(ctx, func() AzureLBSpecInput {
+					return AzureLBSpecInput{
+						BootstrapClusterProxy: bootstrapClusterProxy,
+						Namespace:             namespace,
+						ClusterName:           clusterName,
+						SkipCleanup:           skipCleanup,
+					}
+				})
+			})
+		})
+	})
+
 	Context("Creating a ipv6 control-plane cluster [REQUIRED]", func() {
 		It("With ipv6 worker node", func() {
 			clusterName = getClusterName(clusterNamePrefix, "ipv6")
@@ -651,17 +707,17 @@ var _ = Describe("Workload cluster creation", func() {
 
 	// You can override the default SKU `Standard_D2s_v3` by setting the
 	// `AZURE_AKS_NODE_MACHINE_TYPE` environment variable.
-	Context("Creating an AKS cluster [Managed Kubernetes]", func() {
+	Context("Creating an AKS cluster for control plane tests [Managed Kubernetes]", func() {
 		It("with a single control plane node and 1 node", func() {
 			clusterName = getClusterName(clusterNamePrefix, aksClusterNameSuffix)
 			kubernetesVersionUpgradeFrom, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersionUpgradeFrom)
 			Byf("Upgrading from k8s version %s", kubernetesVersionUpgradeFrom)
-			Expect(err).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
 			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
 			Byf("Upgrading to k8s version %s", kubernetesVersion)
-			Expect(err).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
 
-			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+			clusterTemplate := createApplyClusterTemplateInput(
 				specName,
 				withFlavor("aks"),
 				withAzureCNIv1Manifest(e2eConfig.GetVariable(AzureCNIv1Manifest)),
@@ -676,7 +732,31 @@ var _ = Describe("Workload cluster creation", func() {
 					WaitForControlPlaneInitialized:   WaitForAKSControlPlaneInitialized,
 					WaitForControlPlaneMachinesReady: WaitForAKSControlPlaneReady,
 				}),
-			), result)
+			)
+
+			clusterctl.ApplyClusterTemplateAndWait(ctx, clusterTemplate, result)
+
+			// This test should be first to make sure that the template re-applied here matches the current
+			// state of the cluster exactly.
+			By("orphaning and adopting the cluster", func() {
+				AKSAdoptSpec(ctx, func() AKSAdoptSpecInput {
+					return AKSAdoptSpecInput{
+						ApplyInput:   clusterTemplate,
+						ApplyResult:  result,
+						Cluster:      result.Cluster,
+						MachinePools: result.MachinePools,
+					}
+				})
+			})
+
+			By("adding an AKS marketplace extension", func() {
+				AKSMarketplaceExtensionSpec(ctx, func() AKSMarketplaceExtensionSpecInput {
+					return AKSMarketplaceExtensionSpecInput{
+						Cluster:       result.Cluster,
+						WaitIntervals: e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
+					}
+				})
+			})
 
 			By("attaching the cluster to azure fleet", func() {
 				AKSFleetsMemberSpec(ctx, func() AKSFleetsMemberInput {
@@ -698,6 +778,40 @@ var _ = Describe("Workload cluster creation", func() {
 					}
 				})
 			})
+
+			By("modifying the azure cluster-autoscaler settings", func() {
+				AKSAzureClusterAutoscalerSettingsSpec(ctx, func() AKSAzureClusterAutoscalerSettingsSpecInput {
+					return AKSAzureClusterAutoscalerSettingsSpecInput{
+						Cluster:       result.Cluster,
+						WaitIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
+					}
+				})
+			})
+		})
+	})
+
+	Context("Creating an AKS cluster for node pool tests [Managed Kubernetes]", func() {
+		It("with a single control plane node and 1 node", func() {
+			clusterName = getClusterName(clusterNamePrefix, "pool")
+			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
+			Expect(err).NotTo(HaveOccurred())
+
+			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+				specName,
+				withFlavor("aks"),
+				withAzureCNIv1Manifest(e2eConfig.GetVariable(AzureCNIv1Manifest)),
+				withNamespace(namespace.Name),
+				withClusterName(clusterName),
+				withKubernetesVersion(kubernetesVersion),
+				withControlPlaneMachineCount(1),
+				withWorkerMachineCount(1),
+				withMachineDeploymentInterval(specName, ""),
+				withMachinePoolInterval(specName, "wait-worker-nodes"),
+				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized:   WaitForAKSControlPlaneInitialized,
+					WaitForControlPlaneMachinesReady: WaitForAKSControlPlaneReady,
+				}),
+			), result)
 
 			By("Exercising machine pools", func() {
 				AKSMachinePoolSpec(ctx, func() AKSMachinePoolSpecInput {
@@ -752,15 +866,6 @@ var _ = Describe("Workload cluster creation", func() {
 				})
 			})
 
-			By("modifying the azure cluster-autoscaler settings", func() {
-				AKSAzureClusterAutoscalerSettingsSpec(ctx, func() AKSAzureClusterAutoscalerSettingsSpecInput {
-					return AKSAzureClusterAutoscalerSettingsSpecInput{
-						Cluster:       result.Cluster,
-						WaitIntervals: e2eConfig.GetIntervals(specName, "wait-control-plane"),
-					}
-				})
-			})
-
 			By("modifying node labels configuration", func() {
 				AKSNodeLabelsSpec(ctx, func() AKSNodeLabelsSpecInput {
 					return AKSNodeLabelsSpecInput{
@@ -791,6 +896,16 @@ var _ = Describe("Workload cluster creation", func() {
 					}
 				})
 			})
+
+			By("modifying custom patches", func() {
+				AKSPatchSpec(ctx, func() AKSPatchSpecInput {
+					return AKSPatchSpecInput{
+						Cluster:       result.Cluster,
+						MachinePools:  result.MachinePools,
+						WaitForUpdate: e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
+					}
+				})
+			})
 		})
 	})
 
@@ -803,10 +918,10 @@ var _ = Describe("Workload cluster creation", func() {
 			clusterName = getClusterName(clusterNamePrefix, "cc")
 			kubernetesVersionUpgradeFrom, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersionUpgradeFrom)
 			Byf("Upgrading from k8s version %s", kubernetesVersionUpgradeFrom)
-			Expect(err).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
 			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
 			Byf("Upgrading to k8s version %s", kubernetesVersion)
-			Expect(err).To(BeNil())
+			Expect(err).NotTo(HaveOccurred())
 
 			// Create a cluster using the cluster class created above
 			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
@@ -834,6 +949,38 @@ var _ = Describe("Workload cluster creation", func() {
 						WaitIntervals:              e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
 						WaitUpgradeIntervals:       e2eConfig.GetIntervals(specName, "wait-machine-pool-upgrade"),
 						KubernetesVersionUpgradeTo: kubernetesVersion,
+					}
+				})
+			})
+		})
+	})
+
+	Context("Creating an AKS cluster with the ASO API [Managed Kubernetes]", func() {
+		It("with a single control plane node and 1 node", func() {
+			clusterName = getClusterName(clusterNamePrefix, "asoapi")
+			kubernetesVersion, err := GetAKSKubernetesVersion(ctx, e2eConfig, AKSKubernetesVersion)
+			Expect(err).NotTo(HaveOccurred())
+
+			clusterctl.ApplyClusterTemplateAndWait(ctx, createApplyClusterTemplateInput(
+				specName,
+				withFlavor("aks-aso"),
+				withNamespace(namespace.Name),
+				withClusterName(clusterName),
+				withKubernetesVersion(kubernetesVersion),
+				withWorkerMachineCount(1),
+				withMachinePoolInterval(specName, "wait-worker-nodes"),
+				withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
+					WaitForControlPlaneInitialized:   WaitForAKSControlPlaneInitialized,
+					WaitForControlPlaneMachinesReady: WaitForAKSControlPlaneReady,
+				}),
+			), result)
+
+			By("Exercising machine pools", func() {
+				AKSMachinePoolSpec(ctx, func() AKSMachinePoolSpecInput {
+					return AKSMachinePoolSpecInput{
+						Cluster:       result.Cluster,
+						MachinePools:  result.MachinePools,
+						WaitIntervals: e2eConfig.GetIntervals(specName, "wait-machine-pool-nodes"),
 					}
 				})
 			})

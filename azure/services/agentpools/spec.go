@@ -19,14 +19,19 @@ package agentpools
 import (
 	"context"
 
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1hub "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001/storage"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aso"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
+	"sigs.k8s.io/cluster-api-provider-azure/util/versions"
+	"sigs.k8s.io/controller-runtime/pkg/conversion"
 )
 
 // KubeletConfig defines the set of kubelet configurations for nodes in pools.
@@ -59,9 +64,6 @@ type KubeletConfig struct {
 type AgentPoolSpec struct {
 	// Name is the name of the ASO ManagedClustersAgentPool resource.
 	Name string
-
-	// Namespace is the namespace of the ASO ManagedClustersAgentPool resource.
-	Namespace string
 
 	// AzureName is the name of the agentpool resource in Azure.
 	AzureName string
@@ -152,26 +154,63 @@ type AgentPoolSpec struct {
 
 	// EnableEncryptionAtHost indicates whether host encryption is enabled on the node pool
 	EnableEncryptionAtHost *bool
+
+	// Patches are extra patches to be applied to the ASO resource.
+	Patches []string
+
+	// Preview indicates whether the agent pool is using a preview version of ASO.
+	Preview bool
 }
 
 // ResourceRef implements azure.ASOResourceSpecGetter.
-func (s *AgentPoolSpec) ResourceRef() *asocontainerservicev1.ManagedClustersAgentPool {
+func (s *AgentPoolSpec) ResourceRef() genruntime.MetaObject {
+	if s.Preview {
+		return &asocontainerservicev1preview.ManagedClustersAgentPool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: azure.GetNormalizedKubernetesName(s.Name),
+			},
+		}
+	}
 	return &asocontainerservicev1.ManagedClustersAgentPool{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.Name,
-			Namespace: s.Namespace,
+			Name: azure.GetNormalizedKubernetesName(s.Name),
 		},
 	}
 }
 
+// getManagedMachinePoolVersion gets the desired managed Kubernetes version.
+// If the auto upgrade channel is set to patch, stable or rapid, clusters can be upgraded to a higher version by AKS.
+// If auto upgrade is triggered, the existing Kubernetes version will be higher than the user's desired Kubernetes version.
+// CAPZ should honour the upgrade and it should not downgrade to the lower desired version.
+func (s *AgentPoolSpec) getManagedMachinePoolVersion(existing *asocontainerservicev1hub.ManagedClustersAgentPool) *string {
+	if existing == nil || existing.Spec.OrchestratorVersion == nil {
+		return s.Version
+	}
+	if s.Version == nil {
+		return existing.Spec.OrchestratorVersion
+	}
+	v := versions.GetHigherK8sVersion(*s.Version, *existing.Spec.OrchestratorVersion)
+	return ptr.To(v)
+}
+
 // Parameters returns the parameters for the agent pool.
-func (s *AgentPoolSpec) Parameters(ctx context.Context, existing *asocontainerservicev1.ManagedClustersAgentPool) (params *asocontainerservicev1.ManagedClustersAgentPool, err error) {
+func (s *AgentPoolSpec) Parameters(ctx context.Context, existingObj genruntime.MetaObject) (params genruntime.MetaObject, err error) {
 	_, _, done := tele.StartSpanWithLogger(ctx, "agentpools.Service.Parameters")
 	defer done()
 
+	// If existing is preview, convert to stable then back to preview at the end of the function.
+	var existing *asocontainerservicev1hub.ManagedClustersAgentPool
+	if existingObj != nil {
+		hub := &asocontainerservicev1hub.ManagedClustersAgentPool{}
+		if err := existingObj.(conversion.Convertible).ConvertTo(hub); err != nil {
+			return nil, err
+		}
+		existing = hub
+	}
+
 	agentPool := existing
 	if agentPool == nil {
-		agentPool = &asocontainerservicev1.ManagedClustersAgentPool{}
+		agentPool = &asocontainerservicev1hub.ManagedClustersAgentPool{}
 	}
 
 	agentPool.Spec.AzureName = s.AzureName
@@ -182,27 +221,29 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing *asocontainerse
 	agentPool.Spec.Count = &s.Replicas
 	agentPool.Spec.EnableAutoScaling = ptr.To(s.EnableAutoScaling)
 	agentPool.Spec.EnableUltraSSD = s.EnableUltraSSD
-	agentPool.Spec.KubeletDiskType = azure.AliasOrNil[asocontainerservicev1.KubeletDiskType]((*string)(s.KubeletDiskType))
+	agentPool.Spec.KubeletDiskType = azure.AliasOrNil[string]((*string)(s.KubeletDiskType))
 	agentPool.Spec.MaxCount = s.MaxCount
 	agentPool.Spec.MaxPods = s.MaxPods
 	agentPool.Spec.MinCount = s.MinCount
-	agentPool.Spec.Mode = ptr.To(asocontainerservicev1.AgentPoolMode(s.Mode))
+	agentPool.Spec.Mode = ptr.To(string(asocontainerservicev1.AgentPoolMode(s.Mode)))
 	agentPool.Spec.NodeLabels = s.NodeLabels
 	agentPool.Spec.NodeTaints = s.NodeTaints
-	agentPool.Spec.OrchestratorVersion = s.Version
-	agentPool.Spec.OsDiskSizeGB = ptr.To(asocontainerservicev1.ContainerServiceOSDisk(s.OSDiskSizeGB))
-	agentPool.Spec.OsDiskType = azure.AliasOrNil[asocontainerservicev1.OSDiskType](s.OsDiskType)
-	agentPool.Spec.OsType = azure.AliasOrNil[asocontainerservicev1.OSType](s.OSType)
-	agentPool.Spec.ScaleSetPriority = azure.AliasOrNil[asocontainerservicev1.ScaleSetPriority](s.ScaleSetPriority)
-	agentPool.Spec.ScaleDownMode = azure.AliasOrNil[asocontainerservicev1.ScaleDownMode](s.ScaleDownMode)
-	agentPool.Spec.Type = ptr.To(asocontainerservicev1.AgentPoolType_VirtualMachineScaleSets)
+	agentPool.Spec.OsDiskSizeGB = ptr.To(int(asocontainerservicev1.ContainerServiceOSDisk(s.OSDiskSizeGB)))
+	agentPool.Spec.OsDiskType = azure.AliasOrNil[string](s.OsDiskType)
+	agentPool.Spec.OsType = azure.AliasOrNil[string](s.OSType)
+	agentPool.Spec.ScaleSetPriority = azure.AliasOrNil[string](s.ScaleSetPriority)
+	agentPool.Spec.ScaleDownMode = azure.AliasOrNil[string](s.ScaleDownMode)
+	agentPool.Spec.Type = ptr.To(string(asocontainerservicev1.AgentPoolType_VirtualMachineScaleSets))
 	agentPool.Spec.EnableNodePublicIP = s.EnableNodePublicIP
 	agentPool.Spec.Tags = s.AdditionalTags
 	agentPool.Spec.EnableFIPS = s.EnableFIPS
 	agentPool.Spec.EnableEncryptionAtHost = s.EnableEncryptionAtHost
+	if kubernetesVersion := s.getManagedMachinePoolVersion(existing); kubernetesVersion != nil {
+		agentPool.Spec.OrchestratorVersion = kubernetesVersion
+	}
 
 	if s.KubeletConfig != nil {
-		agentPool.Spec.KubeletConfig = &asocontainerservicev1.KubeletConfig{
+		agentPool.Spec.KubeletConfig = &asocontainerservicev1hub.KubeletConfig{
 			CpuManagerPolicy:      s.KubeletConfig.CPUManagerPolicy,
 			CpuCfsQuota:           s.KubeletConfig.CPUCfsQuota,
 			CpuCfsQuotaPeriod:     s.KubeletConfig.CPUCfsQuotaPeriod,
@@ -238,13 +279,13 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing *asocontainerse
 	}
 
 	if s.LinuxOSConfig != nil {
-		agentPool.Spec.LinuxOSConfig = &asocontainerservicev1.LinuxOSConfig{
+		agentPool.Spec.LinuxOSConfig = &asocontainerservicev1hub.LinuxOSConfig{
 			SwapFileSizeMB:             s.LinuxOSConfig.SwapFileSizeMB,
 			TransparentHugePageEnabled: (*string)(s.LinuxOSConfig.TransparentHugePageEnabled),
 			TransparentHugePageDefrag:  (*string)(s.LinuxOSConfig.TransparentHugePageDefrag),
 		}
 		if s.LinuxOSConfig.Sysctls != nil {
-			agentPool.Spec.LinuxOSConfig.Sysctls = &asocontainerservicev1.SysctlConfig{
+			agentPool.Spec.LinuxOSConfig.Sysctls = &asocontainerservicev1hub.SysctlConfig{
 				FsAioMaxNr:                     s.LinuxOSConfig.Sysctls.FsAioMaxNr,
 				FsFileMax:                      s.LinuxOSConfig.Sysctls.FsFileMax,
 				FsInotifyMaxUserWatches:        s.LinuxOSConfig.Sysctls.FsInotifyMaxUserWatches,
@@ -284,11 +325,31 @@ func (s *AgentPoolSpec) Parameters(ctx context.Context, existing *asocontainerse
 		agentPool.Spec.Count = agentPool.Status.Count
 	}
 
-	return agentPool, nil
+	if s.Preview {
+		prev := &asocontainerservicev1preview.ManagedClustersAgentPool{}
+		if err := prev.ConvertFrom(agentPool); err != nil {
+			return nil, err
+		}
+		return prev, nil
+	}
+
+	stable := &asocontainerservicev1.ManagedClustersAgentPool{}
+	if err := stable.ConvertFrom(agentPool); err != nil {
+		return nil, err
+	}
+
+	return stable, nil
 }
 
 // WasManaged implements azure.ASOResourceSpecGetter.
-func (s *AgentPoolSpec) WasManaged(resource *asocontainerservicev1.ManagedClustersAgentPool) bool {
+func (s *AgentPoolSpec) WasManaged(resource genruntime.MetaObject) bool {
 	// CAPZ has never supported BYO agent pools.
 	return true
+}
+
+var _ aso.Patcher = (*AgentPoolSpec)(nil)
+
+// ExtraPatches implements aso.Patcher.
+func (s *AgentPoolSpec) ExtraPatches() []string {
+	return s.Patches
 }
