@@ -387,6 +387,7 @@ func (amr *AzureMachineReconciler) reconcileDelete(ctx context.Context, machineS
 				if reconcileError.IsTransient() {
 					if azure.IsOperationNotDoneError(reconcileError) {
 						log.V(2).Info(fmt.Sprintf("AzureMachine delete not done: %s", reconcileError.Error()))
+						log.V(2).Info(fmt.Sprintf("AzureMachine being deleted: %v", ams))
 					} else {
 						log.V(2).Info("transient failure to delete AzureMachine, retrying")
 					}
