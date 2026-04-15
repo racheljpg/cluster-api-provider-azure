@@ -23,6 +23,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -89,7 +90,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 
 	reconciler := s.Reconciler
 	var getter azure.ResourceSpecGetter = scaleSetVMSpec
-	var result interface{}
+	var result any
 	var err error
 	// Fetch the latest instance or VM data. AzureMachinePoolReconciler handles model mutations.
 	if scaleSetVMSpec.IsFlex {

@@ -17,7 +17,6 @@ limitations under the License.
 package securitygroups
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
@@ -25,6 +24,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -102,7 +102,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&fakeNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
+				s.UpdateAnnotationJSON(annotation, map[string]any{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeNSG, serviceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, nil)
 			},
@@ -114,7 +114,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&multipleRulesNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{multipleRulesNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description, securityRule2.Name: securityRule2.Description}}).Times(1)
+				s.UpdateAnnotationJSON(annotation, map[string]any{multipleRulesNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description, securityRule2.Name: securityRule2.Description}}).Times(1)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &multipleRulesNSG, serviceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, nil)
 			},
@@ -126,7 +126,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&fakeNSG, &noRulesNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
+				s.UpdateAnnotationJSON(annotation, map[string]any{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeNSG, serviceName).Return(nil, nil)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &noRulesNSG, serviceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, nil)
@@ -139,7 +139,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&fakeNSG, &noRulesNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
+				s.UpdateAnnotationJSON(annotation, map[string]any{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeNSG, serviceName).Return(nil, errFake)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &noRulesNSG, serviceName).Return(nil, nil)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, errFake)
@@ -152,7 +152,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&fakeNSG, &noRulesNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
+				s.UpdateAnnotationJSON(annotation, map[string]any{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}}).Times(1)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeNSG, serviceName).Return(nil, errFake)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &noRulesNSG, serviceName).Return(nil, notDoneError)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, errFake)
@@ -165,7 +165,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				s.IsVnetManaged().Return(true)
 				s.NSGSpecs().Return([]azure.ResourceSpecGetter{&fakeNSG})
-				s.UpdateAnnotationJSON(annotation, map[string]interface{}{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}})
+				s.UpdateAnnotationJSON(annotation, map[string]any{fakeNSG.Name: map[string]string{securityRule1.Name: securityRule1.Description}})
 				r.CreateOrUpdateResource(gomockinternal.AContext(), &fakeNSG, serviceName).Return(nil, notDoneError)
 				s.UpdatePutStatus(infrav1.SecurityGroupsReadyCondition, serviceName, notDoneError)
 			},
@@ -180,7 +180,6 @@ func TestReconcileSecurityGroups(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -197,7 +196,7 @@ func TestReconcileSecurityGroups(t *testing.T) {
 				Reconciler: reconcilerMock,
 			}
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -271,7 +270,6 @@ func TestDeleteSecurityGroups(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -288,7 +286,7 @@ func TestDeleteSecurityGroups(t *testing.T) {
 				Reconciler: reconcilerMock,
 			}
 
-			err := s.Delete(context.TODO())
+			err := s.Delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

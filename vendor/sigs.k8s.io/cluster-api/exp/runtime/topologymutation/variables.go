@@ -19,12 +19,11 @@ package topologymutation
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"github.com/pkg/errors"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
-	runtimehooksv1 "sigs.k8s.io/cluster-api/exp/runtime/hooks/api/v1alpha1"
+	runtimehooksv1 "sigs.k8s.io/cluster-api/api/runtime/hooks/v1alpha1"
 	patchvariables "sigs.k8s.io/cluster-api/internal/controllers/topology/cluster/patches/variables"
 )
 
@@ -77,16 +76,11 @@ func GetObjectVariableInto(templateVariables map[string]apiextensionsv1.JSON, va
 		return err
 	}
 
-	if err := json.Unmarshal(sanitizeJSON(value.Raw), into); err != nil {
+	if err := json.Unmarshal(value.Raw, into); err != nil {
 		return errors.Wrapf(err, "failed to unmarshal variable json %q into %q", string(value.Raw), into)
 	}
 
 	return nil
-}
-
-func sanitizeJSON(input []byte) (output []byte) {
-	output = []byte(strings.ReplaceAll(string(input), "\\", ""))
-	return output
 }
 
 // ToMap converts a list of Variables to a map of apiextensionsv1.JSON (name is the map key).

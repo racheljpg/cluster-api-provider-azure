@@ -75,13 +75,13 @@ func (f *metadataClient) Get(ctx context.Context) (*clusterctlv1.Metadata, error
 		return nil, err
 	}
 	if file == nil {
-		log.V(5).Info("Fetching", "File", metadataFile, "Provider", f.provider.Name(), "Type", f.provider.Type(), "Version", version)
+		log.V(5).Info("Fetching", "file", metadataFile, "provider", f.provider.Name(), "type", f.provider.Type(), "version", version)
 		file, err = f.repository.GetFile(ctx, version, metadataFile)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to read %q from the repository for provider %q", metadataFile, f.provider.ManifestLabel())
 		}
 	} else {
-		log.V(1).Info("Using", "Override", metadataFile, "Provider", f.provider.ManifestLabel(), "Version", version)
+		log.V(1).Info("Using", "override", metadataFile, "provider", f.provider.ManifestLabel(), "version", version)
 	}
 
 	// Convert the yaml into a typed object
@@ -92,7 +92,38 @@ func (f *metadataClient) Get(ctx context.Context) (*clusterctlv1.Metadata, error
 		return nil, errors.Wrapf(err, "error decoding %q for provider %q", metadataFile, f.provider.ManifestLabel())
 	}
 
-	//TODO: consider if to add metadata validation (TBD)
+	if err := validateMetadata(obj, f.provider.ManifestLabel()); err != nil {
+		return nil, err
+	}
 
 	return obj, nil
+}
+
+// validateMetadata validates the metadata object structure.
+//
+// It checks if:
+// 1. The metadata has the correct apiVersion and kind.
+// 2. The metadata has at least one release series.
+//
+// Note: Version matching against releaseSeries is done later in `installer.go`.
+func validateMetadata(metadata *clusterctlv1.Metadata, providerLabel string) error {
+	// Check if metadata has the correct apiVersion and kind
+	if metadata.APIVersion != clusterctlv1.GroupVersion.String() {
+		return errors.Errorf("invalid provider metadata: unexpected apiVersion %q for provider %s (expected %q)",
+			metadata.APIVersion, providerLabel, clusterctlv1.GroupVersion.String())
+	}
+
+	// v1.11 started enforcing the Metadata Kind, but several providers did not actually have the field serialized.
+	// Ratchet validation so that an empty Kind is accepted.
+	if metadata.Kind != "Metadata" && metadata.Kind != "" {
+		return errors.Errorf("invalid provider metadata: unexpected kind %q for provider %s (expected \"Metadata\")",
+			metadata.Kind, providerLabel)
+	}
+
+	// Check if metadata has at least one release series
+	if len(metadata.ReleaseSeries) == 0 {
+		return errors.Errorf("invalid provider metadata: releaseSeries is empty in metadata.yaml for provider %s", providerLabel)
+	}
+
+	return nil
 }

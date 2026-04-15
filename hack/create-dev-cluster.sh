@@ -38,25 +38,27 @@ export AZURE_VNET_NAME=${CLUSTER_NAME}-vnet
 export AZURE_LOCATION="${AZURE_LOCATION:-southcentralus}"
 export AZURE_RESOURCE_GROUP=${CLUSTER_NAME}
 
+AZURE_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:=}"
+AZURE_TENANT_ID="${AZURE_TENANT_ID:=}"
+AZURE_CLIENT_ID="${AZURE_CLIENT_ID:=}"
+
 AZURE_SUBSCRIPTION_ID_B64="$(echo -n "$AZURE_SUBSCRIPTION_ID" | base64 | tr -d '\n')"
 AZURE_TENANT_ID_B64="$(echo -n "$AZURE_TENANT_ID" | base64 | tr -d '\n')"
 AZURE_CLIENT_ID_B64="$(echo -n "$AZURE_CLIENT_ID" | base64 | tr -d '\n')"
-AZURE_CLIENT_SECRET_B64="$(echo -n "$AZURE_CLIENT_SECRET" | base64 | tr -d '\n')"
 
-export AZURE_SUBSCRIPTION_ID_B64 AZURE_TENANT_ID_B64 AZURE_CLIENT_ID_B64 AZURE_CLIENT_SECRET_B64
+export AZURE_SUBSCRIPTION_ID_B64 AZURE_TENANT_ID_B64 AZURE_CLIENT_ID_B64
 
 # Machine settings.
 export CONTROL_PLANE_MACHINE_COUNT=${CONTROL_PLANE_MACHINE_COUNT:-3}
 export AZURE_CONTROL_PLANE_MACHINE_TYPE="${CONTROL_PLANE_MACHINE_TYPE:-Standard_B2s}"
 export AZURE_NODE_MACHINE_TYPE="${NODE_MACHINE_TYPE:-Standard_B2s}"
 export WORKER_MACHINE_COUNT=${WORKER_MACHINE_COUNT:-2}
-export KUBERNETES_VERSION="${KUBERNETES_VERSION:-v1.26.6}"
+export KUBERNETES_VERSION="${KUBERNETES_VERSION:-v1.33.6}"
 export CLUSTER_TEMPLATE="${CLUSTER_TEMPLATE:-cluster-template.yaml}"
 
 # identity secret settings.
-export AZURE_CLUSTER_IDENTITY_SECRET_NAME="cluster-identity-secret"
 export CLUSTER_IDENTITY_NAME=${CLUSTER_IDENTITY_NAME:="cluster-identity"}
-export AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE="default"
+export ASO_CREDENTIAL_SECRET_NAME=${ASO_CREDENTIAL_SECRET_NAME:="aso-credentials"}
 
 # Generate SSH key.
 capz::util::generate_ssh_key
@@ -64,7 +66,7 @@ capz::util::generate_ssh_key
 echo "================ DOCKER BUILD ==============="
 PULL_POLICY=IfNotPresent make modules docker-build
 
-setup() {
+create_cluster() {
     echo "================ MAKE CLEAN ==============="
     make clean
 
@@ -73,19 +75,14 @@ setup() {
 
     echo "================ INSTALL TOOLS ==============="
     make install-tools
-}
 
-create_cluster() {
     echo "================ CREATE CLUSTER ==============="
     make create-cluster
 }
 
-setup
-
 retries=$CLUSTER_CREATE_ATTEMPTS
-while ((retries > 0)); do
-    create_cluster && break
-    setup
-    sleep 5
-    ((retries --))
+until create_cluster; do
+  if ((--retries == 0)); then
+    exit 1
+  fi
 done

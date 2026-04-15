@@ -19,6 +19,7 @@ package azclient
 import (
 	"os"
 
+	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/armauth"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/utils"
 )
 
@@ -42,6 +43,19 @@ type AzureAuthConfig struct {
 	AADFederatedTokenFile string `json:"aadFederatedTokenFile,omitempty" yaml:"aadFederatedTokenFile,omitempty"`
 	// Use workload identity federation for the virtual machine to access Azure ARM APIs
 	UseFederatedWorkloadIdentityExtension bool `json:"useFederatedWorkloadIdentityExtension,omitempty" yaml:"useFederatedWorkloadIdentityExtension,omitempty"`
+	// Auxiliary token provider for accessing resources from network tenant
+	// Require MSI to be enabled and have permission to access the KeyVault
+	AuxiliaryTokenProvider *AzureAuthAuxiliaryTokenProvider `json:"auxiliaryTokenProvider,omitempty" yaml:"auxiliaryTokenProvider,omitempty"`
+	// The path where a JSON file exists containing the JSON format of a UserAssignedIdentityCredentials struct
+	// See the msi-dataplane for more details on UserAssignedIdentityCredentials - https://github.com/Azure/msi-dataplane/blob/63fb37d3a1aaac130120624674df795d2e088083/pkg/dataplane/internal/generated_client.go#L156C6-L156C37
+	AADMSIDataPlaneIdentityPath string `json:"aadMSIDataPlaneIdentityPath,omitempty" yaml:"aadMSIDataPlaneIdentityPath,omitempty"`
+}
+
+type AzureAuthAuxiliaryTokenProvider struct {
+	SubscriptionID string `json:"subscriptionID,omitempty"`
+	ResourceGroup  string `json:"resourceGroup,omitempty"`
+	VaultName      string `json:"vaultName,omitempty"`
+	SecretName     string `json:"secretName,omitempty"`
 }
 
 func (config *AzureAuthConfig) GetAADClientID() string {
@@ -66,4 +80,13 @@ func (config *AzureAuthConfig) GetAzureFederatedTokenFile() (string, bool) {
 		return clientCertPath, true
 	}
 	return config.AADFederatedTokenFile, config.UseFederatedWorkloadIdentityExtension
+}
+
+func (config *AzureAuthAuxiliaryTokenProvider) SecretResourceID() armauth.SecretResourceID {
+	return armauth.SecretResourceID{
+		SubscriptionID: config.SubscriptionID,
+		ResourceGroup:  config.ResourceGroup,
+		VaultName:      config.VaultName,
+		SecretName:     config.SecretName,
+	}
 }

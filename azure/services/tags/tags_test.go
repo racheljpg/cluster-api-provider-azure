@@ -17,7 +17,6 @@ limitations under the License.
 package tags
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -28,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/tags/mock_tags"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
@@ -87,7 +87,7 @@ func TestReconcileTags(t *testing.T) {
 							},
 						},
 					}),
-					s.UpdateAnnotationJSON("my-annotation", map[string]interface{}{"foo": "bar", "thing": "stuff"}),
+					s.UpdateAnnotationJSON("my-annotation", map[string]any{"foo": "bar", "thing": "stuff"}),
 					m.GetAtScope(gomockinternal.AContext(), "/sub/123/other/scope").Return(armresources.TagsResource{Properties: &armresources.Tags{
 						Tags: map[string]*string{
 							"sigs.k8s.io_cluster-api-provider-azure_cluster_test-cluster": ptr.To("owned"),
@@ -103,7 +103,7 @@ func TestReconcileTags(t *testing.T) {
 							},
 						},
 					}),
-					s.UpdateAnnotationJSON("my-annotation-2", map[string]interface{}{"tag1": "value1"}),
+					s.UpdateAnnotationJSON("my-annotation-2", map[string]any{"tag1": "value1"}),
 				)
 			},
 		},
@@ -153,7 +153,7 @@ func TestReconcileTags(t *testing.T) {
 							},
 						},
 					}),
-					s.UpdateAnnotationJSON(annotation, map[string]interface{}{"foo": "bar", "thing": "stuff"}),
+					s.UpdateAnnotationJSON(annotation, map[string]any{"foo": "bar", "thing": "stuff"}),
 				)
 			},
 		},
@@ -179,7 +179,7 @@ func TestReconcileTags(t *testing.T) {
 							"thing": ptr.To("stuff"),
 						},
 					}}, nil),
-					s.AnnotationJSON("my-annotation").Return(map[string]interface{}{"foo": "bar", "thing": "stuff"}, nil),
+					s.AnnotationJSON("my-annotation").Return(map[string]any{"foo": "bar", "thing": "stuff"}, nil),
 					m.UpdateAtScope(gomockinternal.AContext(), "/sub/123/fake/scope", armresources.TagsPatchResource{
 						Operation: ptr.To(armresources.TagsPatchOperationDelete),
 						Properties: &armresources.Tags{
@@ -188,7 +188,7 @@ func TestReconcileTags(t *testing.T) {
 							},
 						},
 					}),
-					s.UpdateAnnotationJSON("my-annotation", map[string]interface{}{"foo": "bar"}),
+					s.UpdateAnnotationJSON("my-annotation", map[string]any{"foo": "bar"}),
 				)
 			},
 		},
@@ -260,14 +260,13 @@ func TestReconcileTags(t *testing.T) {
 						"key": ptr.To("value"),
 					},
 				}}, nil)
-				s.AnnotationJSON("my-annotation").Return(map[string]interface{}{"key": "value"}, nil)
-				s.UpdateAnnotationJSON("my-annotation", map[string]interface{}{"key": "value"})
+				s.AnnotationJSON("my-annotation").Return(map[string]any{"key": "value"}, nil)
+				s.UpdateAnnotationJSON("my-annotation", map[string]any{"key": "value"})
 			},
 		},
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -283,7 +282,7 @@ func TestReconcileTags(t *testing.T) {
 				client: clientMock,
 			}
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(strings.ReplaceAll(err.Error(), "\n", "")).To(MatchRegexp(tc.expectedError))
@@ -298,16 +297,16 @@ func TestTagsChanged(t *testing.T) {
 	g := NewWithT(t)
 
 	var tests = map[string]struct {
-		lastAppliedTags          map[string]interface{}
+		lastAppliedTags          map[string]any
 		desiredTags              map[string]string
 		currentTags              map[string]*string
 		expectedResult           bool
 		expectedCreatedOrUpdated map[string]string
 		expectedDeleted          map[string]string
-		expectedNewAnnotations   map[string]interface{}
+		expectedNewAnnotations   map[string]any
 	}{
 		"tags are the same": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 			},
 			desiredTags: map[string]string{
@@ -319,11 +318,11 @@ func TestTagsChanged(t *testing.T) {
 			expectedResult:           false,
 			expectedCreatedOrUpdated: map[string]string{},
 			expectedDeleted:          map[string]string{},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"foo": "hello",
 			},
 		}, "tag value changed": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 			},
 			desiredTags: map[string]string{
@@ -337,11 +336,11 @@ func TestTagsChanged(t *testing.T) {
 				"foo": "goodbye",
 			},
 			expectedDeleted: map[string]string{},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"foo": "goodbye",
 			},
 		}, "tag deleted": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 			},
 			desiredTags: map[string]string{},
@@ -353,9 +352,9 @@ func TestTagsChanged(t *testing.T) {
 			expectedDeleted: map[string]string{
 				"foo": "hello",
 			},
-			expectedNewAnnotations: map[string]interface{}{},
+			expectedNewAnnotations: map[string]any{},
 		}, "tag created": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 			},
 			desiredTags: map[string]string{
@@ -370,12 +369,12 @@ func TestTagsChanged(t *testing.T) {
 				"bar": "welcome",
 			},
 			expectedDeleted: map[string]string{},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"foo": "hello",
 				"bar": "welcome",
 			},
 		}, "tag deleted and another created": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 			},
 			desiredTags: map[string]string{
@@ -391,12 +390,12 @@ func TestTagsChanged(t *testing.T) {
 			expectedDeleted: map[string]string{
 				"foo": "hello",
 			},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"bar": "welcome",
 			},
 		},
 		"current tags removed by external entity": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 				"bar": "welcome",
 			},
@@ -412,13 +411,13 @@ func TestTagsChanged(t *testing.T) {
 				"bar": "welcome",
 			},
 			expectedDeleted: map[string]string{},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"foo": "hello",
 				"bar": "welcome",
 			},
 		},
 		"current tags modified by external entity": {
-			lastAppliedTags: map[string]interface{}{
+			lastAppliedTags: map[string]any{
 				"foo": "hello",
 				"bar": "welcome",
 			},
@@ -435,14 +434,13 @@ func TestTagsChanged(t *testing.T) {
 				"bar": "welcome",
 			},
 			expectedDeleted: map[string]string{},
-			expectedNewAnnotations: map[string]interface{}{
+			expectedNewAnnotations: map[string]any{
 				"foo": "hello",
 				"bar": "welcome",
 			},
 		}}
 
 	for name, test := range tests {
-		test := test
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			changed, createdOrUpdated, deleted, newAnnotation := TagsChanged(test.lastAppliedTags, test.desiredTags, test.currentTags)

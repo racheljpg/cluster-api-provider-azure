@@ -17,20 +17,20 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 func TestAzureMachineServiceReconcile(t *testing.T) {
@@ -59,7 +59,6 @@ func TestAzureMachineServiceReconcile(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -93,7 +92,7 @@ func TestAzureMachineServiceReconcile(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.reconcile(context.TODO())
+			err := s.reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -135,7 +134,6 @@ func TestAzureMachineServicePause(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -163,7 +161,7 @@ func TestAzureMachineServicePause(t *testing.T) {
 				},
 			}
 
-			err := s.pause(context.TODO())
+			err := s.pause(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -200,7 +198,6 @@ func TestAzureMachineServiceDelete(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -230,7 +227,7 @@ func TestAzureMachineServiceDelete(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.delete(context.TODO())
+			err := s.delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

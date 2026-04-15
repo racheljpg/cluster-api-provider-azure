@@ -20,6 +20,7 @@ SHELL:=/usr/bin/env bash
 
 .DEFAULT_GOAL:=help
 
+GO_VERSION ?= $(shell sed -n 's/^toolchain go//p' go.mod)
 GOPATH  := $(shell go env GOPATH)
 GOARCH  := $(shell go env GOARCH)
 GOOS    := $(shell go env GOOS)
@@ -33,7 +34,7 @@ export GOPROXY
 export GO111MODULE=on
 
 # Kubebuilder.
-export KUBEBUILDER_ENVTEST_KUBERNETES_VERSION ?= 1.29.0
+export KUBEBUILDER_ENVTEST_KUBERNETES_VERSION ?= 1.34.0
 export KUBEBUILDER_CONTROLPLANE_START_TIMEOUT ?= 60s
 export KUBEBUILDER_CONTROLPLANE_STOP_TIMEOUT ?= 60s
 
@@ -69,11 +70,11 @@ ifneq ($(abspath $(ROOT_DIR)),$(GOPATH)/src/sigs.k8s.io/cluster-api-provider-azu
 endif
 
 # Binaries.
-CONTROLLER_GEN_VER := v0.14.0
+CONTROLLER_GEN_VER := v0.19.0
 CONTROLLER_GEN_BIN := controller-gen
 CONTROLLER_GEN := $(TOOLS_BIN_DIR)/$(CONTROLLER_GEN_BIN)-$(CONTROLLER_GEN_VER)
 
-CONVERSION_GEN_VER := v0.29.2
+CONVERSION_GEN_VER := v0.34.0
 CONVERSION_GEN_BIN := conversion-gen
 CONVERSION_GEN := $(TOOLS_BIN_DIR)/$(CONVERSION_GEN_BIN)-$(CONVERSION_GEN_VER)
 
@@ -81,27 +82,41 @@ ENVSUBST_VER := $(shell go list -m -f '{{.Version}}' github.com/drone/envsubst/v
 ENVSUBST_BIN := envsubst
 ENVSUBST := $(TOOLS_BIN_DIR)/$(ENVSUBST_BIN)-$(ENVSUBST_VER)
 
-GOLANGCI_LINT_VER := v1.55.2
+GOLANGCI_LINT_VER := $(shell cat .github/workflows/pr-golangci-lint.yaml | grep [[:space:]]version: | sed 's/.*version: //')
 GOLANGCI_LINT_BIN := golangci-lint
 GOLANGCI_LINT := $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_BIN)-$(GOLANGCI_LINT_VER)
+# Custom golangci-lint binary with kube-api-linter module
+GOLANGCI_LINT_KAL_BIN := golangci-lint-kube-api-linter
+GOLANGCI_LINT_KAL := $(TOOLS_BIN_DIR)/$(GOLANGCI_LINT_KAL_BIN)
 
-KUSTOMIZE_VER := v5.4.1
+GOVULNCHECK_BIN := govulncheck
+GOVULNCHECK_VER := v1.1.4
+GOVULNCHECK := $(abspath $(TOOLS_BIN_DIR)/$(GOVULNCHECK_BIN)-$(GOVULNCHECK_VER))
+GOVULNCHECK_PKG := golang.org/x/vuln/cmd/govulncheck
+
+KUSTOMIZE_VER := v5.7.0
 KUSTOMIZE_BIN := kustomize
 KUSTOMIZE := $(TOOLS_BIN_DIR)/$(KUSTOMIZE_BIN)-$(KUSTOMIZE_VER)
 
-MOCKGEN_VER := v0.4.0
+AZWI_VER := v1.2.2
+AZWI_BIN := azwi
+AZWI := $(TOOLS_BIN_DIR)/$(AZWI_BIN)-$(AZWI_VER)
+
+MOCKGEN_VER := $(shell go list -m -f '{{.Version}}' go.uber.org/mock)
 MOCKGEN_BIN := mockgen
 MOCKGEN := $(TOOLS_BIN_DIR)/$(MOCKGEN_BIN)-$(MOCKGEN_VER)
 
-RELEASE_NOTES_VER := v0.16.6-0.20240222112346-71feb57b59a4
+RELEASE_NOTES_VER := v0.18.0
 RELEASE_NOTES_BIN := release-notes
 RELEASE_NOTES := $(TOOLS_BIN_DIR)/$(RELEASE_NOTES_BIN)-$(RELEASE_NOTES_VER)
 
-KPROMO_VER := v4.0.4
+TRIVY_VER := 0.64.0
+
+KPROMO_VER := v4.0.5
 KPROMO_BIN := kpromo
 KPROMO := $(TOOLS_BIN_DIR)/$(KPROMO_BIN)-$(KPROMO_VER)
 
-GO_APIDIFF_VER := v0.8.2
+GO_APIDIFF_VER := v0.8.3
 GO_APIDIFF_BIN := go-apidiff
 GO_APIDIFF := $(TOOLS_BIN_DIR)/$(GO_APIDIFF_BIN)
 
@@ -109,15 +124,15 @@ GINKGO_VER := $(shell go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
 GINKGO_BIN := ginkgo
 GINKGO := $(TOOLS_BIN_DIR)/$(GINKGO_BIN)-$(GINKGO_VER)
 
-KUBECTL_VER := v1.28.4
+KUBECTL_VER := v1.33.6
 KUBECTL_BIN := kubectl
 KUBECTL := $(TOOLS_BIN_DIR)/$(KUBECTL_BIN)-$(KUBECTL_VER)
 
-HELM_VER := v3.14.4
+HELM_VER := v3.19.5
 HELM_BIN := helm
 HELM := $(TOOLS_BIN_DIR)/$(HELM_BIN)-$(HELM_VER)
 
-YQ_VER := v4.35.2
+YQ_VER := v4.45.4
 YQ_BIN := yq
 YQ :=  $(TOOLS_BIN_DIR)/$(YQ_BIN)-$(YQ_VER)
 
@@ -130,7 +145,7 @@ CODESPELL_BIN := codespell
 CODESPELL_DIST_DIR := codespell_dist
 CODESPELL := $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/$(CODESPELL_BIN)
 
-SETUP_ENVTEST_VER := v0.0.0-20231012212722-e25aeebc7846
+SETUP_ENVTEST_VER := release-0.22
 SETUP_ENVTEST_BIN := setup-envtest
 SETUP_ENVTEST := $(abspath $(TOOLS_BIN_DIR)/$(SETUP_ENVTEST_BIN)-$(SETUP_ENVTEST_VER))
 SETUP_ENVTEST_PKG := sigs.k8s.io/controller-runtime/tools/setup-envtest
@@ -138,13 +153,19 @@ SETUP_ENVTEST_PKG := sigs.k8s.io/controller-runtime/tools/setup-envtest
 KUBEBUILDER_ASSETS ?= $(shell $(SETUP_ENVTEST) use --use-env -p path $(KUBEBUILDER_ENVTEST_KUBERNETES_VERSION))
 
 # Define Docker related variables. Releases should modify and double check these vars.
-ifeq (,$(shell command -v gcloud))
-    REGISTRY ?= gcr.io/$(shell gcloud config get-value project)
-else
-    REGISTRY ?= localhost:5000
+ifneq ($(shell command -v gcloud),)
+    GCLOUD_PROJECT := $(shell gcloud config get-value project 2>/dev/null)
+    ifneq ($(GCLOUD_PROJECT),)
+        REGISTRY ?= gcr.io/$(GCLOUD_PROJECT)
+    endif
 endif
-STAGING_REGISTRY := gcr.io/k8s-staging-cluster-api-azure
-PROD_REGISTRY := registry.k8s.io/cluster-api-azure
+
+# If REGISTRY is not set, default to localhost:5000 to use the kind registry.
+ifndef REGISTRY
+	REGISTRY ?= localhost:5000
+endif
+STAGING_REGISTRY ?= gcr.io/k8s-staging-cluster-api-azure
+PROD_REGISTRY ?= registry.k8s.io/cluster-api-azure
 IMAGE_NAME ?= cluster-api-azure-controller
 CONTROLLER_IMG ?= $(REGISTRY)/$(IMAGE_NAME)
 TAG ?= dev
@@ -157,7 +178,7 @@ CRD_ROOT ?= $(MANIFEST_ROOT)/crd/bases
 WEBHOOK_ROOT ?= $(MANIFEST_ROOT)/webhook
 RBAC_ROOT ?= $(MANIFEST_ROOT)/rbac
 ASO_CRDS_PATH := $(MANIFEST_ROOT)/aso/crds.yaml
-ASO_VERSION := v2.6.0
+ASO_VERSION := $(shell go list -m -f '{{ .Version }}' github.com/Azure/azure-service-operator/v2)
 ASO_CRDS := resourcegroups.resources.azure.com natgateways.network.azure.com managedclusters.containerservice.azure.com managedclustersagentpools.containerservice.azure.com bastionhosts.network.azure.com virtualnetworks.network.azure.com virtualnetworkssubnets.network.azure.com privateendpoints.network.azure.com fleetsmembers.containerservice.azure.com extensions.kubernetesconfiguration.azure.com
 
 # Allow overriding the imagePullPolicy
@@ -173,7 +194,9 @@ ARTIFACTS ?= $(ROOT_DIR)/_artifacts
 E2E_CONF_FILE ?= $(ROOT_DIR)/test/e2e/config/azure-dev.yaml
 E2E_CONF_FILE_ENVSUBST := $(ROOT_DIR)/test/e2e/config/azure-dev-envsubst.yaml
 SKIP_CLEANUP ?= false
+AZWI_SKIP_CLEANUP ?= false
 SKIP_LOG_COLLECTION ?= false
+MGMT_CLUSTER_TYPE ?= kind
 # @sonasingh46: Skip creating mgmt cluster for ci as workload identity needs kind cluster
 # to be created with extra mounts for key pairs which is not yet supported
 # by existing e2e framework. A mgmt cluster(kind) is created as part of e2e suite
@@ -187,6 +210,17 @@ LDFLAGS := $(shell hack/version.sh)
 CLUSTER_TEMPLATE ?= cluster-template.yaml
 
 export KIND_CLUSTER_NAME ?= capz
+export RANDOM_SUFFIX := $(shell od -An -N8 -tx8 /dev/urandom | tr -d ' ' | head -c 16)
+export AZWI_RESOURCE_GROUP ?= capz-wi-$(RANDOM_SUFFIX)
+export CI_RG ?= $(AZWI_RESOURCE_GROUP)
+export USER_IDENTITY ?= $(addsuffix $(RANDOM_SUFFIX),$(CI_RG))
+export AZURE_IDENTITY_ID_FILEPATH ?= $(ROOT_DIR)/azure_identity_id
+
+# ensure that the APISERVER_LB_DNS_SUFFIX is of length 10 and contains only alphanumeric characters
+# LC_ALL=C is used to set the locale to C to ensure that the output is ASCII
+# head /dev/urandom generates random bytes. Will work on Linux and MacOS. Also works on Windows with WSL.
+# Ignore SIGPIPE error. This will suppress error messages if head closes the pipe before tr finishes.
+export APISERVER_LB_DNS_SUFFIX := $(shell LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 10 2>/dev/null)
 
 ## --------------------------------------
 ## Binaries
@@ -260,8 +294,15 @@ verify-gen: generate ## Verify generated files are the latest.
 		git diff; echo "generated files are out of date, run make generate"; exit 1; \
 	fi
 
+.PHONY: verify-generate-local
+verify-generate-local: ## Verify generated files are the latest. To be run locally
+	@if !(git diff --quiet HEAD); then \
+		git diff; echo "generated files are out of date, run make generate"; exit 1; \
+	fi
+
+
 .PHONY: verify-shellcheck
-verify-shellcheck: ## Verify shell files are passing lint.
+verify-shellcheck: ## Verify shell files are shellcheck.
 	./hack/verify-shellcheck.sh
 
 .PHONY: verify-conversions
@@ -276,6 +317,24 @@ verify-tiltfile: ## Verify Tiltfile format.
 verify-codespell: codespell ## Verify codespell.
 	@$(CODESPELL) $(ROOT_DIR) --ignore-words=$(ROOT_DIR)/.codespellignore --skip="*.git,*_artifacts,*.sum,$(ROOT_DIR)/docs/book/bookout,$(ROOT_DIR)/hack/tools/bin/codespell_dist"
 
+.PHONY: verify-govulncheck
+verify-govulncheck: $(GOVULNCHECK) ## Verify code for vulnerabilities
+	$(GOVULNCHECK) ./... && R1=$$? || R1=$$?; \
+	$(GOVULNCHECK) -C "$(TOOLS_DIR)" ./... && R2=$$? || R2=$$?; \
+	$(GOVULNCHECK) -C "$(TEST_DIR)" ./... && R3=$$? || R3=$$?; \
+	if [ "$$R1" -ne "0" ] || [ "$$R2" -ne "0" ] || [ "$$R3" -ne "0" ]; then \
+		exit 1; \
+	fi
+
+.PHONY: verify-security
+verify-security: ## Verify code and images for vulnerabilities
+	$(MAKE) verify-container-images && R1=$$? || R1=$$?; \
+	$(MAKE) verify-govulncheck && R2=$$? || R2=$$?; \
+	if [ "$$R1" -ne "0" ] || [ "$$R2" -ne "0" ]; then \
+	  echo "Check for vulnerabilities failed! There are vulnerabilities to be fixed"; \
+		exit 1; \
+	fi
+
 ## --------------------------------------
 ## Development
 ## --------------------------------------
@@ -283,30 +342,34 @@ verify-codespell: codespell ## Verify codespell.
 ##@ Development:
 
 .PHONY: install-tools # populate hack/tools/bin
-install-tools: $(ENVSUBST) $(KUSTOMIZE) $(KUBECTL) $(HELM) $(GINKGO) $(KIND)
+install-tools: $(ENVSUBST) $(KUSTOMIZE) $(KUBECTL) $(HELM) $(GINKGO) $(KIND) $(AZWI) $(YQ)
 
 .PHONY: create-management-cluster
 create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create a management cluster.
-	# Create kind management cluster.
-	$(MAKE) kind-create
+	# Create management cluster based on type
+	@if [ "$(MGMT_CLUSTER_TYPE)" = "aks" ]; then \
+		$(MAKE) aks-create; \
+	else \
+		$(MAKE) kind-create; \
+	fi
 
 	# Install cert manager and wait for availability
 	./hack/install-cert-manager.sh
 
-	# Create secret for AzureClusterIdentity
-	./hack/create-identity-secret.sh
-
 	# Create customized cloud provider configs
+	AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY="$${AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY:-$$(cat $(AZURE_IDENTITY_ID_FILEPATH))}" \
 	./hack/create-custom-cloud-provider-config.sh
 
 	# Deploy CAPI
-	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.7.1/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
+	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.12.4/cluster-api-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f - --server-side=true; do sleep 5; done"
 
 	# Deploy CAAPH
-	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/releases/download/v0.1.0-alpha.10/addon-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f -; do sleep 5; done"
+	timeout --foreground 300 bash -c "until curl --retry $(CURL_RETRIES) -sSL https://github.com/kubernetes-sigs/cluster-api-addon-provider-helm/releases/download/v0.6.1/addon-components.yaml | $(ENVSUBST) | $(KUBECTL) apply -f - --server-side=true; do sleep 5; done"
 
 	# Deploy CAPZ
-	$(KIND) load docker-image $(CONTROLLER_IMG)-$(ARCH):$(TAG) --name=$(KIND_CLUSTER_NAME)
+	if [ "$(MGMT_CLUSTER_TYPE)" != "aks" ]; then \
+		$(KIND) load docker-image $(CONTROLLER_IMG)-$(ARCH):$(TAG) --name=$(KIND_CLUSTER_NAME); \
+	fi
 	timeout --foreground 300 bash -c "until $(KUSTOMIZE) build config/default | $(ENVSUBST) | $(KUBECTL) apply -f - --server-side=true; do sleep 5; done"
 
 	# Wait for CAPI deployments
@@ -321,23 +384,37 @@ create-management-cluster: $(KUSTOMIZE) $(ENVSUBST) $(KUBECTL) $(KIND) ## Create
 	timeout --foreground 300 bash -c "until $(KUBECTL) get clusterresourcesets -A; do sleep 3; done"
 
 	# install Windows Calico cluster resource set
-	timeout --foreground 300 bash -c "until $(KUBECTL) create configmap calico-windows-addon --from-file="$(ADDONS_DIR)/windows/calico" --dry-run=client -o yaml | kubectl apply -f -; do sleep 5; done"
+	timeout --foreground 300 bash -c "until $(KUBECTL) create configmap calico-windows-addon -n default --from-file="$(ADDONS_DIR)/windows/calico" --dry-run=client -o yaml | kubectl apply -f -; do sleep 5; done"
 	timeout --foreground 300 bash -c "until $(KUBECTL) apply -f templates/addons/windows/calico-resource-set.yaml; do sleep 5; done"
 
 	# Wait for CAPZ deployments
 	$(KUBECTL) wait --for=condition=Available --timeout=5m -n capz-system deployment --all
+
+	# This is a temporary fix to apply https://github.com/kubernetes-sigs/cluster-api/pull/13177 which stops setting
+	# ControlPlaneKubeletLocalMode for K8s v1.36+ clusters.
+	# Override kubeadm control plane controller image on the management cluster (temporary fix)
+	# Remove this when CAPI_VERSION above is update to v1.12.3 OR GREATER
+	timeout --foreground 300 bash -c "until $(KUBECTL) -n capi-kubeadm-control-plane-system get deployment/capi-kubeadm-control-plane-controller-manager > /dev/null 2>&1; do sleep 3; done"
+	$(KUBECTL) -n capi-kubeadm-control-plane-system set image deployment/capi-kubeadm-control-plane-controller-manager manager="gcr.io/k8s-staging-cluster-api/kubeadm-control-plane-controller:v20260109-v1.12.0-rc.0-186-ga64cfe0cc"
+	$(KUBECTL) -n capi-kubeadm-control-plane-system rollout status deployment/capi-kubeadm-control-plane-controller-manager --timeout=5m
 
 	# required sleep for when creating management and workload cluster simultaneously
 	# Wait for the core CRD resources to be "installed" onto the mgmt cluster before returning control
 	timeout --foreground 300 bash -c "until $(KUBECTL) get clusters -A; do sleep 3; done"
 	timeout --foreground 300 bash -c "until $(KUBECTL) get azureclusters -A; do sleep 3; done"
 	timeout --foreground 300 bash -c "until $(KUBECTL) get kubeadmcontrolplanes -A; do sleep 3; done"
-	@echo 'Set kubectl context to the kind management cluster by running "$(KUBECTL) config set-context kind-$(KIND_CLUSTER_NAME)"'
+
+	@if [ "$(MGMT_CLUSTER_TYPE)" != "aks" ]; then \
+		echo 'Set kubectl context to the kind management cluster by running "$(KUBECTL) config set-context kind-$(KIND_CLUSTER_NAME)"'; \
+	fi
 
 .PHONY: create-workload-cluster
 create-workload-cluster: $(ENVSUBST) $(KUBECTL) ## Create a workload cluster.
 	# Create workload Cluster.
-	@if [ -f "$(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE)" ]; then \
+	@if [ -z "${AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY}" ]; then \
+		export AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY=$(shell cat $(AZURE_IDENTITY_ID_FILEPATH)); \
+	fi; \
+	if [ -f "$(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE)" ]; then \
 		timeout --foreground 300 bash -c "until $(ENVSUBST) < $(TEMPLATES_DIR)/$(CLUSTER_TEMPLATE) | $(KUBECTL) apply -f -; do sleep 5; done"; \
 	elif [ -f "$(CLUSTER_TEMPLATE)" ]; then \
 		timeout --foreground 300 bash -c "until $(ENVSUBST) < "$(CLUSTER_TEMPLATE)" | $(KUBECTL) apply -f -; do sleep 5; done"; \
@@ -346,10 +423,14 @@ create-workload-cluster: $(ENVSUBST) $(KUBECTL) ## Create a workload cluster.
 	fi
 
 	# Wait for the kubeconfig to become available.
-	timeout --foreground 300 bash -c "while ! $(KUBECTL) get secrets | grep $(CLUSTER_NAME)-kubeconfig; do sleep 1; done"
+	timeout --foreground 1800 bash -c "while ! $(KUBECTL) get secrets -n default | grep $(CLUSTER_NAME)-kubeconfig; do sleep 1; done"
 	# Get kubeconfig and store it locally.
-	$(KUBECTL) get secrets $(CLUSTER_NAME)-kubeconfig -o json | jq -r .data.value | base64 --decode > ./kubeconfig
-	$(KUBECTL) wait --for=condition=Ready --timeout=10m cluster "$(CLUSTER_NAME)"
+	$(KUBECTL) get secret/$(CLUSTER_NAME)-kubeconfig -n default -o json | jq -r .data.value | base64 --decode > ./kubeconfig
+	# TODO: Standardize timeouts across the Makefile and make them configurable based on the job.
+	$(KUBECTL) -n default wait --for=condition=Ready --timeout=60m clusters.v1beta1.cluster.x-k8s.io "$(CLUSTER_NAME)"
+
+	# Set the namespace to `default` b/c when the service account is auto mounted, the namespace is changed to `test-pods`.
+	$(KUBECTL) --kubeconfig=./kubeconfig config set-context --current --namespace="default"
 
 	@echo 'run "$(KUBECTL) --kubeconfig=./kubeconfig ..." to work with the new target cluster'
 
@@ -358,6 +439,8 @@ create-cluster: ## Create a workload development Kubernetes cluster on Azure in 
 	EXP_CLUSTER_RESOURCE_SET=true \
 	EXP_MACHINE_POOL=true \
 	EXP_EDGEZONE=true \
+	EXP_ASO_API=true \
+	EXP_APISERVER_ILB=true \
 	$(MAKE) create-management-cluster \
 	create-workload-cluster
 
@@ -372,10 +455,14 @@ delete-workload-cluster: $(KUBECTL) ## Deletes the example workload Kubernetes c
 
 ##@ Docker:
 
+.PHONY: acr-login
+acr-login: ## Login to Azure Container Registry.
+	./hack/ensure-acr-login.sh
+
 .PHONY: docker-pull-prerequisites
 docker-pull-prerequisites: ## Pull prerequisites for building controller-manager.
 	docker pull docker/dockerfile:1.4
-	docker pull docker.io/library/golang:1.21
+	docker pull docker.io/library/golang:$(GO_VERSION)
 	docker pull gcr.io/distroless/static:latest
 
 .PHONY: docker-build
@@ -454,8 +541,9 @@ generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
 	$(CONTROLLER_GEN) \
 		paths=./api/... \
 		paths=./$(EXP_DIR)/api/... \
+		paths=./internal/webhooks/... \
 		crd:crdVersions=v1 \
-		rbac:roleName=manager-role \
+		rbac:roleName=base-manager-role \
 		output:crd:dir=$(CRD_ROOT) \
 		output:webhook:dir=$(WEBHOOK_ROOT) \
 		webhook
@@ -464,7 +552,7 @@ generate-manifests: $(CONTROLLER_GEN) ## Generate manifests e.g. CRD, RBAC etc.
 		paths=./controllers/... \
 		paths=./$(EXP_DIR)/controllers/... \
 		output:rbac:dir=$(RBAC_ROOT) \
-		rbac:roleName=manager-role
+		rbac:roleName=base-manager-role
 
 .PHONY: generate-flavors ## Generate template flavors.
 generate-flavors: $(KUSTOMIZE) generate-addons
@@ -476,16 +564,17 @@ generate-e2e-templates: $(KUSTOMIZE) ## Generate Azure infrastructure templates 
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-md-remediation --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-md-remediation.yaml
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-remediation --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-remediation.yaml
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-machine-pool --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-machine-pool.yaml
+	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-machine-and-machine-pool --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-machine-and-machine-pool.yaml
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-node-drain --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-node-drain.yaml
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-upgrades --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-upgrades.yaml
 	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-scale-in --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-kcp-scale-in.yaml
+	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-md-taints --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-md-taints.yaml
+	$(KUSTOMIZE) build $(AZURE_TEMPLATES)/v1beta1/cluster-template-aks --load-restrictor LoadRestrictionsNone > $(AZURE_TEMPLATES)/v1beta1/cluster-template-aks.yaml
 
 .PHONY: generate-addons
-generate-addons: fetch-calico-manifests ## Generate metric-server, calico, calico-ipv6, azure cni v1 addons.
+generate-addons: fetch-calico-manifests $(ENVSUBST)
 	$(KUSTOMIZE) build $(ADDONS_DIR)/metrics-server > $(ADDONS_DIR)/metrics-server/metrics-server.yaml
-	$(KUSTOMIZE) build $(ADDONS_DIR)/calico > $(ADDONS_DIR)/calico.yaml
-	$(KUSTOMIZE) build $(ADDONS_DIR)/calico-ipv6 > $(ADDONS_DIR)/calico-ipv6.yaml
-	$(KUSTOMIZE) build $(ADDONS_DIR)/calico-dual-stack > $(ADDONS_DIR)/calico-dual-stack.yaml
+	$(KUSTOMIZE) build $(ADDONS_DIR)/calico | $(ENVSUBST) > $(ADDONS_DIR)/calico.yaml
 	$(KUSTOMIZE) build $(ADDONS_DIR)/azure-cni-v1 > $(ADDONS_DIR)/azure-cni-v1.yaml
 
 .PHONY: generate-aso-crds
@@ -494,13 +583,13 @@ generate-addons: fetch-calico-manifests ## Generate metric-server, calico, calic
 # envsubst, '$$$$' changes back to '$$' so ASO will not detect a diff and try to
 # update the CRDs for which we don't give it permission.
 generate-aso-crds: $(YQ)
+	$(YQ) e -i '.resources[] |= sub("^(https://github\.com/Azure/azure-service-operator/releases/download/)[^/]+(/.*_).*(\.yaml)$$", "$${1}$(ASO_VERSION)$${2}$(ASO_VERSION)$${3}")' $(ROOT_DIR)/config/aso/kustomization.yaml
 	curl -fSsL "https://github.com/Azure/azure-service-operator/releases/download/$(ASO_VERSION)/azureserviceoperator_customresourcedefinitions_$(ASO_VERSION).yaml" | \
 		$(YQ) e '. | select($(foreach name,$(ASO_CRDS),.metadata.name == "$(name)" or )false)' - | \
 		sed 's/\$$\$$/$$$$$$$$/g' \
 		> $(ASO_CRDS_PATH)
 
-# When updating this, make sure to also update the Windows image version in templates/addons/windows/calico.
-export CALICO_VERSION := v3.26.1
+export CALICO_VERSION := v3.29.4
 # Where all downloaded Calico manifests are unpacked and stored.
 CALICO_RELEASES := $(ARTIFACTS)/calico
 # Path to manifests directory in a Calico release archive.
@@ -543,19 +632,31 @@ help: ## Display this help.
 ##@ Linting:
 
 .PHONY: lint
-lint: $(GOLANGCI_LINT) lint-latest ## Lint codebase.
-	$(GOLANGCI_LINT) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
+lint: $(GOLANGCI_LINT_KAL) lint-azure-latest ## Lint the codebase.
+	$(GOLANGCI_LINT_KAL) run -v $(GOLANGCI_LINT_EXTRA_ARGS)
+
+.PHONY: lint-fast
+lint-fast: $(GOLANGCI_LINT_KAL) ## Lint the codebase with fast linters only.
+	GOLANGCI_LINT_EXTRA_ARGS+=--fast-only $(MAKE) lint
 
 .PHONY: lint-fix
-lint-fix: $(GOLANGCI_LINT) ## Lint the codebase and run auto-fixers if supported by the linter.
-	GOLANGCI_LINT_EXTRA_ARGS=--fix $(MAKE) lint
+lint-fix: $(GOLANGCI_LINT_KAL) ## Lint the codebase and run auto-fixers if supported by the linter.
+	GOLANGCI_LINT_EXTRA_ARGS+=--fix $(MAKE) lint
 
-lint-full: $(GOLANGCI_LINT) ## Run slower linters to detect possible issues.
-	$(GOLANGCI_LINT) run -v --fast=false
+.PHONY: lint-full
+lint-full: $(GOLANGCI_LINT) lint ## Lint the codebase.
 
-.PHONY: lint-latest
-lint-latest:
-	./hack/lint-latest.sh
+.PHONY: lint-azure-latest ## Check for usage of the "latest" floating Azure API version.
+lint-azure-latest:
+	./hack/lint-azure-latest.sh
+
+.PHONY: lint-api
+lint-api: $(GOLANGCI_LINT_KAL) ## Run kube-api-linter on API types.
+	$(GOLANGCI_LINT_KAL) run ./api/... ./exp/api/... --enable-only kubeapilinter
+
+.PHONY: lint-api-fix
+lint-api-fix: $(GOLANGCI_LINT_KAL) ## Run kube-api-linter with auto-fix.
+	$(GOLANGCI_LINT_KAL) run ./api/... ./exp/api/... --enable-only kubeapilinter --fix
 
 ## --------------------------------------
 ## Release
@@ -629,7 +730,7 @@ release-binary: $(RELEASE_DIR) ## Compile and build release binaries.
 		-e GOARCH=$(GOARCH) \
 		-v "$$(pwd):/workspace" \
 		-w /workspace \
-		golang:1.21 \
+		golang:$(GO_VERSION) \
 		go build -a -ldflags '$(LDFLAGS) -extldflags "-static"' \
 		-o $(RELEASE_DIR)/$(notdir $(RELEASE_BINARY))-$(GOOS)-$(GOARCH) $(RELEASE_BINARY)
 
@@ -663,7 +764,7 @@ promote-images: $(KPROMO) ## Promote images.
 
 ##@ Testing:
 .PHONY: test
-test: generate lint go-test-race ## Run "generate", "lint" and "go-test-race" rules.
+test: generate go-test-race ## Run "generate" and "go-test-race" rules.
 
 .PHONY: go-test-race
 go-test-race: TEST_ARGS+= -race
@@ -682,7 +783,24 @@ test-cover: test ## Run tests with code coverage and generate reports.
 
 .PHONY: kind-create-bootstrap
 kind-create-bootstrap: $(KUBECTL) ## Create capz kind bootstrap cluster.
-	export AZWI=$${AZWI:-true} KIND_CLUSTER_NAME=capz-e2e && ./scripts/kind-with-registry.sh
+	KIND_CLUSTER_NAME=capz-e2e ./scripts/kind-with-registry.sh
+
+.PHONY: create-bootstrap
+create-bootstrap: $(KUBECTL) ## Create bootstrap cluster (AKS or KIND) for CAPZ testing. Default is KIND.
+	@echo "Creating bootstrap cluster with type: $(MGMT_CLUSTER_TYPE)"
+	@if [ "$(MGMT_CLUSTER_TYPE)" == "aks" ]; then \
+		MGMT_CLUSTER_NAME="$${MGMT_CLUSTER_NAME:-capz-e2e-$(RANDOM_SUFFIX)}" \
+		./scripts/aks-as-mgmt.sh || { echo "Failed to create AKS bootstrap cluster" >&2; exit 1; }; \
+	else \
+		KIND_CLUSTER_NAME=capz-e2e ./scripts/kind-with-registry.sh || { echo "Failed to create KIND bootstrap cluster" >&2; exit 1; }; \
+	fi
+	@echo "Bootstrap cluster created successfully"
+
+.PHONY: cleanup-workload-identity
+cleanup-workload-identity: ## Cleanup CI workload-identity infra
+	@if ! [ "$(AZWI_SKIP_CLEANUP)" == "true" ]; then \
+		./scripts/cleanup-workload-identity.sh; \
+	fi
 
 ## --------------------------------------
 ## Security Scanning
@@ -690,7 +808,7 @@ kind-create-bootstrap: $(KUBECTL) ## Create capz kind bootstrap cluster.
 
 .PHONY: verify-container-images
 verify-container-images: ## Verify container images
-	./hack/verify-container-images.sh
+	TRACE=$(TRACE) ./hack/verify-container-images.sh $(TRIVY_VER)
 
 ## --------------------------------------
 ## Tilt / Kind
@@ -699,12 +817,24 @@ verify-container-images: ## Verify container images
 ##@ Tilt / Kind:
 
 .PHONY: kind-create
-kind-create: $(KUBECTL) ## Create capz kind cluster if needed.
+kind-create: $(KUBECTL) $(AZWI) ## Create capz kind cluster if needed.
 	./scripts/kind-with-registry.sh
 
+.PHONY: aks-create
+aks-create: $(KUBECTL) ## Create aks cluster as mgmt cluster.
+	./scripts/aks-as-mgmt.sh
+	MANIFEST_IMG=$(CONTROLLER_IMG) MANIFEST_TAG=$(TAG) $(MAKE) set-manifest-image
+
+.PHONY: aks-delete
+aks-delete: $(KUBECTL) ## Deletes the resource group and the associated AKS clusters listed under allowed_contexts in ./tilt-settings.yaml .
+	./scripts/aks-delete.sh
+
 .PHONY: tilt-up
-tilt-up: install-tools kind-create ## Start tilt and build kind cluster if needed.
-	CLUSTER_TOPOLOGY=true EXP_CLUSTER_RESOURCE_SET=true EXP_MACHINE_POOL=true EXP_KUBEADM_BOOTSTRAP_FORMAT_IGNITION=true EXP_EDGEZONE=true tilt up
+tilt-up: install-tools ## Start tilt and build kind cluster if needed.
+	@if [ -z "${AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY}" ]; then \
+		export AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY=$(shell cat $(AZURE_IDENTITY_ID_FILEPATH)); \
+	fi; \
+	CLUSTER_TOPOLOGY=true EXP_ASO_API=true EXP_CLUSTER_RESOURCE_SET=true EXP_MACHINE_POOL=true EXP_KUBEADM_BOOTSTRAP_FORMAT_IGNITION=true EXP_EDGEZONE=true EXP_APISERVER_ILB=true tilt up
 
 .PHONY: delete-cluster
 delete-cluster: delete-workload-cluster  ## Deletes the example kind cluster "capz".
@@ -714,6 +844,14 @@ delete-cluster: delete-workload-cluster  ## Deletes the example kind cluster "ca
 kind-reset: $(KIND) ## Destroys the "capz" and "capz-e2e" kind clusters.
 	$(KIND) delete cluster --name=$(KIND_CLUSTER_NAME) || true
 	$(KIND) delete cluster --name=capz-e2e || true
+
+.PHONY: aks-cleanup
+aks-cleanup: $(KUBECTL) ## Deletes deployments, secrets and service-accounts from existing AKS as mgmt cluster
+	@ASO_CRDS_PATH=$(ASO_CRDS_PATH) \
+	CRD_ROOT=$(CRD_ROOT) \
+	DELETE_CRDS=$${DELETE_CRDS:-"false"} \
+	MGMT_CLUSTER_NAME=$${MGMT_CLUSTER_NAME:-} \
+	./scripts/reuse-existing-aks-cluster.sh
 
 ## --------------------------------------
 ## Tooling Binaries
@@ -738,6 +876,7 @@ yq: $(YQ) ## Build a local copy of yq.
 kind: $(KIND) ## Build a local copy of kind.
 setup-envtest: $(SETUP_ENVTEST) ## Build a local copy of setup-envtest.
 codespell : $(CODESPELL) ## Build a local copy of codespell.
+azwi: $(AZWI) ## Build a local copy of azwi.
 
 $(CONVERSION_VERIFIER): go.mod
 	cd $(TOOLS_DIR); go build -tags=tools -o $@ sigs.k8s.io/cluster-api/hack/tools/conversion-verifier
@@ -751,8 +890,17 @@ $(CONVERSION_GEN): ## Build conversion-gen from tools folder.
 $(ENVSUBST): ## Build envsubst from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/drone/envsubst/v2/cmd/envsubst $(ENVSUBST_BIN) $(ENVSUBST_VER)
 
+.PHONY: $(GOVULNCHECK_BIN)
+$(GOVULNCHECK_BIN): $(GOVULNCHECK) ## Build a local copy of govulncheck.
+
+$(GOVULNCHECK): # Build govulncheck.
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) $(GOVULNCHECK_PKG) $(GOVULNCHECK_BIN) $(GOVULNCHECK_VER)
+
 $(GOLANGCI_LINT): ## Build golangci-lint from tools folder.
-	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/golangci/golangci-lint/cmd/golangci-lint $(GOLANGCI_LINT_BIN) $(GOLANGCI_LINT_VER)
+	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint $(GOLANGCI_LINT_BIN) $(GOLANGCI_LINT_VER)
+
+$(GOLANGCI_LINT_KAL): $(GOLANGCI_LINT) .custom-gcl.yml ## Build custom golangci-lint with kube-api-linter module.
+	$(GOLANGCI_LINT) custom
 
 $(KUSTOMIZE): ## Build kustomize from tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/kustomize/kustomize/v5 $(KUSTOMIZE_BIN) $(KUSTOMIZE_VER)
@@ -787,6 +935,16 @@ $(HELM): ## Put helm into tools folder.
 	USE_SUDO=false HELM_INSTALL_DIR=$(TOOLS_BIN_DIR) DESIRED_VERSION=$(HELM_VER) BINARY_NAME=$(HELM_BIN)-$(HELM_VER) $(TOOLS_BIN_DIR)/get_helm.sh
 	ln -sf $(HELM) $(TOOLS_BIN_DIR)/$(HELM_BIN)
 	rm -f $(TOOLS_BIN_DIR)/get_helm.sh
+
+$(AZWI): ## Put azwi into tools folder.
+	mkdir -p $(TOOLS_BIN_DIR)
+	rm -f "$(TOOLS_BIN_DIR)/$(AZWI_BIN)*"
+	curl --retry $(CURL_RETRIES) -fsSL -o $(TOOLS_BIN_DIR)/azwi.tar.gz https://github.com/Azure/azure-workload-identity/releases/download/$(AZWI_VER)/azwi-$(AZWI_VER)-$(GOOS)-$(GOARCH).tar.gz
+	tar -xf "$(TOOLS_BIN_DIR)/azwi.tar.gz" -C $(TOOLS_BIN_DIR) $(AZWI_BIN)
+	mv "$(TOOLS_BIN_DIR)/$(AZWI_BIN)" $(AZWI)
+	ln -sf $(AZWI) $(TOOLS_BIN_DIR)/$(AZWI_BIN)
+	chmod +x $(AZWI) $(TOOLS_BIN_DIR)/$(AZWI_BIN)
+	rm -f $(TOOLS_BIN_DIR)/azwi.tar.gz
 
 $(KIND): ## Build kind into tools folder.
 	GOBIN=$(TOOLS_BIN_DIR) $(GO_INSTALL) sigs.k8s.io/kind $(KIND_BIN) $(KIND_VER)
@@ -825,6 +983,15 @@ $(CODESPELL): ## Build codespell from tools folder.
 		mv $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin/$(CODESPELL_BIN) $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR); \
 		rm -r $(TOOLS_BIN_DIR)/$(CODESPELL_DIST_DIR)/bin; \
     )
+
+## --------------------------------------
+## Helpers
+## --------------------------------------
+
+##@ helpers:
+
+go-version: ## Print the go version we use to compile our binaries and images
+	@echo $(GO_VERSION)
 
 include conformance.mk
 include e2e.mk

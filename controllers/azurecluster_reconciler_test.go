@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -30,6 +29,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -38,9 +41,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vnetpeerings"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestAzureClusterServiceReconcile(t *testing.T) {
@@ -69,7 +69,6 @@ func TestAzureClusterServiceReconcile(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -95,7 +94,7 @@ func TestAzureClusterServiceReconcile(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.reconcile(context.TODO())
+			err := s.reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -137,7 +136,6 @@ func TestAzureClusterServicePause(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -165,7 +163,7 @@ func TestAzureClusterServicePause(t *testing.T) {
 				},
 			}
 
-			err := s.pause(context.TODO())
+			err := s.pause(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -328,7 +326,6 @@ func TestAzureClusterServiceDelete(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -379,7 +376,7 @@ func TestAzureClusterServiceDelete(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.delete(context.TODO())
+			err := s.delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

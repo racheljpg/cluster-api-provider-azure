@@ -35,13 +35,14 @@ import (
 	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
-	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
+	v1beta10 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 )
 
 // MockFutureScope is a mock of FutureScope interface.
 type MockFutureScope struct {
 	ctrl     *gomock.Controller
 	recorder *MockFutureScopeMockRecorder
+	isgomock struct{}
 }
 
 // MockFutureScopeMockRecorder is the mock recorder for MockFutureScope.
@@ -181,6 +182,7 @@ func (mr *MockFutureScopeMockRecorder) UpdatePutStatus(arg0, arg1, arg2 any) *go
 type MockGetter struct {
 	ctrl     *gomock.Controller
 	recorder *MockGetterMockRecorder
+	isgomock struct{}
 }
 
 // MockGetterMockRecorder is the mock recorder for MockGetter.
@@ -219,6 +221,7 @@ func (mr *MockGetterMockRecorder) Get(ctx, spec any) *gomock.Call {
 type MockTagsGetter struct {
 	ctrl     *gomock.Controller
 	recorder *MockTagsGetterMockRecorder
+	isgomock struct{}
 }
 
 // MockTagsGetterMockRecorder is the mock recorder for MockTagsGetter.
@@ -257,6 +260,7 @@ func (mr *MockTagsGetterMockRecorder) GetAtScope(ctx, scope any) *gomock.Call {
 type MockCreator[T any] struct {
 	ctrl     *gomock.Controller
 	recorder *MockCreatorMockRecorder[T]
+	isgomock struct{}
 }
 
 // MockCreatorMockRecorder is the mock recorder for MockCreator.
@@ -311,6 +315,7 @@ func (mr *MockCreatorMockRecorder[T]) Get(ctx, spec any) *gomock.Call {
 type MockDeleter[T any] struct {
 	ctrl     *gomock.Controller
 	recorder *MockDeleterMockRecorder[T]
+	isgomock struct{}
 }
 
 // MockDeleterMockRecorder is the mock recorder for MockDeleter.
@@ -349,6 +354,7 @@ func (mr *MockDeleterMockRecorder[T]) DeleteAsync(ctx, spec, resumeToken any) *g
 type MockReconciler struct {
 	ctrl     *gomock.Controller
 	recorder *MockReconcilerMockRecorder
+	isgomock struct{}
 }
 
 // MockReconcilerMockRecorder is the mock recorder for MockReconciler.

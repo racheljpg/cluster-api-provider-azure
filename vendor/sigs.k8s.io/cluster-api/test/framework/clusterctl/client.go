@@ -91,11 +91,11 @@ func Init(ctx context.Context, input InitInput) {
 }
 
 // InitWithBinary uses clusterctl binary to run init with the list of providers defined in the local repository.
-func InitWithBinary(_ context.Context, binary string, input InitInput) {
+func InitWithBinary(ctx context.Context, binary string, input InitInput) {
 	args := calculateClusterCtlInitArgs(input, binary)
 	log.Logf("clusterctl %s", strings.Join(args, " "))
 
-	cmd := exec.Command(binary, args...) //nolint:gosec // We don't care about command injection here.
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // We don't care about command injection here.
 
 	out, err := cmd.CombinedOutput()
 	_ = os.WriteFile(filepath.Join(input.LogFolder, "clusterctl-init.log"), out, 0644) //nolint:gosec // this is a log file to be shared via prow artifacts
@@ -203,7 +203,7 @@ func Upgrade(ctx context.Context, input UpgradeInput) {
 }
 
 // UpgradeWithBinary calls clusterctl upgrade apply with the list of providers defined in the local repository.
-func UpgradeWithBinary(ctx context.Context, binary string, input UpgradeInput) {
+func UpgradeWithBinary(ctx context.Context, binary string, input UpgradeInput) error {
 	if len(input.ClusterctlVariables) > 0 {
 		outputPath := filepath.Join(filepath.Dir(input.ClusterctlConfigPath), fmt.Sprintf("clusterctl-upgrade-config-%s.yaml", input.ClusterName))
 		Expect(CopyAndAmendClusterctlConfig(ctx, CopyAndAmendClusterctlConfigInput{
@@ -217,7 +217,7 @@ func UpgradeWithBinary(ctx context.Context, binary string, input UpgradeInput) {
 	args := calculateClusterCtlUpgradeArgs(input)
 	log.Logf("clusterctl %s", strings.Join(args, " "))
 
-	cmd := exec.Command(binary, args...) //nolint:gosec // We don't care about command injection here.
+	cmd := exec.CommandContext(ctx, binary, args...) //nolint:gosec // We don't care about command injection here.
 
 	out, err := cmd.CombinedOutput()
 	_ = os.WriteFile(filepath.Join(input.LogFolder, "clusterctl-upgrade.log"), out, 0644) //nolint:gosec // this is a log file to be shared via prow artifacts
@@ -227,8 +227,9 @@ func UpgradeWithBinary(ctx context.Context, binary string, input UpgradeInput) {
 		if errors.As(err, &exitErr) {
 			stdErr = string(exitErr.Stderr)
 		}
+		return fmt.Errorf("failed to run clusterctl upgrade apply:\nstdout:\n%s\nstderr:\n%s", string(out), stdErr)
 	}
-	Expect(err).ToNot(HaveOccurred(), "failed to run clusterctl upgrade apply:\nstdout:\n%s\nstderr:\n%s", string(out), stdErr)
+	return nil
 }
 
 func calculateClusterCtlUpgradeArgs(input UpgradeInput) []string {
@@ -318,12 +319,16 @@ type ConfigClusterInput struct {
 
 // ConfigCluster gets a workload cluster based on a template.
 func ConfigCluster(ctx context.Context, input ConfigClusterInput) []byte {
-	log.Logf("clusterctl config cluster %s --infrastructure %s --kubernetes-version %s --control-plane-machine-count %d --worker-machine-count %d --flavor %s",
+	var workerMachineCountArg string
+	if input.WorkerMachineCount != nil {
+		workerMachineCountArg = fmt.Sprintf("--worker-machine-count %d ", *input.WorkerMachineCount)
+	}
+	log.Logf("clusterctl config cluster %s --infrastructure %s --kubernetes-version %s --control-plane-machine-count %d %s--flavor %s",
 		input.ClusterName,
 		valueOrDefault(input.InfrastructureProvider),
 		input.KubernetesVersion,
 		*input.ControlPlaneMachineCount,
-		*input.WorkerMachineCount,
+		workerMachineCountArg,
 		valueOrDefault(input.Flavor),
 	)
 
@@ -369,54 +374,34 @@ func ConfigCluster(ctx context.Context, input ConfigClusterInput) []byte {
 // ConfigClusterWithBinary uses clusterctl binary to run config cluster or generate cluster.
 // NOTE: This func detects the clusterctl version and uses config cluster or generate cluster
 // accordingly. We can drop the detection when we don't have to support clusterctl v0.3.x anymore.
-func ConfigClusterWithBinary(_ context.Context, clusterctlBinaryPath string, input ConfigClusterInput) []byte {
+func ConfigClusterWithBinary(ctx context.Context, clusterctlBinaryPath string, input ConfigClusterInput) []byte {
 	version, err := getClusterCtlVersion(clusterctlBinaryPath)
 	Expect(err).ToNot(HaveOccurred())
 	clusterctlSupportsGenerateCluster := version.GTE(semver.MustParse("1.0.0"))
 
-	var cmd *exec.Cmd
+	var command string
 	if clusterctlSupportsGenerateCluster {
-		log.Logf("clusterctl generate cluster %s --infrastructure %s --kubernetes-version %s --control-plane-machine-count %d --worker-machine-count %d --flavor %s",
-			input.ClusterName,
-			valueOrDefault(input.InfrastructureProvider),
-			input.KubernetesVersion,
-			*input.ControlPlaneMachineCount,
-			*input.WorkerMachineCount,
-			valueOrDefault(input.Flavor),
-		)
-		cmd = exec.Command(clusterctlBinaryPath, "generate", "cluster", //nolint:gosec // We don't care about command injection here.
-			input.ClusterName,
-			"--infrastructure", input.InfrastructureProvider,
-			"--kubernetes-version", input.KubernetesVersion,
-			"--control-plane-machine-count", fmt.Sprint(*input.ControlPlaneMachineCount),
-			"--worker-machine-count", fmt.Sprint(*input.WorkerMachineCount),
-			"--flavor", input.Flavor,
-			"--target-namespace", input.Namespace,
-			"--config", input.ClusterctlConfigPath,
-			"--kubeconfig", input.KubeconfigPath,
-		)
+		command = "generate"
 	} else {
-		log.Logf("clusterctl config cluster %s --infrastructure %s --kubernetes-version %s --control-plane-machine-count %d --worker-machine-count %d --flavor %s",
-			input.ClusterName,
-			valueOrDefault(input.InfrastructureProvider),
-			input.KubernetesVersion,
-			*input.ControlPlaneMachineCount,
-			*input.WorkerMachineCount,
-			valueOrDefault(input.Flavor),
-		)
-		cmd = exec.Command(clusterctlBinaryPath, "config", "cluster", //nolint:gosec // We don't care about command injection here.
-			input.ClusterName,
-			"--infrastructure", input.InfrastructureProvider,
-			"--kubernetes-version", input.KubernetesVersion,
-			"--control-plane-machine-count", fmt.Sprint(*input.ControlPlaneMachineCount),
-			"--worker-machine-count", fmt.Sprint(*input.WorkerMachineCount),
-			"--flavor", input.Flavor,
-			"--target-namespace", input.Namespace,
-			"--config", input.ClusterctlConfigPath,
-			"--kubeconfig", input.KubeconfigPath,
-		)
+		command = "config"
 	}
 
+	args := []string{command, "cluster",
+		input.ClusterName,
+		"--infrastructure", input.InfrastructureProvider,
+		"--kubernetes-version", input.KubernetesVersion,
+		"--worker-machine-count", fmt.Sprint(*input.WorkerMachineCount),
+		"--flavor", input.Flavor,
+		"--target-namespace", input.Namespace,
+		"--config", input.ClusterctlConfigPath,
+		"--kubeconfig", input.KubeconfigPath,
+	}
+	if input.ControlPlaneMachineCount != nil && *input.ControlPlaneMachineCount > 0 {
+		args = append(args, "--control-plane-machine-count", fmt.Sprint(*input.ControlPlaneMachineCount))
+	}
+	log.Logf("clusterctl %s", strings.Join(args, " "))
+
+	cmd := exec.CommandContext(ctx, clusterctlBinaryPath, args...) //nolint:gosec // We don't care about command injection here.
 	out, err := cmd.Output()
 	_ = os.WriteFile(filepath.Join(input.LogFolder, fmt.Sprintf("%s-cluster-template.yaml", input.ClusterName)), out, 0644) //nolint:gosec // this is a log file to be shared via prow artifacts
 	var stdErr string

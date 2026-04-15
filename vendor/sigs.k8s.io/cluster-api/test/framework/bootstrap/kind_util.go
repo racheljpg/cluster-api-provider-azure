@@ -18,10 +18,11 @@ package bootstrap
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/blang/semver/v4"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/test/framework/internal/log"
 	"sigs.k8s.io/cluster-api/test/infrastructure/container"
+	kindmapper "sigs.k8s.io/cluster-api/test/infrastructure/kind"
 )
 
 // CreateKindBootstrapClusterAndLoadImagesInput is the input for CreateKindBootstrapClusterAndLoadImages.
@@ -56,30 +58,44 @@ type CreateKindBootstrapClusterAndLoadImagesInput struct {
 
 	// ExtraPortMappings specifies the port forward configuration of the kind node.
 	ExtraPortMappings []kindv1.PortMapping
+
+	// CustomNodeImage is the custom node image used for creating the kind node
+	CustomNodeImage string
 }
 
 // CreateKindBootstrapClusterAndLoadImages returns a new Kubernetes cluster with pre-loaded images.
 func CreateKindBootstrapClusterAndLoadImages(ctx context.Context, input CreateKindBootstrapClusterAndLoadImagesInput) ClusterProvider {
 	Expect(ctx).NotTo(BeNil(), "ctx is required for CreateKindBootstrapClusterAndLoadImages")
 	Expect(input.Name).ToNot(BeEmpty(), "Invalid argument. Name can't be empty when calling CreateKindBootstrapClusterAndLoadImages")
+	Expect(input.KubernetesVersion != "" && input.CustomNodeImage != "").To(BeFalse(), "Invalid input. Either KubernetesVersion or CustomNodeImage should be passed")
 
 	log.Logf("Creating a kind cluster with name %q", input.Name)
 
 	options := []KindClusterOption{}
 	if input.KubernetesVersion != "" {
-		options = append(options, WithNodeImage(fmt.Sprintf("%s:%s", DefaultNodeImageRepository, input.KubernetesVersion)))
+		semVer, err := semver.ParseTolerant(input.KubernetesVersion)
+		if err != nil {
+			Expect(err).ToNot(HaveOccurred(), "could not parse KubernetesVersion version")
+		}
+
+		kindMapping := kindmapper.GetMapping(semVer, "")
+
+		options = append(options, WithNodeImage(kindMapping.Image))
 	}
 	if input.RequiresDockerSock {
 		options = append(options, WithDockerSockMount())
 	}
-	if input.IPFamily == "IPv6" {
+	if strings.EqualFold(input.IPFamily, string(kindv1.IPv6Family)) {
 		options = append(options, WithIPv6Family())
 	}
-	if input.IPFamily == "dual" {
+	if strings.EqualFold(input.IPFamily, string(kindv1.DualStackFamily)) {
 		options = append(options, WithDualStackFamily())
 	}
 	if input.LogFolder != "" {
 		options = append(options, LogFolder(input.LogFolder))
+	}
+	if input.CustomNodeImage != "" {
+		options = append(options, WithNodeImage(input.CustomNodeImage))
 	}
 	options = append(options, WithExtraPortMappings(input.ExtraPortMappings))
 

@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -124,22 +125,9 @@ func TestVMSS_HasModelChanges(t *testing.T) {
 			},
 			HasModelChanges: true,
 		},
-		{
-			Name: "with different Tags",
-			Factory: func() (VMSS, VMSS) {
-				l := getDefaultVMSSForModelTesting()
-				l.Tags = infrav1.Tags{
-					"bin": "baz",
-				}
-				r := getDefaultVMSSForModelTesting()
-				return r, l
-			},
-			HasModelChanges: true,
-		},
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			l, r := c.Factory()
 			g := NewWithT(t)

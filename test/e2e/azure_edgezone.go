@@ -27,12 +27,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 )
 
 // AzureEdgeZoneClusterSpecInput is the input for Azure
@@ -68,8 +69,8 @@ func AzureEdgeZoneClusterSpec(ctx context.Context, inputGetter func() AzureEdgeZ
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Getting extendedLocation Name and Type from environment variables or e2e config file")
-	extendedLocationType := input.E2EConfig.GetVariable(AzureExtendedLocationType)
-	extendedLocationName := input.E2EConfig.GetVariable(AzureExtendedLocationName)
+	extendedLocationType := input.E2EConfig.MustGetVariable(AzureExtendedLocationType)
+	extendedLocationName := input.E2EConfig.MustGetVariable(AzureExtendedLocationName)
 
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())

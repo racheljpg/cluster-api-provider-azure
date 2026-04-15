@@ -33,7 +33,7 @@ import (
 	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
-	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
+	v1beta10 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -41,6 +41,7 @@ import (
 type MockVNetScope struct {
 	ctrl     *gomock.Controller
 	recorder *MockVNetScopeMockRecorder
+	isgomock struct{}
 }
 
 // MockVNetScopeMockRecorder is the mock recorder for MockVNetScope.

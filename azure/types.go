@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 )
@@ -98,7 +99,7 @@ type (
 	VMSSVM struct {
 		ID                 string                        `json:"id,omitempty"`
 		InstanceID         string                        `json:"instanceID,omitempty"`
-		Image              infrav1.Image                 `json:"image,omitempty"`
+		Image              infrav1.Image                 `json:"image"`
 		Name               string                        `json:"name,omitempty"`
 		AvailabilityZone   string                        `json:"availabilityZone,omitempty"`
 		State              infrav1.ProvisioningState     `json:"vmState,omitempty"`
@@ -113,7 +114,7 @@ type (
 		Sku       string                    `json:"sku,omitempty"`
 		Capacity  int64                     `json:"capacity,omitempty"`
 		Zones     []string                  `json:"zones,omitempty"`
-		Image     infrav1.Image             `json:"image,omitempty"`
+		Image     infrav1.Image             `json:"image"`
 		State     infrav1.ProvisioningState `json:"vmState,omitempty"`
 		Identity  infrav1.VMIdentity        `json:"identity,omitempty"`
 		Tags      infrav1.Tags              `json:"tags,omitempty"`
@@ -126,7 +127,6 @@ func (vmss VMSS) HasModelChanges(other VMSS) bool {
 	equal := cmp.Equal(vmss.Image, other.Image) &&
 		cmp.Equal(vmss.Identity, other.Identity) &&
 		cmp.Equal(vmss.Zones, other.Zones) &&
-		cmp.Equal(vmss.Tags, other.Tags) &&
 		cmp.Equal(vmss.Sku, other.Sku)
 	return !equal
 }

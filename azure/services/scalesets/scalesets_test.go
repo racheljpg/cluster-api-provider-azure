@@ -17,7 +17,6 @@ limitations under the License.
 package scalesets
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -29,6 +28,8 @@ import (
 	"go.uber.org/mock/gomock"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -38,7 +39,6 @@ import (
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 const (
@@ -100,6 +100,13 @@ func getResultVMSS() armcompute.VirtualMachineScaleSet {
 	return resultVMSS
 }
 
+func getMemFloatResultVMSS() armcompute.VirtualMachineScaleSet {
+	resultVMSS := newDefaultVMSS("VM_SIZE_MEM_FLOAT")
+	resultVMSS.ID = ptr.To(defaultVMSSID)
+
+	return resultVMSS
+}
+
 func TestReconcileVMSS(t *testing.T) {
 	defaultInstances := newDefaultInstances()
 	resultVMSS := newDefaultVMSS("VM_SIZE")
@@ -119,14 +126,14 @@ func TestReconcileVMSS(t *testing.T) {
 				spec := getDefaultVMSSSpec()
 				// Validate spec
 				s.ScaleSetSpec(gomockinternal.AContext()).Return(spec).AnyTimes()
-				m.Get(gomockinternal.AContext(), &defaultSpec).Return(&resultVMSS, nil)
+				m.Get(gomockinternal.AContext(), &defaultSpec).Return(resultVMSS, nil)
 				m.ListInstances(gomockinternal.AContext(), defaultSpec.ResourceGroup, defaultSpec.Name).Return(defaultInstances, nil)
 				r.CreateOrUpdateResource(gomockinternal.AContext(), spec, serviceName).Return(getResultVMSS(), nil)
 				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 
-				s.ReconcileReplicas(gomockinternal.AContext(), &fetchedVMSS).Return(nil)
-				s.SetProviderID(azureutil.ProviderIDPrefix + defaultVMSSID)
-				s.SetVMSSState(&fetchedVMSS)
+				s.ReconcileReplicas(gomockinternal.AContext(), &fetchedVMSS).Return(nil).Times(2)
+				s.SetProviderID(azureutil.ProviderIDPrefix + defaultVMSSID).Times(2)
+				s.SetVMSSState(&fetchedVMSS).Times(2)
 			},
 		},
 		{
@@ -177,28 +184,16 @@ func TestReconcileVMSS(t *testing.T) {
 				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
 				spec := getDefaultVMSSSpec()
 				s.ScaleSetSpec(gomockinternal.AContext()).Return(spec).AnyTimes()
-				m.Get(gomockinternal.AContext(), &defaultSpec).Return(&resultVMSS, nil)
+				m.Get(gomockinternal.AContext(), &defaultSpec).Return(resultVMSS, nil)
 				m.ListInstances(gomockinternal.AContext(), defaultSpec.ResourceGroup, defaultSpec.Name).Return(defaultInstances, nil)
 
 				r.CreateOrUpdateResource(gomockinternal.AContext(), spec, serviceName).
 					Return(nil, internalError())
 				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, internalError())
-			},
-		},
-		{
-			name:          "failed to reconcile replicas",
-			expectedError: "unable to reconcile VMSS replicas:.*#: Internal Server Error: StatusCode=500",
-			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
-				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
-				spec := getDefaultVMSSSpec()
-				s.ScaleSetSpec(gomockinternal.AContext()).Return(spec).AnyTimes()
-				m.Get(gomockinternal.AContext(), &defaultSpec).Return(&resultVMSS, nil)
-				m.ListInstances(gomockinternal.AContext(), defaultSpec.ResourceGroup, defaultSpec.Name).Return(defaultInstances, nil)
 
-				r.CreateOrUpdateResource(gomockinternal.AContext(), spec, serviceName).Return(getResultVMSS(), nil)
-				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
-
-				s.ReconcileReplicas(gomockinternal.AContext(), &fetchedVMSS).Return(internalError())
+				s.ReconcileReplicas(gomockinternal.AContext(), &fetchedVMSS).Return(nil)
+				s.SetProviderID(azureutil.ProviderIDPrefix + defaultVMSSID)
+				s.SetVMSSState(&fetchedVMSS)
 			},
 		},
 		{
@@ -223,6 +218,29 @@ func TestReconcileVMSS(t *testing.T) {
 				spec.Capacity = 2
 				spec.SSHKeyData = sshKeyData
 				s.ScaleSetSpec(gomockinternal.AContext()).Return(&spec).AnyTimes()
+			},
+		},
+		{
+			name:          "validate spec success: Memory is float",
+			expectedError: "",
+			expect: func(g *WithT, s *mock_scalesets.MockScaleSetScopeMockRecorder, r *mock_async.MockReconcilerMockRecorder, m *mock_scalesets.MockClientMockRecorder) {
+				s.DefaultedAzureServiceReconcileTimeout().Return(reconciler.DefaultAzureServiceReconcileTimeout)
+				spec := newVMSSSpecWithSKU(resourceskus.MemoryGB, "217.13")
+				spec.Size = "VM_SIZE_MEM_FLOAT"
+				spec.Capacity = 2
+				spec.SSHKeyData = sshKeyData
+				memFloatVMSS := newDefaultVMSS("VM_SIZE_MEM_FLOAT")
+				memFloatVMSS.ID = ptr.To(defaultVMSSID)
+
+				s.ScaleSetSpec(gomockinternal.AContext()).Return(&spec).AnyTimes()
+				m.Get(gomockinternal.AContext(), &spec).Return(memFloatVMSS, nil)
+				m.ListInstances(gomockinternal.AContext(), spec.ResourceGroup, spec.Name).Return(defaultInstances, nil)
+				fetchedMemFloatVMSS := converters.SDKToVMSS(getMemFloatResultVMSS(), defaultInstances)
+				s.ReconcileReplicas(gomockinternal.AContext(), &fetchedMemFloatVMSS).Return(nil).Times(2)
+				s.SetProviderID(azureutil.ProviderIDPrefix + defaultVMSSID).Times(2)
+				s.SetVMSSState(&fetchedMemFloatVMSS).Times(2)
+				r.CreateOrUpdateResource(gomockinternal.AContext(), &spec, serviceName).Return(getMemFloatResultVMSS(), nil)
+				s.UpdatePutStatus(infrav1.BootstrapSucceededCondition, serviceName, nil)
 			},
 		},
 		{
@@ -310,7 +328,6 @@ func TestReconcileVMSS(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -330,7 +347,7 @@ func TestReconcileVMSS(t *testing.T) {
 				resourceSKUCache: resourceskus.NewStaticCache(getFakeSkus(), "test-location"),
 			}
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(strings.ReplaceAll(err.Error(), "\n", "")).To(MatchRegexp(tc.expectedError), err.Error())
@@ -393,7 +410,6 @@ func TestDeleteVMSS(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -411,7 +427,7 @@ func TestDeleteVMSS(t *testing.T) {
 				Client:     mockClient,
 			}
 
-			err := s.Delete(context.TODO())
+			err := s.Delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -646,6 +662,34 @@ func getFakeSkus() []armcompute.ResourceSKU {
 				},
 			},
 		},
+		{
+			Name:         ptr.To("VM_SIZE_MEM_FLOAT"),
+			ResourceType: ptr.To(string(resourceskus.VirtualMachines)),
+			Kind:         ptr.To(string(resourceskus.VirtualMachines)),
+			Locations: []*string{
+				ptr.To("test-location"),
+			},
+			LocationInfo: []*armcompute.ResourceSKULocationInfo{
+				{
+					Location: ptr.To("test-location"),
+					Zones:    []*string{ptr.To("1"), ptr.To("3")},
+				},
+			},
+			Capabilities: []*armcompute.ResourceSKUCapabilities{
+				{
+					Name:  ptr.To(resourceskus.AcceleratedNetworking),
+					Value: ptr.To(string(resourceskus.CapabilityUnsupported)),
+				},
+				{
+					Name:  ptr.To(resourceskus.VCPUs),
+					Value: ptr.To("4"),
+				},
+				{
+					Name:  ptr.To(resourceskus.MemoryGB),
+					Value: ptr.To("217.13"),
+				},
+			},
+		},
 	}
 }
 
@@ -741,9 +785,18 @@ func newWindowsVMSSSpec() ScaleSetSpec {
 	vmss.OSDisk.OSType = azure.WindowsOS
 	return vmss
 }
+func newVMSSSpecWithSKU(capName string, capValue string) ScaleSetSpec {
+	vmsSpec := newDefaultVMSSSpec()
+	inputCapability := armcompute.ResourceSKUCapabilities{
+		Name:  ptr.To(capName),
+		Value: ptr.To(capValue),
+	}
+	vmsSpec.SKU.Capabilities = append(vmsSpec.SKU.Capabilities, &inputCapability)
+	return vmsSpec
+}
 
-func newDefaultExistingVMSS(vmSize string) armcompute.VirtualMachineScaleSet {
-	vmss := newDefaultVMSS(vmSize)
+func newDefaultExistingVMSS() armcompute.VirtualMachineScaleSet {
+	vmss := newDefaultVMSS("VM_SIZE")
 	vmss.ID = ptr.To("subscriptions/1234/resourceGroups/my_resource_group/providers/Microsoft.Compute/virtualMachines/my-vm")
 	return vmss
 }
@@ -760,12 +813,14 @@ func newDefaultWindowsVMSS() armcompute.VirtualMachineScaleSet {
 
 func newDefaultVMSS(vmSize string) armcompute.VirtualMachineScaleSet {
 	dataDisk := fetchDataDiskBasedOnSize(vmSize)
+	bootstrapData := "fake-bootstrap-data"
 	return armcompute.VirtualMachineScaleSet{
 		Location: ptr.To("test-location"),
 		Tags: map[string]*string{
 			"Name": ptr.To(defaultVMSSName),
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			"sigs.k8s.io_cluster-api-provider-azure_role":               ptr.To("node"),
+			customDataHashTagName:                                       ptr.To(mustCalculateBootstrapDataHash(bootstrapData)),
 		},
 		SKU: &armcompute.SKU{
 			Name:     ptr.To(vmSize),
@@ -784,7 +839,7 @@ func newDefaultVMSS(vmSize string) armcompute.VirtualMachineScaleSet {
 				OSProfile: &armcompute.VirtualMachineScaleSetOSProfile{
 					ComputerNamePrefix: ptr.To(defaultVMSSName),
 					AdminUsername:      ptr.To(azure.DefaultUserName),
-					CustomData:         ptr.To("fake-bootstrap-data"),
+					CustomData:         ptr.To(bootstrapData),
 					LinuxConfiguration: &armcompute.LinuxConfiguration{
 						SSH: &armcompute.SSHConfiguration{
 							PublicKeys: []*armcompute.SSHPublicKey{

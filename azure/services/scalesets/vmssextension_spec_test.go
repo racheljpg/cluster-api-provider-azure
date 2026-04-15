@@ -17,12 +17,12 @@ limitations under the License.
 package scalesets
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
@@ -55,15 +55,15 @@ func TestVMSSExtensionParameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          *VMSSExtensionSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:     "get parameters for vmextension",
 			spec:     &fakeVMSSExtensionSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(Equal(fakeVMSSExtensionParams))
 			},
 			expectedError: "",
@@ -72,19 +72,18 @@ func TestVMSSExtensionParameters(t *testing.T) {
 			name:     "vmextension that already exists",
 			spec:     &fakeVMSSExtensionSpec,
 			existing: fakeVMSSExtensionParams,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "",
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

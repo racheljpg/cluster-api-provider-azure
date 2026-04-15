@@ -21,6 +21,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
@@ -35,7 +36,7 @@ type NSGScope interface {
 	azure.AsyncStatusUpdater
 	NSGSpecs() []azure.ResourceSpecGetter
 	IsVnetManaged() bool
-	UpdateAnnotationJSON(string, map[string]interface{}) error
+	UpdateAnnotationJSON(string, map[string]any) error
 }
 
 // Service provides operations on Azure resources.
@@ -85,7 +86,7 @@ func (s *Service) Reconcile(ctx context.Context) error {
 
 	var resErr error
 
-	newAnnotation := make(map[string]interface{})
+	newAnnotation := make(map[string]any)
 
 	// We go through the list of security groups to reconcile each one, independently of the result of the previous one.
 	// If multiple errors occur, we return the most pressing one.

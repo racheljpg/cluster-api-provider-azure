@@ -17,7 +17,6 @@ limitations under the License.
 package virtualnetworks
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -29,10 +28,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks/mock_virtualnetworks"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks/mock_virtualnetworks"
 )
 
 func TestPostCreateOrUpdateResourceHook(t *testing.T) {
@@ -41,7 +41,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		scope := mock_virtualnetworks.NewMockVNetScope(mockCtrl)
 		err := errors.New("an error")
-		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, nil, err)).To(MatchError(err))
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, nil, err)).To(MatchError(err))
 	})
 
 	t.Run("successfully created or updated", func(t *testing.T) {
@@ -74,10 +74,10 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 						labels.OwnerNameLabel: existing.Name,
 					},
 				},
-				Spec: asonetworkv1.VirtualNetworks_Subnet_Spec{
+				Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
 					AzureName: "azure-name",
 				},
-				Status: asonetworkv1.VirtualNetworks_Subnet_STATUS{
+				Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
 					AddressPrefixes: []string{"address prefixes"},
 				},
 			},
@@ -85,7 +85,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "other subnet",
 				},
-				Spec: asonetworkv1.VirtualNetworks_Subnet_Spec{
+				Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
 					Owner: &genruntime.KnownResourceReference{
 						Name: "not this vnet",
 					},
@@ -102,10 +102,73 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			Build()
 		scope.EXPECT().GetClient().Return(c)
 
-		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, existing, nil)).To(Succeed())
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, existing, nil)).To(Succeed())
 
 		g.Expect(vnet.ID).To(Equal("id"))
 		g.Expect(vnet.Tags).To(Equal(infrav1.Tags{"actual": "tags"}))
 		g.Expect(vnet.CIDRBlocks).To(Equal([]string{"cidr"}))
+	})
+
+	t.Run("correctly handles empty and non-empty ASO Status CIDRBlocks", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+		mockCtrl := gomock.NewController(t)
+		scope := mock_virtualnetworks.NewMockVNetScope(mockCtrl)
+
+		existing := &asonetworkv1.VirtualNetwork{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "vnet",
+			},
+			Status: asonetworkv1.VirtualNetwork_STATUS{
+				Id:   ptr.To("id"),
+				Tags: map[string]string{"actual": "tags"},
+				AddressSpace: &asonetworkv1.AddressSpace_STATUS{
+					AddressPrefixes: []string{"cidr"},
+				},
+			},
+		}
+
+		vnet := &infrav1.VnetSpec{}
+		scope.EXPECT().Vnet().Return(vnet)
+
+		subnets := []client.Object{
+			&asonetworkv1.VirtualNetworksSubnet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "empty-cidr-status-subnet",
+					Labels: map[string]string{
+						labels.OwnerNameLabel: existing.Name,
+					},
+				},
+				Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
+					AzureName: "empty-cidr-status-subnet",
+				},
+				Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
+					AddressPrefixes: []string{},
+				},
+			},
+			&asonetworkv1.VirtualNetworksSubnet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "nonempty-cidr-status-subnet",
+					Labels: map[string]string{
+						labels.OwnerNameLabel: existing.Name,
+					},
+				},
+				Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
+					AzureName: "nonempty-cidr-status-subnet",
+				},
+				Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
+					AddressPrefixes: []string{"cidr"},
+				},
+			},
+		}
+		s := runtime.NewScheme()
+		g.Expect(asonetworkv1.AddToScheme(s)).To(Succeed())
+		c := fakeclient.NewClientBuilder().
+			WithScheme(s).
+			WithObjects(subnets...).
+			Build()
+		scope.EXPECT().GetClient().Return(c)
+		scope.EXPECT().UpdateSubnetCIDRs("empty-cidr-status-subnet", []string{}).Times(0)
+		scope.EXPECT().UpdateSubnetCIDRs("nonempty-cidr-status-subnet", []string{"cidr"}).Times(1)
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, existing, nil)).To(Succeed())
 	})
 }

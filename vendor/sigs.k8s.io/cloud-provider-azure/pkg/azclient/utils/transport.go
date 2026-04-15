@@ -22,8 +22,11 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http2"
 )
 
+// DefaultTransport is the default transport used by the Azure SDK for Go.
 var DefaultTransport *http.Transport
 var once sync.Once
 
@@ -35,14 +38,23 @@ func init() {
 				Timeout:   30 * time.Second,
 				KeepAlive: 30 * time.Second,
 			}).DialContext,
-			ForceAttemptHTTP2:   true,
-			MaxIdleConns:        100,
-			MaxConnsPerHost:     100,
-			IdleConnTimeout:     90 * time.Second,
-			TLSHandshakeTimeout: 10 * time.Second,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			MaxConnsPerHost:       100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second, // the same as default transport
+			ResponseHeaderTimeout: 60 * time.Second,
 			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS12,
+				MinVersion:    tls.VersionTLS12,
+				Renegotiation: tls.RenegotiateNever, // the same as default transport https://pkg.go.dev/crypto/tls#RenegotiationSupport
 			},
+		}
+
+		// Configure HTTP/2
+		if http2Transport, err := http2.ConfigureTransports(DefaultTransport); err == nil {
+			http2Transport.ReadIdleTimeout = 30 * time.Second
+			http2Transport.PingTimeout = 15 * time.Second
 		}
 	})
 }

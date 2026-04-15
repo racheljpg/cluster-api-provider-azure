@@ -20,6 +20,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -31,8 +32,8 @@ type VM struct {
 	// Hardware profile
 	VMSize string `json:"vmSize,omitempty"`
 	// Storage profile
-	Image         infrav1.Image  `json:"image,omitempty"`
-	OSDisk        infrav1.OSDisk `json:"osDisk,omitempty"`
+	Image         infrav1.Image  `json:"image"`
+	OSDisk        infrav1.OSDisk `json:"osDisk"`
 	StartupScript string         `json:"startupScript,omitempty"`
 	// State - The provisioning state, which only appears in the response.
 	State    infrav1.ProvisioningState `json:"vmState,omitempty"`
@@ -66,12 +67,10 @@ func SDKToVM(v armcompute.VirtualMachine) *VM {
 	}
 
 	if v.Identity != nil {
-		for _, identity := range v.Identity.UserAssignedIdentities {
-			if identity != nil && identity.ClientID != nil {
-				vm.UserAssignedIdentities = append(vm.UserAssignedIdentities, infrav1.UserAssignedIdentity{
-					ProviderID: *identity.ClientID,
-				})
-			}
+		for providerID := range v.Identity.UserAssignedIdentities {
+			vm.UserAssignedIdentities = append(vm.UserAssignedIdentities, infrav1.UserAssignedIdentity{
+				ProviderID: providerID,
+			})
 		}
 	}
 

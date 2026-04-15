@@ -17,7 +17,7 @@
 ###############################################################################
 
 # This script is executed by presubmit `pull-cluster-api-provider-azure-e2e`
-# To run locally, set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
+# To run locally, set AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
 
 set -o errexit
 set -o nounset
@@ -30,20 +30,19 @@ KIND="${REPO_ROOT}/hack/tools/bin/kind"
 KUSTOMIZE="${REPO_ROOT}/hack/tools/bin/kustomize"
 make --directory="${REPO_ROOT}" "${KUBECTL##*/}" "${KIND##*/}" "${KUSTOMIZE##*/}"
 
+WORKER_MACHINE_COUNT="${WORKER_MACHINE_COUNT:-2}"
+
 # shellcheck source=hack/ensure-go.sh
 source "${REPO_ROOT}/hack/ensure-go.sh"
 # shellcheck source=hack/ensure-tags.sh
 source "${REPO_ROOT}/hack/ensure-tags.sh"
-# shellcheck source=hack/parse-prow-creds.sh
-source "${REPO_ROOT}/hack/parse-prow-creds.sh"
 # shellcheck source=hack/util.sh
 source "${REPO_ROOT}/hack/util.sh"
 
 # Verify the required Environment Variables are present.
 capz::util::ensure_azure_envs
 
-export LOCAL_ONLY=${LOCAL_ONLY:-"true"}
-export USE_LOCAL_KIND_REGISTRY=${USE_LOCAL_KIND_REGISTRY:-${LOCAL_ONLY}} 
+export USE_LOCAL_KIND_REGISTRY=${USE_LOCAL_KIND_REGISTRY:-"true"}
 
 if [[ "${USE_LOCAL_KIND_REGISTRY}" == "true" ]]; then
   export REGISTRY="localhost:5000/ci-e2e"
@@ -68,18 +67,31 @@ defaultTag=$(date -u '+%Y%m%d%H%M%S')
 export TAG="${defaultTag:-dev}"
 export GINKGO_NODES=1
 
-export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region)}"
+if [ "${WORKER_MACHINE_COUNT}" -gt "10" ]; then
+    export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region_load)}"
+    echo "Using AZURE_LOCATION: ${AZURE_LOCATION}"
+else
+    export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region)}"
+    echo "Using AZURE_LOCATION: ${AZURE_LOCATION}"
+fi
+# TODO these AZURE_LOCATION_* overrides may have the effect of
+# disassociating VM regions from disks, leading to attachment failures.
+# Less likely with GPU scenarios but FYI.
 export AZURE_LOCATION_GPU="${AZURE_LOCATION_GPU:-$(capz::util::get_random_region_gpu)}"
 export AZURE_LOCATION_EDGEZONE="${AZURE_LOCATION_EDGEZONE:-$(capz::util::get_random_region_edgezone)}"
 export AZURE_CONTROL_PLANE_MACHINE_TYPE="${AZURE_CONTROL_PLANE_MACHINE_TYPE:-"Standard_B2s"}"
 export AZURE_NODE_MACHINE_TYPE="${AZURE_NODE_MACHINE_TYPE:-"Standard_B2s"}"
 export WINDOWS="${WINDOWS:-false}"
+export WINDOWS_SERVER_VERSION="${WINDOWS_SERVER_VERSION:-windows-2022}"
+AZWI_RESOURCE_GROUP="${AZWI_RESOURCE_GROUP:-capz-wi-$(capz::util::random_suffix)}"
+export AZWI_RESOURCE_GROUP
 
 # Generate SSH key.
 capz::util::generate_ssh_key
 
 capz::ci-conformance::cleanup() {
     "${REPO_ROOT}/hack/log/redact.sh" || true
+    make test-e2e-run-cleanup || true
 }
 
 trap capz::ci-conformance::cleanup EXIT

@@ -28,6 +28,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
+	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	v1beta1patch "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/patch"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/availabilitysets"
@@ -40,15 +47,10 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachines"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vmextensions"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	capierrors "sigs.k8s.io/cluster-api/errors"
-	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // MachineScopeParams defines the input parameters used to create a new MachineScope.
@@ -74,7 +76,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		return nil, errors.New("azure machine is required when creating a MachineScope")
 	}
 
-	helper, err := patch.NewHelper(params.AzureMachine, params.Client)
+	helper, err := v1beta1patch.NewHelper(params.AzureMachine, params.Client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
@@ -93,7 +95,7 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 // MachineScope defines a scope defined around a machine and its cluster.
 type MachineScope struct {
 	client      client.Client
-	patchHelper *patch.Helper
+	patchHelper *v1beta1patch.Helper
 
 	azure.ClusterScoper
 	Machine      *clusterv1.Machine
@@ -160,29 +162,30 @@ func (m *MachineScope) InitMachineCache(ctx context.Context) error {
 // VMSpec returns the VM spec.
 func (m *MachineScope) VMSpec() azure.ResourceSpecGetter {
 	spec := &virtualmachines.VMSpec{
-		Name:                       m.Name(),
-		Location:                   m.Location(),
-		ExtendedLocation:           m.ExtendedLocation(),
-		ResourceGroup:              m.NodeResourceGroup(),
-		ClusterName:                m.ClusterName(),
-		Role:                       m.Role(),
-		NICIDs:                     m.NICIDs(),
-		SSHKeyData:                 m.AzureMachine.Spec.SSHPublicKey,
-		Size:                       m.AzureMachine.Spec.VMSize,
-		OSDisk:                     m.AzureMachine.Spec.OSDisk,
-		DataDisks:                  m.AzureMachine.Spec.DataDisks,
-		AvailabilitySetID:          m.AvailabilitySetID(),
-		Zone:                       m.AvailabilityZone(),
-		Identity:                   m.AzureMachine.Spec.Identity,
-		UserAssignedIdentities:     m.AzureMachine.Spec.UserAssignedIdentities,
-		SpotVMOptions:              m.AzureMachine.Spec.SpotVMOptions,
-		SecurityProfile:            m.AzureMachine.Spec.SecurityProfile,
-		DiagnosticsProfile:         m.AzureMachine.Spec.Diagnostics,
-		DisableExtensionOperations: ptr.Deref(m.AzureMachine.Spec.DisableExtensionOperations, false),
-		AdditionalTags:             m.AdditionalTags(),
-		AdditionalCapabilities:     m.AzureMachine.Spec.AdditionalCapabilities,
-		CapacityReservationGroupID: m.GetCapacityReservationGroupID(),
-		ProviderID:                 m.ProviderID(),
+		Name:                        m.Name(),
+		Location:                    m.Location(),
+		ExtendedLocation:            m.ExtendedLocation(),
+		ResourceGroup:               m.NodeResourceGroup(),
+		ClusterName:                 m.ClusterName(),
+		Role:                        m.Role(),
+		NICIDs:                      m.NICIDs(),
+		SSHKeyData:                  m.AzureMachine.Spec.SSHPublicKey,
+		Size:                        m.AzureMachine.Spec.VMSize,
+		OSDisk:                      m.AzureMachine.Spec.OSDisk,
+		DataDisks:                   m.AzureMachine.Spec.DataDisks,
+		AvailabilitySetID:           m.AvailabilitySetID(),
+		Zone:                        m.AvailabilityZone(),
+		Identity:                    m.AzureMachine.Spec.Identity,
+		UserAssignedIdentities:      m.AzureMachine.Spec.UserAssignedIdentities,
+		SpotVMOptions:               m.AzureMachine.Spec.SpotVMOptions,
+		SecurityProfile:             m.AzureMachine.Spec.SecurityProfile,
+		DiagnosticsProfile:          m.AzureMachine.Spec.Diagnostics,
+		DisableExtensionOperations:  ptr.Deref(m.AzureMachine.Spec.DisableExtensionOperations, false),
+		DisableVMBootstrapExtension: ptr.Deref(m.AzureMachine.Spec.DisableVMBootstrapExtension, false),
+		AdditionalTags:              m.AdditionalTags(),
+		AdditionalCapabilities:      m.AzureMachine.Spec.AdditionalCapabilities,
+		CapacityReservationGroupID:  m.GetCapacityReservationGroupID(),
+		ProviderID:                  m.ProviderID(),
 	}
 	if m.cache != nil {
 		spec.SKU = m.cache.VMSKU
@@ -297,6 +300,10 @@ func (m *MachineScope) BuildNICSpec(nicName string, infrav1NetworkInterface infr
 				spec.InternalLBName = m.APIServerLBName()
 				spec.InternalLBAddressPoolName = m.APIServerLBPoolName()
 			} else {
+				if feature.Gates.Enabled(feature.APIServerILB) {
+					spec.InternalLBName = m.APIServerLBName() + "-internal"
+					spec.InternalLBAddressPoolName = m.APIServerLBPoolName() + "-internal"
+				}
 				spec.PublicLBNATRuleName = m.Name()
 				spec.PublicLBAddressPoolName = m.APIServerLBPoolName()
 			}
@@ -395,15 +402,17 @@ func (m *MachineScope) VMExtensionSpecs() []azure.ResourceSpecGetter {
 		})
 	}
 
-	cpuArchitectureType, _ := m.cache.VMSKU.GetCapability(resourceskus.CPUArchitectureType)
-	bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachine.Spec.OSDisk.OSType, m.CloudEnvironment(), m.Name(), cpuArchitectureType)
+	if !ptr.Deref(m.AzureMachine.Spec.DisableVMBootstrapExtension, false) {
+		cpuArchitectureType, _ := m.cache.VMSKU.GetCapability(resourceskus.CPUArchitectureType)
+		bootstrapExtensionSpec := azure.GetBootstrappingVMExtension(m.AzureMachine.Spec.OSDisk.OSType, m.CloudEnvironment(), m.Name(), cpuArchitectureType)
 
-	if bootstrapExtensionSpec != nil {
-		extensionSpecs = append(extensionSpecs, &vmextensions.VMExtensionSpec{
-			ExtensionSpec: *bootstrapExtensionSpec,
-			ResourceGroup: m.NodeResourceGroup(),
-			Location:      m.Location(),
-		})
+		if bootstrapExtensionSpec != nil {
+			extensionSpecs = append(extensionSpecs, &vmextensions.VMExtensionSpec{
+				ExtensionSpec: *bootstrapExtensionSpec,
+				ResourceGroup: m.NodeResourceGroup(),
+				Location:      m.Location(),
+			})
+		}
 	}
 
 	return extensionSpecs
@@ -426,8 +435,8 @@ func (m *MachineScope) Subnet() infrav1.SubnetSpec {
 //  2. AzureMachine.Spec.FailureDomain (This is to support deprecated AZ)
 //  3. No AZ
 func (m *MachineScope) AvailabilityZone() string {
-	if m.Machine.Spec.FailureDomain != nil {
-		return *m.Machine.Spec.FailureDomain
+	if m.Machine.Spec.FailureDomain != "" {
+		return m.Machine.Spec.FailureDomain
 	}
 	// Deprecated: to support old clients
 	if m.AzureMachine.Spec.FailureDomain != nil {
@@ -508,7 +517,8 @@ func (m *MachineScope) AvailabilitySetSpec() azure.ResourceSpecGetter {
 func (m *MachineScope) AvailabilitySet() (string, bool) {
 	// AvailabilitySet service is not supported on EdgeZone currently.
 	// AvailabilitySet cannot be used with Spot instances.
-	if !m.AvailabilitySetEnabled() || m.AzureMachine.Spec.SpotVMOptions != nil || m.ExtendedLocation() != nil {
+	if !m.AvailabilitySetEnabled() || m.AzureMachine.Spec.SpotVMOptions != nil || m.ExtendedLocation() != nil ||
+		m.AzureMachine.Spec.FailureDomain != nil || m.Machine.Spec.FailureDomain != "" {
 		return "", false
 	}
 
@@ -596,13 +606,13 @@ func (m *MachineScope) SetFailureMessage(v error) {
 }
 
 // SetFailureReason sets the AzureMachine status failure reason.
-func (m *MachineScope) SetFailureReason(v capierrors.MachineStatusError) {
+func (m *MachineScope) SetFailureReason(v string) {
 	m.AzureMachine.Status.FailureReason = &v
 }
 
 // SetConditionFalse sets the specified AzureMachine condition to false.
-func (m *MachineScope) SetConditionFalse(conditionType clusterv1.ConditionType, reason string, severity clusterv1.ConditionSeverity, message string) {
-	conditions.MarkFalse(m.AzureMachine, conditionType, reason, severity, message)
+func (m *MachineScope) SetConditionFalse(conditionType clusterv1beta1.ConditionType, reason string, severity clusterv1beta1.ConditionSeverity, message string) {
+	v1beta1conditions.MarkFalse(m.AzureMachine, conditionType, reason, severity, "%s", message)
 }
 
 // SetAnnotation sets a key value annotation on the AzureMachine.
@@ -614,8 +624,8 @@ func (m *MachineScope) SetAnnotation(key, value string) {
 }
 
 // AnnotationJSON returns a map[string]interface from a JSON annotation.
-func (m *MachineScope) AnnotationJSON(annotation string) (map[string]interface{}, error) {
-	out := map[string]interface{}{}
+func (m *MachineScope) AnnotationJSON(annotation string) (map[string]any, error) {
+	out := map[string]any{}
 	jsonAnnotation := m.AzureMachine.GetAnnotations()[annotation]
 	if jsonAnnotation == "" {
 		return out, nil
@@ -631,7 +641,7 @@ func (m *MachineScope) AnnotationJSON(annotation string) (map[string]interface{}
 // `content`. `content` in this case should be a `map[string]interface{}`
 // suitable for turning into JSON. This `content` map will be marshalled into a
 // JSON string before being set as the given `annotation`.
-func (m *MachineScope) UpdateAnnotationJSON(annotation string, content map[string]interface{}) error {
+func (m *MachineScope) UpdateAnnotationJSON(annotation string, content map[string]any) error {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return err
@@ -647,13 +657,13 @@ func (m *MachineScope) SetAddresses(addrs []corev1.NodeAddress) {
 
 // PatchObject persists the machine spec and status.
 func (m *MachineScope) PatchObject(ctx context.Context) error {
-	conditions.SetSummary(m.AzureMachine)
+	v1beta1conditions.SetSummary(m.AzureMachine)
 
 	return m.patchHelper.Patch(
 		ctx,
 		m.AzureMachine,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
-			clusterv1.ReadyCondition,
+		v1beta1patch.WithOwnedConditions{Conditions: []clusterv1beta1.ConditionType{
+			clusterv1beta1.ReadyCondition,
 			infrav1.VMRunningCondition,
 			infrav1.AvailabilitySetReadyCondition,
 			infrav1.NetworkInterfaceReadyCondition,
@@ -719,11 +729,11 @@ func (m *MachineScope) GetVMImage(ctx context.Context) (*infrav1.Image, error) {
 		runtime := m.AzureMachine.Annotations["runtime"]
 		windowsServerVersion := m.AzureMachine.Annotations["windowsServerVersion"]
 		log.Info("No image specified for machine, using default Windows Image", "machine", m.AzureMachine.GetName(), "runtime", runtime, "windowsServerVersion", windowsServerVersion)
-		return svc.GetDefaultWindowsImage(ctx, m.Location(), ptr.Deref(m.Machine.Spec.Version, ""), runtime, windowsServerVersion)
+		return svc.GetDefaultWindowsImage(ctx, m.Location(), m.Machine.Spec.Version, runtime, windowsServerVersion)
 	}
 
 	log.Info("No image specified for machine, using default Linux Image", "machine", m.AzureMachine.GetName())
-	return svc.GetDefaultUbuntuImage(ctx, m.Location(), ptr.Deref(m.Machine.Spec.Version, ""))
+	return svc.GetDefaultLinuxImage(ctx, m.Location(), m.Machine.Spec.Version)
 }
 
 // SetSubnetName defaults the AzureMachine subnet name to the name of one the subnets with the machine role when there is only one of them.
@@ -777,38 +787,38 @@ func (m *MachineScope) DeleteLongRunningOperationState(name, service, futureType
 }
 
 // UpdateDeleteStatus updates a condition on the AzureMachine status after a DELETE operation.
-func (m *MachineScope) UpdateDeleteStatus(condition clusterv1.ConditionType, service string, err error) {
+func (m *MachineScope) UpdateDeleteStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletedReason, clusterv1.ConditionSeverityInfo, "%s successfully deleted", service)
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletedReason, clusterv1beta1.ConditionSeverityInfo, "%s successfully deleted", service)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletingReason, clusterv1.ConditionSeverityInfo, "%s deleting", service)
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletingReason, clusterv1beta1.ConditionSeverityInfo, "%s deleting", service)
 	default:
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletionFailedReason, clusterv1.ConditionSeverityError, "%s failed to delete. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.DeletionFailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to delete. err: %s", service, err.Error())
 	}
 }
 
 // UpdatePutStatus updates a condition on the AzureMachine status after a PUT operation.
-func (m *MachineScope) UpdatePutStatus(condition clusterv1.ConditionType, service string, err error) {
+func (m *MachineScope) UpdatePutStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkTrue(m.AzureMachine, condition)
+		v1beta1conditions.MarkTrue(m.AzureMachine, condition)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.CreatingReason, clusterv1.ConditionSeverityInfo, "%s creating or updating", service)
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.CreatingReason, clusterv1beta1.ConditionSeverityInfo, "%s creating or updating", service)
 	default:
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.FailedReason, clusterv1.ConditionSeverityError, "%s failed to create or update. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.FailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to create or update. err: %s", service, err.Error())
 	}
 }
 
 // UpdatePatchStatus updates a condition on the AzureMachine status after a PATCH operation.
-func (m *MachineScope) UpdatePatchStatus(condition clusterv1.ConditionType, service string, err error) {
+func (m *MachineScope) UpdatePatchStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkTrue(m.AzureMachine, condition)
+		v1beta1conditions.MarkTrue(m.AzureMachine, condition)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.UpdatingReason, clusterv1.ConditionSeverityInfo, "%s updating", service)
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.UpdatingReason, clusterv1beta1.ConditionSeverityInfo, "%s updating", service)
 	default:
-		conditions.MarkFalse(m.AzureMachine, condition, infrav1.FailedReason, clusterv1.ConditionSeverityError, "%s failed to update. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(m.AzureMachine, condition, infrav1.FailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to update. err: %s", service, err.Error())
 	}
 }
 

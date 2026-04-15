@@ -17,20 +17,20 @@ limitations under the License.
 package managedclusters
 
 import (
-	"context"
 	"encoding/base64"
 	"testing"
 
-	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231102preview"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/cluster-api/util/secret"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
-	"sigs.k8s.io/cluster-api/util/secret"
 )
 
 func TestParameters(t *testing.T) {
@@ -57,8 +57,13 @@ func TestParameters(t *testing.T) {
 					&agentpools.AgentPoolSpec{
 						Replicas:  5,
 						Mode:      "mode",
-						AzureName: "agentpool",
+						AzureName: "agentpool-b",
 						Patches:   []string{`{"spec": {"tags": {"from": "patches"}}}`},
+					},
+					&agentpools.AgentPoolSpec{
+						Replicas:  10,
+						Mode:      "mode",
+						AzureName: "agentpool-a",
 					},
 				}, nil
 			},
@@ -141,10 +146,18 @@ func TestParameters(t *testing.T) {
 				},
 				AgentPoolProfiles: []asocontainerservicev1.ManagedClusterAgentPoolProfile{
 					{
+						Count:             ptr.To(10),
+						EnableAutoScaling: ptr.To(false),
+						Mode:              ptr.To(asocontainerservicev1.AgentPoolMode("mode")),
+						Name:              ptr.To("agentpool-a"),
+						OsDiskSizeGB:      ptr.To(asocontainerservicev1.ContainerServiceOSDisk(0)),
+						Type:              ptr.To(asocontainerservicev1.AgentPoolType_VirtualMachineScaleSets),
+					},
+					{
 						Count:             ptr.To(5),
 						EnableAutoScaling: ptr.To(false),
 						Mode:              ptr.To(asocontainerservicev1.AgentPoolMode("mode")),
-						Name:              ptr.To("agentpool"),
+						Name:              ptr.To("agentpool-b"),
 						OsDiskSizeGB:      ptr.To(asocontainerservicev1.ContainerServiceOSDisk(0)),
 						Type:              ptr.To(asocontainerservicev1.AgentPoolType_VirtualMachineScaleSets),
 						Tags:              map[string]string{"from": "patches"},
@@ -286,7 +299,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), nil)
+		actual, err := spec.Parameters(t.Context(), nil)
 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(cmp.Diff(actual, expected)).To(BeEmpty())
@@ -311,7 +324,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), nil)
+		actual, err := spec.Parameters(t.Context(), nil)
 		g.Expect(err).NotTo(HaveOccurred())
 		_, ok := actual.(*asocontainerservicev1preview.ManagedCluster)
 		g.Expect(ok).To(BeTrue())
@@ -337,7 +350,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actualObj, err := spec.Parameters(context.Background(), existing)
+		actualObj, err := spec.Parameters(t.Context(), existing)
 		actual := actualObj.(*asocontainerservicev1.ManagedCluster)
 
 		g.Expect(err).NotTo(HaveOccurred())
@@ -370,7 +383,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actualObj, err := spec.Parameters(context.Background(), existing)
+		actualObj, err := spec.Parameters(t.Context(), existing)
 		actual := actualObj.(*asocontainerservicev1.ManagedCluster)
 
 		g.Expect(err).NotTo(HaveOccurred())

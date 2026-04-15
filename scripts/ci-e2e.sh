@@ -17,7 +17,7 @@
 ###############################################################################
 
 # This script is executed by presubmit `pull-cluster-api-provider-azure-e2e`
-# To run locally, set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
+# To run locally, set AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
 
 set -o errexit
 set -o nounset
@@ -33,16 +33,13 @@ make --directory="${REPO_ROOT}" "${KUBECTL##*/}" "${KIND##*/}"
 source "${REPO_ROOT}/hack/ensure-go.sh"
 # shellcheck source=hack/ensure-tags.sh
 source "${REPO_ROOT}/hack/ensure-tags.sh"
-# shellcheck source=hack/parse-prow-creds.sh
-source "${REPO_ROOT}/hack/parse-prow-creds.sh"
 # shellcheck source=hack/util.sh
 source "${REPO_ROOT}/hack/util.sh"
 
 # Verify the required Environment Variables are present.
 capz::util::ensure_azure_envs
 
-export LOCAL_ONLY=${LOCAL_ONLY:-"true"}
-export USE_LOCAL_KIND_REGISTRY=${USE_LOCAL_KIND_REGISTRY:-${LOCAL_ONLY}} 
+export USE_LOCAL_KIND_REGISTRY=${USE_LOCAL_KIND_REGISTRY:-"true"}
 export BUILD_MANAGER_IMAGE=${BUILD_MANAGER_IMAGE:-"true"}
 
 if [[ "${USE_LOCAL_KIND_REGISTRY}" == "false" ]]; then
@@ -73,19 +70,30 @@ export AZURE_CONTROL_PLANE_MACHINE_TYPE="${AZURE_CONTROL_PLANE_MACHINE_TYPE:-"St
 export AZURE_NODE_MACHINE_TYPE="${AZURE_NODE_MACHINE_TYPE:-"Standard_B2s"}"
 CALICO_VERSION=$(make get-calico-version)
 export CALICO_VERSION
+AZWI_RESOURCE_GROUP="${AZWI_RESOURCE_GROUP:-capz-wi-$(capz::util::random_suffix)}"
+export AZWI_RESOURCE_GROUP
+export WINDOWS_SERVER_VERSION="${WINDOWS_SERVER_VERSION:-windows-2022}"
 
 
 capz::util::generate_ssh_key
 
 capz::ci-e2e::cleanup() {
     "${REPO_ROOT}/hack/log/redact.sh" || true
+    make test-e2e-run-cleanup || true
 }
 
 trap capz::ci-e2e::cleanup EXIT
 # Image is configured as `${CONTROLLER_IMG}-${ARCH}:${TAG}` where `CONTROLLER_IMG` is defaulted to `${REGISTRY}/${IMAGE_NAME}`.
 if [[ "${BUILD_MANAGER_IMAGE}" == "false" ]]; then
   # Load an existing image, skip docker-build and docker-push.
-  make test-e2e-skip-build-and-push
+  if [[ -n "${CUSTOM_MANAGER_IMAGE:-}" ]]; then
+    # Use custom image format when CUSTOM_MANAGER_IMAGE is set
+    export MANAGER_IMAGE="${CUSTOM_MANAGER_IMAGE}"
+    make test-e2e-custom-image
+  else
+    # Use default image format
+    make test-e2e-skip-build-and-push
+  fi
 elif [[ "${USE_LOCAL_KIND_REGISTRY}" == "true" ]]; then
   # Build an image with kind local registry, skip docker-push. REGISTRY is set to `localhost:5000/ci-e2e`. TAG is set to `$(date -u '+%Y%m%d%H%M%S')`.
   make test-e2e-skip-push

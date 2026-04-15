@@ -23,6 +23,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -55,7 +56,7 @@ func newClient(auth azure.Authorizer, apiCallTimeout time.Duration) (*azureClien
 }
 
 // Get gets the specified inbound NAT rules.
-func (ac *azureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result interface{}, err error) {
+func (ac *azureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result any, err error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.azureClient.Get")
 	defer done()
 
@@ -89,7 +90,7 @@ func (ac *azureClient) List(ctx context.Context, resourceGroupName, lbName strin
 // CreateOrUpdateAsync creates or updates an inbound NAT rule asynchronously.
 // It sends a PUT request to Azure and if accepted without error, the func will return a Poller which can be used to track the ongoing
 // progress of the operation.
-func (ac *azureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters interface{}) (result interface{}, poller *runtime.Poller[armnetwork.InboundNatRulesClientCreateOrUpdateResponse], err error) {
+func (ac *azureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters any) (result any, poller *runtime.Poller[armnetwork.InboundNatRulesClientCreateOrUpdateResponse], err error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "inboundnatrules.azureClient.CreateOrUpdateAsync")
 	defer done()
 

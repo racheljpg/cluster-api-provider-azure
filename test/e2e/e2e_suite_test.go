@@ -32,6 +32,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
@@ -132,7 +133,8 @@ var _ = SynchronizedAfterSuite(func() {
 })
 
 func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
-	config := clusterctl.LoadE2EConfig(context.TODO(), clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
+	ctx := context.TODO()
+	config := clusterctl.LoadE2EConfig(ctx, clusterctl.LoadE2EConfigInput{ConfigPath: configPath})
 	Expect(config).NotTo(BeNil(), "Failed to load E2E config from %s", configPath)
 
 	resolveKubernetesVersions(config)
@@ -141,6 +143,7 @@ func loadE2EConfig(configPath string) *clusterctl.E2EConfig {
 }
 
 func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFolder string) string {
+	ctx := context.TODO()
 	createRepositoryInput := clusterctl.CreateRepositoryInput{
 		E2EConfig:        config,
 		RepositoryFolder: repositoryFolder,
@@ -148,20 +151,21 @@ func createClusterctlLocalRepository(config *clusterctl.E2EConfig, repositoryFol
 
 	// Ensuring a CNI file is defined in the config and register a FileTransformation to inject the referenced file as in place of the CNI_RESOURCES envSubst variable.
 	Expect(config.Variables).To(HaveKey(capi_e2e.CNIPath), "Missing %s variable in the config", capi_e2e.CNIPath)
-	cniPath := config.GetVariable(capi_e2e.CNIPath)
+	cniPath := config.MustGetVariable(capi_e2e.CNIPath)
 	Expect(cniPath).To(BeAnExistingFile(), "The %s variable should resolve to an existing file", capi_e2e.CNIPath)
 	createRepositoryInput.RegisterClusterResourceSetConfigMapTransformation(cniPath, capi_e2e.CNIResources)
 
-	clusterctlConfig := clusterctl.CreateRepository(context.TODO(), createRepositoryInput)
+	clusterctlConfig := clusterctl.CreateRepository(ctx, createRepositoryInput)
 	Expect(clusterctlConfig).To(BeAnExistingFile(), "The clusterctl config file does not exists in the local repository %s", repositoryFolder)
 	return clusterctlConfig
 }
 
 func setupBootstrapCluster(config *clusterctl.E2EConfig, useExistingCluster bool) (bootstrap.ClusterProvider, framework.ClusterProxy) {
+	ctx := context.TODO()
 	var clusterProvider bootstrap.ClusterProvider
 	kubeconfigPath := ""
 	if !useExistingCluster {
-		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(context.TODO(), bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
+		clusterProvider = bootstrap.CreateKindBootstrapClusterAndLoadImages(ctx, bootstrap.CreateKindBootstrapClusterAndLoadImagesInput{
 			Name:               config.ManagementClusterName,
 			RequiresDockerSock: config.HasDockerProvider(),
 			Images:             config.Images,
@@ -171,13 +175,14 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, useExistingCluster bool
 		kubeconfigPath = clusterProvider.GetKubeconfigPath()
 		Expect(kubeconfigPath).To(BeAnExistingFile(), "Failed to get the kubeconfig file for the bootstrap cluster")
 	} else {
+		kubeconfigPath = clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
 		// @sonasingh46: Workaround for testing workload identity.
 		// Loading image for already created cluster
 		imagesInput := bootstrap.LoadImagesToKindClusterInput{
 			Name:   "capz-e2e",
 			Images: config.Images,
 		}
-		err := bootstrap.LoadImagesToKindCluster(context.TODO(), imagesInput)
+		err := bootstrap.LoadImagesToKindCluster(ctx, imagesInput)
 		Expect(err).NotTo(HaveOccurred(), "Failed to load images to the bootstrap cluster: %s", err)
 	}
 	clusterProxy := NewAzureClusterProxy("bootstrap", kubeconfigPath)
@@ -186,20 +191,24 @@ func setupBootstrapCluster(config *clusterctl.E2EConfig, useExistingCluster bool
 }
 
 func initBootstrapCluster(bootstrapClusterProxy framework.ClusterProxy, config *clusterctl.E2EConfig, clusterctlConfig, artifactFolder string) {
-	clusterctl.InitManagementClusterAndWatchControllerLogs(context.TODO(), clusterctl.InitManagementClusterAndWatchControllerLogsInput{
+	ctx := context.TODO()
+	clusterctl.InitManagementClusterAndWatchControllerLogs(ctx, clusterctl.InitManagementClusterAndWatchControllerLogsInput{
 		ClusterProxy:            bootstrapClusterProxy,
 		ClusterctlConfigPath:    clusterctlConfig,
 		InfrastructureProviders: config.InfrastructureProviders(),
 		AddonProviders:          config.AddonProviders(),
 		LogFolder:               filepath.Join(artifactFolder, "clusters", bootstrapClusterProxy.GetName()),
 	}, config.GetIntervals(bootstrapClusterProxy.GetName(), "wait-controllers")...)
+
+	waitForWebhookCAInjection(ctx, bootstrapClusterProxy.GetClient())
 }
 
 func tearDown(bootstrapClusterProvider bootstrap.ClusterProvider, bootstrapClusterProxy framework.ClusterProxy) {
+	ctx := context.TODO()
 	if bootstrapClusterProxy != nil {
-		bootstrapClusterProxy.Dispose(context.TODO())
+		bootstrapClusterProxy.Dispose(ctx)
 	}
 	if bootstrapClusterProvider != nil {
-		bootstrapClusterProvider.Dispose(context.TODO())
+		bootstrapClusterProvider.Dispose(ctx)
 	}
 }

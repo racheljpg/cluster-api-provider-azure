@@ -26,6 +26,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
+	"github.com/Azure/azure-sdk-for-go/sdk/tracing/azotel"
+	"go.opentelemetry.io/otel"
+
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 	"sigs.k8s.io/cluster-api-provider-azure/version"
 )
@@ -41,17 +44,17 @@ const (
 	ChinaCloudName = "AzureChinaCloud"
 	// USGovernmentCloudName is the name of the Azure US Government cloud.
 	USGovernmentCloudName = "AzureUSGovernmentCloud"
+	// GermanCloudName is the name of the Azure German cloud.
+	GermanCloudName = "AzureGermanCloud"
 )
 
 const (
-	// DefaultImageOfferID is the default Azure Marketplace offer ID.
-	DefaultImageOfferID = "capi"
-	// DefaultWindowsImageOfferID is the default Azure Marketplace offer ID for Windows.
-	DefaultWindowsImageOfferID = "capi-windows"
-	// DefaultImagePublisherID is the default Azure Marketplace publisher ID.
-	DefaultImagePublisherID = "cncf-upstream"
-	// LatestVersion is the image version latest.
-	LatestVersion = "latest"
+	// DefaultPublicGalleryName is the default Azure compute gallery.
+	DefaultPublicGalleryName = "ClusterAPI-f72ceb4f-5159-4c26-a0fe-2ea738f0d019"
+	// DefaultLinuxGalleryImageName is the default Linux community gallery image definition.
+	DefaultLinuxGalleryImageName = "capi-ubun2-2404"
+	// DefaultWindowsGalleryImageName is the default Windows community gallery image definition.
+	DefaultWindowsGalleryImageName = "capi-win-2019-containerd"
 )
 
 const (
@@ -110,7 +113,7 @@ const (
 
 var (
 	// LinuxBootstrapExtensionCommand is the command the VM bootstrap extension will execute to verify Linux nodes bootstrap completes successfully.
-	LinuxBootstrapExtensionCommand = fmt.Sprintf("for i in $(seq 1 %d); do test -f %s && break; if [ $i -eq %d ]; then exit 1; else sleep %d; fi; done", bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionRetries, bootstrapExtensionSleep)
+	LinuxBootstrapExtensionCommand = fmt.Sprintf("for i in $(seq 1 %d); do test -f %s && break; if [ $i -eq %d ]; then echo 'Error joining node to cluster: kubeadm init or join failed. To debug, check the cloud-init, kubelet, or other bootstrap logs: https://capz.sigs.k8s.io/self-managed/troubleshooting.html#checking-cloud-init-logs-ubuntu'; exit 1; else sleep %d; fi; done", bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionRetries, bootstrapExtensionSleep)
 	// WindowsBootstrapExtensionCommand is the command the VM bootstrap extension will execute to verify Windows nodes bootstrap completes successfully.
 	WindowsBootstrapExtensionCommand = fmt.Sprintf("powershell.exe -Command \"for ($i = 0; $i -lt %d; $i++) {if (Test-Path '%s') {exit 0} else {Start-Sleep -Seconds %d}} exit -2\"",
 		bootstrapExtensionRetries, bootstrapSentinelFile, bootstrapExtensionSleep)
@@ -215,6 +218,11 @@ func ResourceGroupID(subscriptionID, resourceGroup string) string {
 // VMID returns the azure resource ID for a given VM.
 func VMID(subscriptionID, resourceGroup, vmName string) string {
 	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/virtualMachines/%s", subscriptionID, resourceGroup, vmName)
+}
+
+// VMSSID returns the azure resource ID for a given VMSS.
+func VMSSID(subscriptionID, resourceGroup, vmssName string) string {
+	return fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/virtualMachineScaleSets/%s", subscriptionID, resourceGroup, vmssName)
 }
 
 // VNetID returns the azure resource ID for a given VNet.
@@ -372,6 +380,8 @@ func ARMClientOptions(azureEnvironment string, extraPolicies ...policy.Policy) (
 	}
 	opts.PerCallPolicies = append(opts.PerCallPolicies, extraPolicies...)
 	opts.Retry.MaxRetries = -1 // Less than zero means one try and no retries.
+
+	opts.TracingProvider = azotel.NewTracingProvider(otel.GetTracerProvider(), nil)
 
 	return opts, nil
 }

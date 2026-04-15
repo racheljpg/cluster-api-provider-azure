@@ -33,13 +33,14 @@ import (
 	gomock "go.uber.org/mock/gomock"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	azure "sigs.k8s.io/cluster-api-provider-azure/azure"
-	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
+	v1beta10 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 )
 
 // MockRouteTableScope is a mock of RouteTableScope interface.
 type MockRouteTableScope struct {
 	ctrl     *gomock.Controller
 	recorder *MockRouteTableScopeMockRecorder
+	isgomock struct{}
 }
 
 // MockRouteTableScopeMockRecorder is the mock recorder for MockRouteTableScope.

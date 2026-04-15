@@ -17,12 +17,12 @@ limitations under the License.
 package securitygroups
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
 )
@@ -82,8 +82,8 @@ func TestParameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          *NSGSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
@@ -107,7 +107,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -134,7 +134,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
 				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
 					Location: ptr.To("test-location"),
@@ -176,7 +176,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
 				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
 					Location: ptr.To("test-location"),
@@ -206,7 +206,7 @@ func TestParameters(t *testing.T) {
 				},
 				ResourceGroup: "test-group",
 				ClusterName:   "my-cluster",
-				LastAppliedSecurityRules: map[string]interface{}{
+				LastAppliedSecurityRules: map[string]any{
 					"allow_ssh":   sshRule,
 					"custom_rule": customRule,
 					"other_rule":  otherRule,
@@ -224,7 +224,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
 				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
 					Location: ptr.To("test-location"),
@@ -253,7 +253,7 @@ func TestParameters(t *testing.T) {
 				},
 				ResourceGroup: "test-group",
 				ClusterName:   "my-cluster",
-				LastAppliedSecurityRules: map[string]interface{}{
+				LastAppliedSecurityRules: map[string]any{
 					"allow_ssh":   sshRule,
 					"custom_rule": customRule,
 					"deny_rule":   denyRule,
@@ -271,7 +271,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
 				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
 					Location: ptr.To("test-location"),
@@ -300,7 +300,7 @@ func TestParameters(t *testing.T) {
 				},
 				ResourceGroup: "test-group",
 				ClusterName:   "my-cluster",
-				LastAppliedSecurityRules: map[string]interface{}{
+				LastAppliedSecurityRules: map[string]any{
 					"allow_ssh":   sshRule,
 					"custom_rule": customRule,
 				},
@@ -317,7 +317,7 @@ func TestParameters(t *testing.T) {
 					},
 				},
 			},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -334,7 +334,7 @@ func TestParameters(t *testing.T) {
 				ClusterName:   "my-cluster",
 			},
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.SecurityGroup{}))
 				g.Expect(result).To(Equal(armnetwork.SecurityGroup{
 					Properties: &armnetwork.SecurityGroupPropertiesFormat{
@@ -354,12 +354,11 @@ func TestParameters(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -398,7 +397,6 @@ func TestRuleExists(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()

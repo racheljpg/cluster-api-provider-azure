@@ -21,6 +21,8 @@
     - [Tilt for dev in CAPZ](#tilt-for-dev-in-capz)
     - [Tilt for dev in both CAPZ and CAPI](#tilt-for-dev-in-both-capz-and-capi)
     - [Deploying a workload cluster](#deploying-a-workload-cluster)
+    - [Tilt for dev using internal load balancer (ILB) for intra-cluster node-apiserver traffic](./tilt-with-aks-as-mgmt-ilb.md#tilt-workflow-for-aks-as-management-cluster-with-internal-load-balancer)
+      - [Flavors for dev using internal load balancer (ILB) for intra-cluster node-apiserver traffic](./tilt-with-aks-as-mgmt-ilb.md#flavors-leveraging-internal-load-balancer)
     - [Viewing Telemetry](#viewing-telemetry)
     - [Debugging](#debugging)
   - [Manual Testing](#manual-testing)
@@ -46,7 +48,7 @@
 ### Base requirements
 
 1. Install [go][go]
-   - Get the latest patch version for go v1.21.
+   - Get the latest patch version for go v1.22.
 2. Install [jq][jq]
    - `brew install jq` on macOS.
    - `sudo apt install jq` on Windows + WSL2
@@ -122,7 +124,7 @@ Makefile targets and scripts are offered to work with go modules:
 
 ### Setting up the environment
 
-Your must have the Azure credentials as outlined in the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
+You must have the Azure credentials as outlined in the [getting started prerequisites](../getting-started-with-aks.md#Prerequisites) section.
 
 ### Tilt Requirements
 
@@ -151,6 +153,13 @@ development will span both CAPZ and CAPI, then follow the [CAPI and CAPZ instruc
 
 #### Tilt for dev in CAPZ
 
+<aside class="note warning">
+  <h1>Warning</h1>
+  To use an internal load balancer (ILB) for intra-cluster node-apiserver traffic in your workload cluster, please refer to the
+  <a href="tilt-with-aks-as-mgmt-ilb.md">Tilt with AKS as Management Cluster</a> guide.
+</aside>
+
+
 If you want to develop in CAPZ and get a local development cluster working quickly, this is the path for you.
 
 Create a file named `tilt-settings.yaml` in the root of the CAPZ repository with the following contents:
@@ -163,13 +172,16 @@ kustomize_substitutions:
   AZURE_CLIENT_ID: <client-id>
 ```
 
-You should have these values saved from the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
+You should have these values saved from the [getting started prerequisites](../getting-started-with-aks.md#Prerequisites) section.
 
 To build a kind cluster and start Tilt, just run:
 
 ```shell
-make tilt-up
+make kind-create tilt-up
 ```
+
+**Note**: You can also choose an AKS cluster as a management cluster by using `aks-create` instead of `kind-create`.
+
 By default, the Cluster API components deployed by Tilt have experimental features turned off.
 If you would like to enable these features, add `extra_args` as specified in [The Cluster API Book](https://cluster-api.sigs.k8s.io/developer/tilt.html#create-a-tilt-settingsjson-file).
 
@@ -218,7 +230,7 @@ kustomize_substitutions:
 EOF
 ```
 
-Make sure to replace the credentials with the values from the [getting started prerequisites](../topics/getting-started.md#Prerequisites) section.
+Make sure to replace the credentials with the values from the [getting started prerequisites](../getting-started-with-aks.md#Prerequisites) section.
 
 > `$REGISTRY` should be in the format `docker.io/<dockerhub-username>`
 
@@ -245,7 +257,7 @@ To delete the cluster:
 make delete-workload-cluster
 ```
 
-> Check out the [troubleshooting guide](../topics/troubleshooting.md) for common errors you might run into.
+> Check out the [self-managed](../self-managed/troubleshooting.md) and [managed](../managed/troubleshooting.md) troubleshooting guides for common errors you might run into.
 
 #### Viewing Telemetry
 
@@ -317,6 +329,19 @@ If you then start Tilt you can connect to delve via the port defined (i.e. 30000
 }
 ```
 
+#### AI-assisted debugging
+
+This repository includes a [debugging skill](https://github.com/kubernetes-sigs/cluster-api-provider-azure/tree/main/.claude/skills/debug-capz-k8s/SKILL.md) <!-- markdown-link-check-disable-line --> for AI coding agents that can help triage CAPZ cluster failures interactively. The skill covers:
+
+- Live cluster inspection via `kubectl` and `az` CLI
+- Prow CI artifact analysis and build log triage
+- Common failure patterns for Azure infrastructure, control plane, networking, and more
+- VM-level debugging with `az vm run-command`
+
+The skill is automatically loaded by coding agents that support it, such as [GitHub Copilot coding agent](https://docs.github.com/en/copilot/using-github-copilot/using-copilot-coding-agent), [Claude Code](https://docs.anthropic.com/en/docs/claude-code), and [opencode](https://opencode.ai). Open a session in this repository and ask the agent to debug a failing cluster or CI run.
+
+For general troubleshooting guidance, see also the [self-managed cluster troubleshooting](../self-managed/troubleshooting.md) and [managed cluster troubleshooting](../managed/troubleshooting.md) pages.
+
 ### Manual Testing
 
 #### Creating a dev cluster
@@ -376,7 +401,7 @@ export CONTROL_PLANE_MACHINE_COUNT=3
 export AZURE_CONTROL_PLANE_MACHINE_TYPE="Standard_B2s"
 export AZURE_NODE_MACHINE_TYPE="Standard_B2s"
 export WORKER_MACHINE_COUNT=2
-export KUBERNETES_VERSION="v1.25.6"
+export KUBERNETES_VERSION="v1.33.6"
 
 # Identity secret.
 export AZURE_CLUSTER_IDENTITY_SECRET_NAME="cluster-identity-secret"
@@ -414,7 +439,7 @@ Create the cluster:
 make create-cluster
 ```
 
-> Check out the [troubleshooting](../topics/troubleshooting.md) guide for common errors you might run into.
+> Check out the [self-managed](../self-managed/troubleshooting.md) and [managed](../managed/troubleshooting.md) troubleshooting guides for common errors you might run into
 
 ### Instrumenting Telemetry
 Telemetry is the key to operational transparency. We strive to provide insight into the internal behavior of the
@@ -495,6 +520,8 @@ To run E2E locally, set `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_SUBSCRI
 ./scripts/ci-e2e.sh
 ```
 
+Note: Users that have a restrictive environment and want to leverage API Server ILB in their flavors and to run e2e tests locally should refer to the detailed explanation in [running e2e tests locally leveraging apiserver ilb solution](./tilt-with-aks-as-mgmt-ilb.md#running-e2e-tests-locally-using-api-server-ilbs-networking-solution)
+
 You can optionally set the following variables:
 
 | Variable                   | Description                                                                                                                                                                                                                                                                                                                                                                | Default                                                                               |
@@ -531,16 +558,16 @@ Optional settings are:
 | `WINDOWS`            | `false`       | Run conformance against Windows nodes                                                              |
 | `CONFORMANCE_NODES`  | `1`           | Number of parallel ginkgo nodes to run                                                             |
 | `CONFORMANCE_FLAVOR` | `""`          | The flavor of the cluster to run conformance against. If not set, the default flavor will be used. |
-| `IP_FAMILY`          | `IPv4`        | Set to `IPv6` to run conformance against single-stack IPv6, or `dual` for dual-stack.              |
+| `IP_FAMILY`          | `ipv4`        | Set to `ipv6` to run conformance against single-stack IPv6, or `dual` for dual-stack.              |
 
 With the following environment variables defined, you can build a CAPZ cluster from the HEAD of Kubernetes main branch or release branch, and run the Conformance test suite against it.
 
 | Environment Variable      | Value                                                                                                                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `E2E_ARGS`                | `-kubetest.use-ci-artifacts`                                                                                                                                                                             |
-| `KUBERNETES_VERSION`      | `latest` - extract Kubernetes version from https://dl.k8s.io/ci/latest.txt (main's HEAD)<br>`latest-1.<MINOR>` - extract Kubernetes version from dl.k8s.io/ci/latest-1.<MINOR>.txt (release branch's HEAD) |
-| `WINDOWS_SERVER_VERSION`  | Optional, can be `windows-2019` (default) or `windows-2022`                                                                                                                                              |
-| `KUBETEST_WINDOWS_CONFIG` | Optional, can be `upstream-windows-serial-slow.yaml`, when not specified `upstream-windows.yaml` is used                                                                                                 |
+| `KUBERNETES_VERSION`      | `latest` - extract Kubernetes version from https://dl.k8s.io/ci/latest.txt (main's HEAD)<br>`latest-1.<MINOR>` - extract Kubernetes version from dl.k8s.io/ci/latest-1.<MINOR>.txt (release branch's HEAD). For end-of-life minor versions, a static final patch release is returned instead (see `capz::util::get_eol_k8s_version` in `hack/util.sh`). |
+| `WINDOWS_SERVER_VERSION`  | Optional, can be `windows-2022` (default) or `windows-2025`                                                                                                                                              |
+| `KUBETEST_WINDOWS_CONFIG` | Default is `upstream-windows.yaml`. CAPZ contains various other configuration recipes in the `test/e2e/data/` directory; you may use any of those by referencing their file names as the value of `KUBETEST_WINDOWS_CONFIG` (e.g., `conformance-fast.yaml`), or you may drop in your own config files into `test/e2e/data/` and reference those.                                                                                                 |
 | `WINDOWS_CONTAINERD_URL`  | Optional, can be any url to a `tar.gz` file containing binaries for containerd in the same format as upstream package                                                                                    |
 
 With the following environment variables defined, CAPZ runs `./scripts/ci-build-kubernetes.sh` as part of `./scripts/ci-conformance.sh`, which allows developers to build Kubernetes from source and run the Kubernetes Conformance test suite against a CAPZ cluster based on the custom build:
@@ -568,11 +595,11 @@ You can optionally set the following variables:
 | `AZURE_SSH_PUBLIC_KEY_FILE` | Use your own SSH key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `SKIP_CLEANUP`              | Skip deleting the cluster after the tests finish running.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `KUBECONFIG`                | Provide your existing cluster kubeconfig filepath. If no kubeconfig is provided, `./kubeconfig` will be used.                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `KUBERNETES_VERSION`        | Desired Kubernetes version to test. You can pass in a definitive released version, e.g., "v1.24.0". If you want to use pre-released CI bits of a particular release you may use the "latest-" prefix, e.g., "latest-1.24"; you may use the very latest built CI bits from the kubernetes/kubernetes master branch by passing in "latest". If you provide a `KUBERNETES_VERSION` environment variable, you may not also use `CI_VERSION` (below). Use only one configuration variable to declare the version of Kubernetes to test. |
+| `KUBERNETES_VERSION`        | Desired Kubernetes version to test. You can pass in a definitive released version, e.g., "v1.24.0". If you want to use pre-released CI bits of a particular release you may use the "latest-" prefix, e.g., "latest-1.24"; you may use the very latest built CI bits from the kubernetes/kubernetes master branch by passing in "latest". For end-of-life Kubernetes versions whose CI artifacts are no longer published, CAPZ sets `KUBERNETES_VERSION` to a static final patch release instead (see `capz::util::get_eol_k8s_version` in `hack/util.sh`). If you provide a `KUBERNETES_VERSION` environment variable, you may not also use `CI_VERSION` (below). Use only one configuration variable to declare the version of Kubernetes to test. |
 | `CI_VERSION`                | Provide a custom CI version of Kubernetes (e.g., `v1.25.0-alpha.0.597+aa49dffc7f24dc`). If not specified, this will be determined from the KUBERNETES_VERSION above if it is an unreleased version. If you provide a `CI_VERSION` environment variable, you may not also use `KUBERNETES_VERSION` (above).                                                                                                                                                                                                                         |
 | `TEST_CCM`                  | Build a cluster that uses custom versions of the Azure cloud-provider cloud-controller-manager and node-controller-manager images                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `EXP_MACHINE_POOL`          | Use [Machine Pool](../topics/machinepools.md) for worker machines.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `TEST_WINDOWS`              | Build a cluster that has Windows worker nodes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `EXP_MACHINE_POOL`          | Use [Machine Pool](../self-managed/machinepools.md) for worker machines. Defaults to true.                                                                                                                                                                                                                                                                                                                                                                   |
+| `TEST_WINDOWS`              | Set to "true" to build a cluster that has Windows worker nodes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `REGISTRY`                  | Registry to push any custom k8s images or cloud provider images built.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `CLUSTER_TEMPLATE`          | Use a custom cluster template. It can be a path to a template under templates/, a path on the host or a link. If the value is not set, the script will choose the appropriate cluster template based on existing environment variables.                                                                                                                                                                                                                                                                                            |
 | `CCM_COUNT`                 | Set the number of cloud-controller-manager only when `TEST_CCM` is set. Besides it should not be more than control plane Node number.                                                                                                                                                                                                                                                                                                                                                                                              |

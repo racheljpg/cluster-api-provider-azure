@@ -17,7 +17,6 @@ limitations under the License.
 package natgateways
 
 import (
-	"context"
 	"testing"
 
 	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20220701"
@@ -26,6 +25,7 @@ import (
 	"go.uber.org/mock/gomock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/natgateways/mock_natgateways"
 )
 
@@ -35,7 +35,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		scope := mock_natgateways.NewMockNatGatewayScope(mockCtrl)
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, nil, errors.New("an error"))
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, nil, errors.New("an error"))
 		g.Expect(err).To(HaveOccurred())
 	})
 
@@ -56,7 +56,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, natGateway, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, natGateway, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 }

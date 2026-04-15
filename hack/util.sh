@@ -20,6 +20,15 @@ set -o pipefail
 
 CURL_RETRIES=3
 
+# capz::util::get_eol_k8s_version returns the final patch release for an EOL Kubernetes version.
+capz::util::get_eol_k8s_version() {
+    case "$1" in
+        latest-1.30) echo "v1.30.14" ;;
+        latest-1.31) echo "v1.31.14" ;;
+        *) return 1 ;;
+    esac
+}
+
 capz::util::get_latest_ci_version() {
     release="${1}"
     ci_version_url="https://dl.k8s.io/ci/latest-${release}.txt"
@@ -63,17 +72,31 @@ capz::util::should_build_ccm() {
 
 # all test regions must support AvailabilityZones
 capz::util::get_random_region() {
-    local REGIONS=("canadacentral" "eastus" "eastus2" "northeurope" "uksouth" "westeurope" "westus2" "westus3")
+    # Regions appear more than once to represent the approximate relative amount
+    # of Standard BS v2 quota in each region.
+    local REGIONS=(
+      "australiaeast"
+      "canadacentral" "canadacentral" "canadacentral"
+      "francecentral"
+      "germanywestcentral"
+      "switzerlandnorth" "switzerlandnorth" "switzerlandnorth"
+      "uksouth"
+    )
     echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
 }
 # all regions below must have GPU availability for the chosen GPU VM SKU
 capz::util::get_random_region_gpu() {
-    local REGIONS=("eastus" "eastus2" "northeurope" "uksouth" "westeurope" "westus2")
+    local REGIONS=("eastus" "eastus2" "uksouth" "westeurope" "westus2")
     echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
 }
 # all regions below must support ExtendedLocation
 capz::util::get_random_region_edgezone() {
     local REGIONS=("canadacentral")
+    echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
+}
+# all regions below must have sufficient quota to run load tests
+capz::util::get_random_region_load() {
+    local REGIONS=("canadacentral" "francecentral" "northeurope")
     echo "${REGIONS[${RANDOM} % ${#REGIONS[@]}]}"
 }
 
@@ -108,6 +131,8 @@ capz::util::generate_ssh_key() {
 capz::util::ensure_azure_envs() {
     : "${AZURE_SUBSCRIPTION_ID:?Environment variable empty or not defined.}"
     : "${AZURE_TENANT_ID:?Environment variable empty or not defined.}"
-    : "${AZURE_CLIENT_ID:?Environment variable empty or not defined.}"
-    : "${AZURE_CLIENT_SECRET:?Environment variable empty or not defined.}"
+}
+
+capz::util::random_suffix() {
+    od -An -N8 -tx8 /dev/urandom | tr -d ' ' | head -c 16
 }

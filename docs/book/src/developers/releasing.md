@@ -50,7 +50,7 @@ This must be done prior to generating release artifacts, so the release contains
 ### 2. Change milestone (skip for patch releases) (maintainer)
 
 - Create a [new GitHub milestone](https://github.com/kubernetes-sigs/cluster-api-provider-azure/milestones/new) for the next release.
-- Change the milestone applier so new changes can be applied to the appropriate release.
+- Change the milestone applier so new changes can be applied to the appropriate release. [A sample PR](https://github.com/kubernetes/test-infra/pull/34225) in test infra to update the release.
 
 #### Versioning
 
@@ -88,6 +88,13 @@ Example versions:
     - Move items out of "Uncategorized" into an appropriate section.
     - Change anything attributed to "k8s-cherrypick-robot" to credit the original author.
     - Fix any typos or other errors.
+    - Add a "Details" section with a link to the full diff:
+        ```md
+        ## Details
+        <!-- markdown-link-check-disable-next-line -->
+        https://github.com/kubernetes-sigs/cluster-api-provider-azure/compare/v1.14.4...v1.14.5
+        ```
+      Be sure to replace the versions in the URL with the appropriate tags.
 
 1. Open a pull request against the `main` branch with the release notes.
 
@@ -141,7 +148,16 @@ Go to [the Netlify branches and deploy contexts in site settings](https://app.ne
 
 Note: this step requires access to the Netlify site. If you don't have access, please ask a maintainer to update the branch.
 
-### 8. Announce the new release
+### 8. Update security scanner branches (skip for patch releases)
+
+Open a pull request to update the branches in the [weekly security scan workflow](../../.github/workflows/weekly-security-scan.yaml) to include the new release branch. For example, if the new release branch is `release-1.23`, update the `branch` matrix to:
+
+```yaml
+      matrix:
+        branch: [ main, release-1.23, release-1.22 ]
+```
+
+### 9. Announce the new release
 
 #### Patch Releases
 
@@ -149,7 +165,7 @@ Note: this step requires access to the Netlify site. If you don't have access, p
 
 #### Minor/Major Releases
 
-1. Follow the communications process for [pre-releases](#pre-releases)
+1. Follow the communications process for [patch-releases](#patch-releases)
 2. An announcement email is sent to `kubernetes-sig-azure@googlegroups.com` and `kubernetes-sig-cluster-lifecycle@googlegroups.com` with the subject `[ANNOUNCE] cluster-api-provider-azure <version> has been released`
 
 [semver]: https://semver.org/#semantic-versioning-200
@@ -194,7 +210,7 @@ Additionally, we need to update the `type: InfrastructureProvider` spec in [azur
 
 #### Update clusterctl API version upgrade tests
 
-Update the [API version upgrade tests](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/v1.12.1/test/e2e/capi_test.go#L214) to use the oldest supported release versions of CAPI and CAPZ after the release is cut as "Init" provider versions. See [this PR](https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/4433) for more details.
+Update the [API version upgrade tests](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/v1.12.2/test/e2e/capi_test.go#L214) to use the oldest supported release versions of CAPI and CAPZ after the release is cut as "Init" provider versions. See [this PR](https://github.com/kubernetes-sigs/cluster-api-provider-azure/pull/4433) for more details.
 
 ### Update Upstream Tests (skip for patch releases)
 

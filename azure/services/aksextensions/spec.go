@@ -23,6 +23,7 @@ import (
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
@@ -55,7 +56,7 @@ func (s *AKSExtensionSpec) ResourceRef() *asokubernetesconfigurationv1.Extension
 }
 
 // Parameters implements azure.ASOResourceSpecGetter.
-func (s *AKSExtensionSpec) Parameters(ctx context.Context, existingAKSExtension *asokubernetesconfigurationv1.Extension) (parameters *asokubernetesconfigurationv1.Extension, err error) {
+func (s *AKSExtensionSpec) Parameters(_ context.Context, existingAKSExtension *asokubernetesconfigurationv1.Extension) (parameters *asokubernetesconfigurationv1.Extension, err error) {
 	aksExtension := &asokubernetesconfigurationv1.Extension{}
 	if existingAKSExtension != nil {
 		aksExtension = existingAKSExtension
@@ -90,13 +91,14 @@ func (s *AKSExtensionSpec) Parameters(ctx context.Context, existingAKSExtension 
 			Type: (*asokubernetesconfigurationv1.Extension_Properties_AksAssignedIdentity_Type_Spec)(ptr.To(s.AKSAssignedIdentityType)),
 		}
 	}
-	if s.Scope.ScopeType == infrav1.ExtensionScopeCluster {
+	switch s.Scope.ScopeType {
+	case infrav1.ExtensionScopeCluster:
 		aksExtension.Spec.Scope = &asokubernetesconfigurationv1.Scope{
 			Cluster: &asokubernetesconfigurationv1.ScopeCluster{
 				ReleaseNamespace: ptr.To(s.Scope.ReleaseNamespace),
 			},
 		}
-	} else if s.Scope.ScopeType == infrav1.ExtensionScopeNamespace {
+	case infrav1.ExtensionScopeNamespace:
 		aksExtension.Spec.Scope = &asokubernetesconfigurationv1.Scope{
 			Namespace: &asokubernetesconfigurationv1.ScopeNamespace{
 				TargetNamespace: ptr.To(s.Scope.TargetNamespace),
@@ -108,7 +110,7 @@ func (s *AKSExtensionSpec) Parameters(ctx context.Context, existingAKSExtension 
 }
 
 // WasManaged implements azure.ASOResourceSpecGetter.
-func (s *AKSExtensionSpec) WasManaged(resource *asokubernetesconfigurationv1.Extension) bool {
+func (s *AKSExtensionSpec) WasManaged(_ *asokubernetesconfigurationv1.Extension) bool {
 	// returns always returns true as CAPZ does not support BYO extension.
 	return true
 }

@@ -1,0 +1,48 @@
+name: PR golangci-lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+# Remove all permissions from GITHUB_TOKEN except metadata.
+permissions: {}
+
+jobs:
+  golangci:
+    name: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        working-directory:
+          - ""
+          - test
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # tag=v6.0.2
+
+      - name: Get Go version
+        id: vars
+        run: echo "go_version=$(make go-version)" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # tag=v6.3.0
+        with:
+          go-version: ${{ steps.vars.outputs.go_version }}
+
+      - name: Build custom golangci-lint with kube-api-linter
+        if: matrix.working-directory == ''
+        run: |
+          make golangci-lint
+          hack/tools/bin/golangci-lint-v2.7.0 custom
+
+      - name: golangci-lint (root with kube-api-linter)
+        if: matrix.working-directory == ''
+        run: hack/tools/bin/golangci-lint-kube-api-linter run -v
+
+      - name: golangci-lint (test directory)
+        if: matrix.working-directory == 'test'
+        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # tag=v9.2.0
+        with:
+          # update the version when updating golangci-lint
+          version: v2.7.0
+          working-directory: ${{matrix.working-directory}}

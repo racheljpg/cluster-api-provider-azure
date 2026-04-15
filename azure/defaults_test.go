@@ -28,6 +28,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
@@ -67,7 +68,6 @@ func TestARMClientOptions(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
@@ -106,7 +106,7 @@ func TestPerCallPolicies(t *testing.T) {
 	g.Expect(opts.PerCallPolicies).To(ContainElement(BeAssignableToTypeOf(userAgentPolicy{})))
 
 	// Create a request with a correlation ID.
-	ctx := context.WithValue(context.Background(), tele.CorrIDKeyVal, tele.CorrID(corrID))
+	ctx := context.WithValue(t.Context(), tele.CorrIDKeyVal, tele.CorrID(corrID))
 	req, err := runtime.NewRequest(ctx, http.MethodGet, server.URL)
 	g.Expect(err).NotTo(HaveOccurred())
 
@@ -165,7 +165,6 @@ func TestCustomPutPatchHeaderPolicy(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
@@ -189,7 +188,7 @@ func TestCustomPutPatchHeaderPolicy(t *testing.T) {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			// Create a request
-			req, err := runtime.NewRequest(context.Background(), tc.method, server.URL)
+			req, err := runtime.NewRequest(t.Context(), tc.method, server.URL)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			// Create a pipeline and send the request to the test server for validation.

@@ -17,13 +17,13 @@ limitations under the License.
 package groups
 
 import (
-	"context"
 	"testing"
 
 	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -71,7 +71,7 @@ func TestParameters(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			actual, err := test.spec.Parameters(context.Background(), test.existing)
+			actual, err := test.spec.Parameters(t.Context(), test.existing)
 			g.Expect(err).NotTo(HaveOccurred())
 			if test.expected == nil {
 				g.Expect(actual).To(BeNil())

@@ -17,17 +17,17 @@ limitations under the License.
 package agentpools
 
 import (
-	"context"
 	"testing"
 
-	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231102preview"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools/mock_agentpools"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 )
 
 func TestPostCreateOrUpdateResourceHook(t *testing.T) {
@@ -36,7 +36,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		scope := mock_agentpools.NewMockAgentPoolScope(mockCtrl)
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, nil, errors.New("an error"))
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, nil, errors.New("an error"))
 		g.Expect(err).To(HaveOccurred())
 	})
 
@@ -48,12 +48,12 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		scope.EXPECT().RemoveCAPIMachinePoolAnnotation(clusterv1.ReplicasManagedByAnnotation)
 
 		managedCluster := &asocontainerservicev1.ManagedClustersAgentPool{
-			Status: asocontainerservicev1.ManagedClusters_AgentPool_STATUS{
+			Status: asocontainerservicev1.ManagedClustersAgentPool_STATUS{
 				EnableAutoScaling: ptr.To(false),
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, managedCluster, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -66,13 +66,13 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		scope.EXPECT().SetCAPIMachinePoolReplicas(ptr.To(1234))
 
 		managedCluster := &asocontainerservicev1.ManagedClustersAgentPool{
-			Status: asocontainerservicev1.ManagedClusters_AgentPool_STATUS{
+			Status: asocontainerservicev1.ManagedClustersAgentPool_STATUS{
 				EnableAutoScaling: ptr.To(true),
 				Count:             ptr.To(1234),
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, managedCluster, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -85,12 +85,12 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		scope.EXPECT().SetCAPIMachinePoolReplicas(ptr.To(1234))
 
 		agentPool := &asocontainerservicev1preview.ManagedClustersAgentPool{
-			Status: asocontainerservicev1preview.ManagedClusters_AgentPool_STATUS{
+			Status: asocontainerservicev1preview.ManagedClustersAgentPool_STATUS{
 				EnableAutoScaling: ptr.To(true),
 				Count:             ptr.To(1234),
 			},
 		}
 
-		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, agentPool, nil)).To(Succeed())
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, agentPool, nil)).To(Succeed())
 	})
 }

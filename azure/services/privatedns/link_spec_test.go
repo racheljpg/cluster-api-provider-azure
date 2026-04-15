@@ -17,12 +17,12 @@ limitations under the License.
 package privatedns
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
@@ -58,15 +58,15 @@ func TestLinkSpec_Parameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          LinkSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:          "new private dns virtual network link",
 			expectedError: "",
 			spec:          linkSpec,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(Equal(armprivatedns.VirtualNetworkLink{
 					Properties: &armprivatedns.VirtualNetworkLinkProperties{
 						VirtualNetwork: &armprivatedns.SubResource{
@@ -88,7 +88,7 @@ func TestLinkSpec_Parameters(t *testing.T) {
 			existing: armprivatedns.VirtualNetworkLink{Tags: map[string]*string{
 				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			}},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -97,7 +97,7 @@ func TestLinkSpec_Parameters(t *testing.T) {
 			expectedError: "",
 			spec:          linkSpec,
 			existing:      armprivatedns.VirtualNetworkLink{},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -110,12 +110,11 @@ func TestLinkSpec_Parameters(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

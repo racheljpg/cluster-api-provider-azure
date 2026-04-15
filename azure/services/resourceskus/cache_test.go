@@ -17,7 +17,6 @@ limitations under the License.
 package resourceskus
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
@@ -63,7 +62,6 @@ func TestCacheGet(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -72,7 +70,7 @@ func TestCacheGet(t *testing.T) {
 				location: tc.location,
 			}
 
-			val, err := cache.Get(context.Background(), tc.sku, tc.resourceType)
+			val, err := cache.Get(t.Context(), tc.sku, tc.resourceType)
 			if tc.err != "" {
 				if err == nil {
 					t.Fatalf("expected cache.get to fail with error %s, but actual error was nil", tc.err)
@@ -227,7 +225,6 @@ func TestCacheGetZones(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -235,12 +232,12 @@ func TestCacheGetZones(t *testing.T) {
 				data: tc.have,
 			}
 
-			zones, err := cache.GetZones(context.Background(), "baz")
+			zones, err := cache.GetZones(t.Context(), "baz")
 			if err != nil {
 				t.Error(err)
 			}
 			if diff := cmp.Diff(zones, tc.want, []cmp.Option{cmpopts.EquateEmpty()}...); diff != "" {
-				t.Errorf(diff)
+				t.Errorf("%s", diff)
 			}
 		})
 	}
@@ -376,7 +373,6 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -384,12 +380,12 @@ func TestCacheGetZonesWithVMSize(t *testing.T) {
 				data: tc.have,
 			}
 
-			zones, err := cache.GetZonesWithVMSize(context.Background(), "foo", "baz")
+			zones, err := cache.GetZonesWithVMSize(t.Context(), "foo", "baz")
 			if err != nil {
 				t.Error(err)
 			}
 			if diff := cmp.Diff(zones, tc.want, []cmp.Option{cmpopts.EquateEmpty()}...); diff != "" {
-				t.Fatalf(diff)
+				t.Fatalf("%s", diff)
 			}
 		})
 	}

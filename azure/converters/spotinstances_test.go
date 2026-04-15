@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -94,6 +95,21 @@ func TestGetSpotVMOptions(t *testing.T) {
 			},
 		},
 		{
+			name: "spot with ResourceDisk",
+			spot: &infrav1.SpotVMOptions{
+				MaxPrice: nil,
+			},
+			diffDiskSettings: &infrav1.DiffDiskSettings{
+				Option:    string(armcompute.DiffDiskOptionsLocal),
+				Placement: ptr.To(infrav1.DiffDiskPlacementResourceDisk),
+			},
+			want: resultParams{
+				vmPriorityTypes:       ptr.To(armcompute.VirtualMachinePriorityTypesSpot),
+				vmEvictionPolicyTypes: nil,
+				billingProfile:        nil,
+			},
+		},
+		{
 			name: "spot with eviction policy",
 			spot: &infrav1.SpotVMOptions{
 				MaxPrice:       nil,
@@ -108,7 +124,6 @@ func TestGetSpotVMOptions(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			g := NewGomegaWithT(t)

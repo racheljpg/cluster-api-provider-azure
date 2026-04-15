@@ -18,18 +18,19 @@ package clusterctl
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/blang/semver/v4"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	controlplanev1 "sigs.k8s.io/cluster-api/api/controlplane/kubeadm/v1beta2"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
-	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/internal/log"
 )
@@ -94,6 +95,16 @@ func InitManagementClusterAndWatchControllerLogs(ctx context.Context, input Init
 
 		if input.ClusterctlBinaryPath != "" {
 			InitWithBinary(ctx, input.ClusterctlBinaryPath, initInput)
+			// Old versions of clusterctl may deploy CRDs, Mutating- and/or ValidatingWebhookConfigurations
+			// before creating the new Certificate objects. This check ensures the CA's are up to date before
+			// continuing.
+			clusterctlVersion, err := getClusterCtlVersion(input.ClusterctlBinaryPath)
+			Expect(err).ToNot(HaveOccurred())
+			if clusterctlVersion.LT(semver.MustParse("1.7.2")) {
+				Eventually(func() error {
+					return verifyCAInjection(ctx, client)
+				}, time.Minute*5, time.Second*10).Should(Succeed(), "Failed to verify CA injection")
+			}
 		} else {
 			Init(ctx, initInput)
 		}
@@ -182,13 +193,38 @@ func UpgradeManagementClusterAndWait(ctx context.Context, input UpgradeManagemen
 		LogFolder:                 input.LogFolder,
 	}
 
+	client := input.ClusterProxy.GetClient()
+
 	if input.ClusterctlBinaryPath != "" {
-		UpgradeWithBinary(ctx, input.ClusterctlBinaryPath, upgradeInput)
+		clusterctlVersion, err := getClusterCtlVersion(input.ClusterctlBinaryPath)
+		Expect(err).ToNot(HaveOccurred())
+		upgradeRetries := 1
+		// Older versions of clusterctl may need to retry the upgrade process to allow for
+		// cert-manager CAs to become available before continuing.  For newer versions of clusterctl
+		// this is addressed with https://github.com/kubernetes-sigs/cluster-api/pull/10513
+		if clusterctlVersion.LT(semver.MustParse("1.7.0")) {
+			upgradeRetries = 2
+		}
+		for i := range upgradeRetries {
+			err := UpgradeWithBinary(ctx, input.ClusterctlBinaryPath, upgradeInput)
+			if err != nil && i < upgradeRetries-1 {
+				log.Logf("Failed to UpgradeWithBinary, retrying: %v", err)
+				continue
+			}
+			Expect(err).ToNot(HaveOccurred())
+			break
+		}
+		// Old versions of clusterctl may deploy CRDs, Mutating- and/or ValidatingWebhookConfigurations
+		// before creating the new Certificate objects. This check ensures the CA's are up to date before
+		// continuing.
+		if clusterctlVersion.LT(semver.MustParse("1.7.2")) {
+			Eventually(func() error {
+				return verifyCAInjection(ctx, client)
+			}, time.Minute*5, time.Second*10).Should(Succeed(), "Failed to verify CA injection")
+		}
 	} else {
 		Upgrade(ctx, upgradeInput)
 	}
-
-	client := input.ClusterProxy.GetClient()
 
 	log.Logf("Waiting for provider controllers to be running")
 	controllersDeployments := framework.GetControllerDeployments(ctx, framework.GetControllerDeploymentsInput{
@@ -224,7 +260,7 @@ type ApplyClusterTemplateAndWaitInput struct {
 	WaitForControlPlaneIntervals []interface{}
 	WaitForMachineDeployments    []interface{}
 	WaitForMachinePools          []interface{}
-	Args                         []string // extra args to be used during `kubectl apply`
+	CreateOpts                   []framework.CreateOption // options to be passed to Create function config
 	PreWaitForCluster            func()
 	PostMachinesProvisioned      func()
 	ControlPlaneWaiters
@@ -245,7 +281,7 @@ type ApplyClusterTemplateAndWaitResult struct {
 	Cluster            *clusterv1.Cluster
 	ControlPlane       *controlplanev1.KubeadmControlPlane
 	MachineDeployments []*clusterv1.MachineDeployment
-	MachinePools       []*expv1.MachinePool
+	MachinePools       []*clusterv1.MachinePool
 }
 
 // ExpectedWorkerNodes returns the expected number of worker nodes that will
@@ -286,10 +322,15 @@ func ApplyClusterTemplateAndWait(ctx context.Context, input ApplyClusterTemplate
 	Expect(input.ClusterProxy).ToNot(BeNil(), "Invalid argument. input.ClusterProxy can't be nil when calling ApplyClusterTemplateAndWait")
 	Expect(result).ToNot(BeNil(), "Invalid argument. result can't be nil when calling ApplyClusterTemplateAndWait")
 	Expect(input.ConfigCluster.ControlPlaneMachineCount).ToNot(BeNil())
-	Expect(input.ConfigCluster.WorkerMachineCount).ToNot(BeNil())
 
-	log.Logf("Creating the workload cluster with name %q using the %q template (Kubernetes %s, %d control-plane machines, %d worker machines)",
-		input.ConfigCluster.ClusterName, valueOrDefault(input.ConfigCluster.Flavor), input.ConfigCluster.KubernetesVersion, *input.ConfigCluster.ControlPlaneMachineCount, *input.ConfigCluster.WorkerMachineCount)
+	var workerMachinesCount string
+	if input.ConfigCluster.WorkerMachineCount != nil {
+		workerMachinesCount = fmt.Sprintf("%d", *input.ConfigCluster.WorkerMachineCount)
+	} else {
+		workerMachinesCount = "(unset)"
+	}
+	log.Logf("Creating the workload cluster with name %q using the %q template (Kubernetes %s, %d control-plane machines, %s worker machines)",
+		input.ConfigCluster.ClusterName, valueOrDefault(input.ConfigCluster.Flavor), input.ConfigCluster.KubernetesVersion, *input.ConfigCluster.ControlPlaneMachineCount, workerMachinesCount)
 
 	// Ensure we have a Cluster for dump and cleanup steps in AfterEach even if ApplyClusterTemplateAndWait fails.
 	result.Cluster = &clusterv1.Cluster{
@@ -331,7 +372,7 @@ func ApplyClusterTemplateAndWait(ctx context.Context, input ApplyClusterTemplate
 		WaitForControlPlaneIntervals: input.WaitForControlPlaneIntervals,
 		WaitForMachineDeployments:    input.WaitForMachineDeployments,
 		WaitForMachinePools:          input.WaitForMachinePools,
-		Args:                         input.Args,
+		CreateOpts:                   input.CreateOpts,
 		PreWaitForCluster:            input.PreWaitForCluster,
 		PostMachinesProvisioned:      input.PostMachinesProvisioned,
 		ControlPlaneWaiters:          input.ControlPlaneWaiters,
@@ -350,7 +391,7 @@ type ApplyCustomClusterTemplateAndWaitInput struct {
 	WaitForControlPlaneIntervals []interface{}
 	WaitForMachineDeployments    []interface{}
 	WaitForMachinePools          []interface{}
-	Args                         []string // extra args to be used during `kubectl apply`
+	CreateOpts                   []framework.CreateOption // options to be passed to Create function config
 	PreWaitForCluster            func()
 	PostMachinesProvisioned      func()
 	ControlPlaneWaiters
@@ -361,7 +402,7 @@ type ApplyCustomClusterTemplateAndWaitResult struct {
 	Cluster            *clusterv1.Cluster
 	ControlPlane       *controlplanev1.KubeadmControlPlane
 	MachineDeployments []*clusterv1.MachineDeployment
-	MachinePools       []*expv1.MachinePool
+	MachinePools       []*clusterv1.MachinePool
 }
 
 func ApplyCustomClusterTemplateAndWait(ctx context.Context, input ApplyCustomClusterTemplateAndWaitInput, result *ApplyCustomClusterTemplateAndWaitResult) {
@@ -384,9 +425,12 @@ func ApplyCustomClusterTemplateAndWait(ctx context.Context, input ApplyCustomClu
 	}
 
 	log.Logf("Applying the cluster template yaml of cluster %s", klog.KRef(input.Namespace, input.ClusterName))
-	Eventually(func() error {
-		return input.ClusterProxy.Apply(ctx, input.CustomTemplateYAML, input.Args...)
-	}, 1*time.Minute).Should(Succeed(), "Failed to apply the cluster template")
+	createOpts := []framework.CreateOption{
+		// Set default polling. Can be overridden by users.
+		framework.CreateWithPolling(1*time.Minute, 250*time.Millisecond),
+	}
+	createOpts = append(createOpts, input.CreateOpts...)
+	Expect(input.ClusterProxy.Create(ctx, input.CustomTemplateYAML, createOpts...)).To(Succeed(), "Failed to apply the cluster template")
 
 	// Once we applied the cluster template we can run PreWaitForCluster.
 	// Note: This can e.g. be used to verify the BeforeClusterCreate lifecycle hook is executed
@@ -403,11 +447,11 @@ func ApplyCustomClusterTemplateAndWait(ctx context.Context, input ApplyCustomClu
 		Name:      input.ClusterName,
 	}, input.WaitForClusterIntervals...)
 
-	if result.Cluster.Spec.Topology != nil {
+	if result.Cluster.Spec.Topology.IsDefined() {
 		result.ClusterClass = framework.GetClusterClassByName(ctx, framework.GetClusterClassByNameInput{
 			Getter:    input.ClusterProxy.GetClient(),
-			Namespace: input.Namespace,
-			Name:      result.Cluster.Spec.Topology.Class,
+			Namespace: result.Cluster.GetClassKey().Namespace,
+			Name:      result.Cluster.GetClassKey().Name,
 		})
 	}
 
@@ -421,7 +465,7 @@ func ApplyCustomClusterTemplateAndWait(ctx context.Context, input ApplyCustomClu
 		cniYaml, err := os.ReadFile(input.CNIManifestPath)
 		Expect(err).ShouldNot(HaveOccurred())
 
-		Expect(workloadCluster.Apply(ctx, cniYaml)).ShouldNot(HaveOccurred())
+		Expect(workloadCluster.CreateOrUpdate(ctx, cniYaml)).ShouldNot(HaveOccurred())
 	}
 
 	log.Logf("Waiting for control plane of cluster %s to be ready", klog.KRef(input.Namespace, input.ClusterName))

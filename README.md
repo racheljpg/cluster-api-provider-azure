@@ -13,18 +13,28 @@
 <!-- join kubernetes slack channel for cluster-api-azure-provider -->
 <a href="https://kubernetes.slack.com/messages/CEX9HENG7">
 <img src="https://img.shields.io/badge/join%20slack-%23cluster--api--azure-brightgreen"></a>
+<!-- deepwiki link for cluster-api-provider-azure -->
+<a href="https://deepwiki.com/kubernetes-sigs/cluster-api-provider-azure">
+<img src="https://deepwiki.com/badge.svg"></a>
 </p>
 
 ------
 
 Kubernetes-native declarative infrastructure for Azure.
 
-## What is the Cluster API Provider Azure
+## What is the Cluster API Provider Azure (CAPZ)
 
 The [Cluster API][cluster_api] brings declarative, Kubernetes-style APIs to cluster creation, configuration and management.
 
-The API itself is shared across multiple cloud providers allowing for true Azure
-hybrid deployments of Kubernetes.
+The API itself is shared across multiple cloud providers allowing for true Azure hybrid deployments of Kubernetes.
+
+CAPZ enables efficient management at scale of self-managed or managed (AKS) clusters on Azure.  Furthermore, the CAPZ management cluster can be utilized with the automatically installed Azure Service Operator (ASO) installation dependency to manage any Azure infrastructure.  For more information see the [roadmap high level vision](https://capz.sigs.k8s.io/roadmap#high-level-vision).
+
+## Documentation
+
+Please see our [Book](https://capz.sigs.k8s.io) for in-depth user documentation.
+
+Additional docs can be found in the `/docs` directory, and the [index is here](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/docs/README.md).
 
 ## Quick Start
 
@@ -57,12 +67,6 @@ Managed Clusters (AKS) follow their own [Kubernetes version support policy](http
 For more information on Kubernetes version support, see the [Cluster API book](https://cluster-api.sigs.k8s.io/reference/versions.html).
 
 ------
-
-## Documentation
-
-Please see our [Book](https://capz.sigs.k8s.io) for in-depth user documentation.
-
-Additional docs can be found in the `/docs` directory, and the [index is here](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/docs/README.md).
 
 ## Getting involved and contributing
 

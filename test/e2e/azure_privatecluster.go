@@ -31,16 +31,16 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
-	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 )
 
 // AzurePrivateClusterSpecInput is the input for AzurePrivateClusterSpec.
@@ -99,7 +99,7 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 	Consistently(func() error {
 		ns := &corev1.Namespace{}
 		return publicClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
-	}, "5s", "100ms").Should(BeNil(), "Failed to assert public API server stability")
+	}, "5s", "100ms").Should(Succeed(), "Failed to assert public API server stability")
 
 	// **************
 	// Get the Client ID for the user assigned identity
@@ -113,10 +113,10 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 		userID = "cloud-provider-user-identity"
 	}
 	resourceID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.ManagedIdentity/userAssignedIdentities/%s", subscriptionID, identityRG, userID)
-	os.Setenv("UAMI_CLIENT_ID", getClientIDforMSI(resourceID))
+	Expect(os.Setenv("UAMI_CLIENT_ID", getClientIDforMSI(resourceID))).To(Succeed())
 
-	os.Setenv("CLUSTER_IDENTITY_NAME", "cluster-identity-user-assigned")
-	os.Setenv("CLUSTER_IDENTITY_NAMESPACE", input.Namespace.Name)
+	Expect(os.Setenv("CLUSTER_IDENTITY_NAME", "cluster-identity-user-assigned")).To(Succeed())
+	Expect(os.Setenv("CLUSTER_IDENTITY_NAMESPACE", input.Namespace.Name)).To(Succeed())
 	// *************
 
 	By("Creating a private workload cluster")
@@ -195,7 +195,7 @@ func AzurePrivateClusterSpec(ctx context.Context, inputGetter func() AzurePrivat
 				// Wait for operation to complete.
 				return false, nil
 			default:
-				return false, errors.New(fmt.Sprintf("Azure Bastion provisioning failed with state: %q", ptr.Deref(bastion.Properties.ProvisioningState, "(nil)")))
+				return false, fmt.Errorf("azure bastion provisioning failed with state: %q", ptr.Deref(bastion.Properties.ProvisioningState, "(nil)"))
 			}
 		}
 		err = wait.ExponentialBackoff(backoff, retryFn)
@@ -408,6 +408,7 @@ func SetupExistingVNet(ctx context.Context, vnetCidr string, cpSubnetCidrs, node
 
 // getClientIDforMSI fetches the client ID of a user assigned identity.
 func getClientIDforMSI(resourceID string) string {
+	ctx := context.TODO()
 	subscriptionID := getSubscriptionID(Default)
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	Expect(err).NotTo(HaveOccurred())
@@ -418,7 +419,7 @@ func getClientIDforMSI(resourceID string) string {
 	parsed, err := azureutil.ParseResourceID(resourceID)
 	Expect(err).NotTo(HaveOccurred())
 
-	resp, err := msiClient.Get(context.TODO(), parsed.ResourceGroupName, parsed.Name, nil)
+	resp, err := msiClient.Get(ctx, parsed.ResourceGroupName, parsed.Name, nil)
 	Expect(err).NotTo(HaveOccurred())
 
 	return *resp.Properties.ClientID

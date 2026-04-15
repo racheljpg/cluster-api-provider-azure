@@ -24,24 +24,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/annotations"
+	"sigs.k8s.io/cluster-api/util/predicates"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/coalescing"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	capiexputil "sigs.k8s.io/cluster-api/exp/util"
-	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/predicates"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // AzureManagedControlPlaneReconciler reconciles an AzureManagedControlPlane object.
@@ -50,6 +49,7 @@ type AzureManagedControlPlaneReconciler struct {
 	Recorder                                 record.EventRecorder
 	Timeouts                                 reconciler.Timeouts
 	WatchFilterValue                         string
+	CredentialCache                          azure.CredentialCache
 	getNewAzureManagedControlPlaneReconciler func(scope *scope.ManagedControlPlaneScope) (*azureManagedControlPlaneService, error)
 }
 
@@ -77,10 +77,10 @@ func (amcpr *AzureManagedControlPlaneReconciler) SetupWithManager(ctx context.Co
 	// map requests for machine pools corresponding to AzureManagedControlPlane's defaultPool back to the corresponding AzureManagedControlPlane.
 	azureManagedMachinePoolMapper := MachinePoolToAzureManagedControlPlaneMapFunc(ctx, amcpr.Client, infrav1.GroupVersion.WithKind(infrav1.AzureManagedControlPlaneKind), log)
 
-	c, err := ctrl.NewControllerManagedBy(mgr).
+	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options.Options).
 		For(azManagedControlPlane).
-		WithEventFilter(predicates.ResourceHasFilterLabel(log, amcpr.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceHasFilterLabel(mgr.GetScheme(), log, amcpr.WatchFilterValue)).
 		// watch AzureManagedCluster resources
 		Watches(
 			&infrav1.AzureManagedCluster{},
@@ -88,25 +88,19 @@ func (amcpr *AzureManagedControlPlaneReconciler) SetupWithManager(ctx context.Co
 		).
 		// watch MachinePool resources
 		Watches(
-			&expv1.MachinePool{},
+			&clusterv1.MachinePool{},
 			handler.EnqueueRequestsFromMapFunc(azureManagedMachinePoolMapper),
 		).
-		Build(r)
-	if err != nil {
-		return errors.Wrap(err, "error creating controller")
-	}
-
-	// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
-	if err = c.Watch(
-		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
-		handler.EnqueueRequestsFromMapFunc(amcpr.ClusterToAzureManagedControlPlane),
-		ClusterPauseChangeAndInfrastructureReady(log),
-		predicates.ResourceHasFilterLabel(log, amcpr.WatchFilterValue),
-	); err != nil {
-		return errors.Wrap(err, "failed adding a watch for ready clusters")
-	}
-
-	return nil
+		// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
+		Watches(
+			&clusterv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(amcpr.ClusterToAzureManagedControlPlane),
+			builder.WithPredicates(
+				predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(mgr.GetScheme(), log),
+				predicates.ResourceHasFilterLabel(mgr.GetScheme(), log, amcpr.WatchFilterValue),
+			),
+		).
+		Complete(r)
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedcontrolplanes,verbs=get;list;watch;create;update;patch;delete
@@ -172,7 +166,7 @@ func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, 
 
 	for i, ammp := range ammpList.Items {
 		// Fetch the owner MachinePool.
-		ownerPool, err := capiexputil.GetOwnerMachinePool(ctx, amcpr.Client, ammp.ObjectMeta)
+		ownerPool, err := GetOwnerMachinePool(ctx, amcpr.Client, ammp.ObjectMeta)
 		if err != nil || ownerPool == nil {
 			return reconcile.Result{}, errors.Wrapf(err, "failed to fetch owner MachinePool for AzureManagedMachinePool: %s", ammp.Name)
 		}
@@ -189,6 +183,7 @@ func (amcpr *AzureManagedControlPlaneReconciler) Reconcile(ctx context.Context, 
 		ControlPlane:        azureControlPlane,
 		ManagedMachinePools: pools,
 		Timeouts:            amcpr.Timeouts,
+		CredentialCache:     amcpr.CredentialCache,
 	})
 	if err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to create scope")
@@ -283,7 +278,6 @@ func (amcpr *AzureManagedControlPlaneReconciler) reconcileNormal(ctx context.Con
 	return reconcile.Result{}, nil
 }
 
-//nolint:unparam // Always returns an empty struct for reconcile.Result
 func (amcpr *AzureManagedControlPlaneReconciler) reconcilePause(ctx context.Context, scope *scope.ManagedControlPlaneScope) (reconcile.Result, error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureManagedControlPlane.reconcilePause")
 	defer done()
@@ -348,8 +342,8 @@ func (amcpr *AzureManagedControlPlaneReconciler) ClusterToAzureManagedControlPla
 	}
 
 	controlPlaneRef := c.Spec.ControlPlaneRef
-	if controlPlaneRef != nil && controlPlaneRef.Kind == infrav1.AzureManagedControlPlaneKind {
-		return []ctrl.Request{{NamespacedName: client.ObjectKey{Namespace: controlPlaneRef.Namespace, Name: controlPlaneRef.Name}}}
+	if controlPlaneRef.IsDefined() && controlPlaneRef.Kind == infrav1.AzureManagedControlPlaneKind {
+		return []ctrl.Request{{NamespacedName: client.ObjectKey{Namespace: c.Namespace, Name: controlPlaneRef.Name}}}
 	}
 
 	return nil

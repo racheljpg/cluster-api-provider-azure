@@ -17,7 +17,6 @@ limitations under the License.
 package resourcehealth
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcehealth/armresourcehealth"
@@ -26,11 +25,12 @@ import (
 	"go.uber.org/mock/gomock"
 	utilfeature "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/ptr"
+	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourcehealth/mock_resourcehealth"
 	"sigs.k8s.io/cluster-api-provider-azure/feature"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
-	"sigs.k8s.io/cluster-api/util/conditions"
 )
 
 func TestReconcileResourceHealth(t *testing.T) {
@@ -89,7 +89,7 @@ func TestReconcileResourceHealth(t *testing.T) {
 					},
 				}, nil)
 				// ignore the above status
-				f.AvailabilityStatusFilter(gomock.Any()).Return(conditions.TrueCondition(infrav1.AzureResourceAvailableCondition))
+				f.AvailabilityStatusFilter(gomock.Any()).Return(v1beta1conditions.TrueCondition(infrav1.AzureResourceAvailableCondition))
 			},
 			expectedError: "",
 		},
@@ -125,9 +125,9 @@ func TestReconcileResourceHealth(t *testing.T) {
 				}{scopeMock, filtererMock}
 			}
 
-			defer utilfeature.SetFeatureGateDuringTest(t, feature.Gates, feature.AKSResourceHealth, !tc.featureDisabled)()
+			utilfeature.SetFeatureGateDuringTest(t, feature.Gates, feature.AKSResourceHealth, !tc.featureDisabled)
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())

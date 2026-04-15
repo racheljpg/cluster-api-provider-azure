@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path"
 	goruntime "runtime"
 	"sync"
@@ -30,9 +29,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	pkgerrors "github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -42,11 +45,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	testexec "sigs.k8s.io/cluster-api/test/framework/exec"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework/internal/log"
 	"sigs.k8s.io/cluster-api/test/infrastructure/container"
+	"sigs.k8s.io/cluster-api/util/yaml"
 )
 
 const (
@@ -89,8 +91,12 @@ type ClusterProxy interface {
 	// GetLogCollector returns the machine log collector for the Kubernetes cluster.
 	GetLogCollector() ClusterLogCollector
 
-	// Apply to apply YAML to the Kubernetes cluster, `kubectl apply`.
-	Apply(ctx context.Context, resources []byte, args ...string) error
+	// Create creates objects using the clusterProxy client.
+	// It will return an error if any object already exists.
+	Create(ctx context.Context, resources []byte, options ...CreateOption) error
+
+	// CreateOrUpdate creates or updates objects using the clusterProxy client
+	CreateOrUpdate(ctx context.Context, resources []byte, options ...CreateOrUpdateOption) error
 
 	// GetWorkloadCluster returns a proxy to a workload cluster defined in the Kubernetes cluster.
 	GetWorkloadCluster(ctx context.Context, namespace, name string, options ...Option) ClusterProxy
@@ -103,12 +109,82 @@ type ClusterProxy interface {
 	Dispose(context.Context)
 }
 
+// createConfig contains options for use with Create.
+type createConfig struct {
+	labelSelector             labels.Selector
+	createOpts                []client.CreateOption
+	pollTimeout, pollInterval time.Duration
+}
+
+// CreateOption is a configuration option supplied to Create.
+type CreateOption func(*createConfig)
+
+// CreateWithLabelSelector allows definition of the LabelSelector to be used in Create.
+func CreateWithLabelSelector(labelSelector labels.Selector) CreateOption {
+	return func(c *createConfig) {
+		c.labelSelector = labelSelector
+	}
+}
+
+// CreateWithCreateOpts allows definition of the Create options to be used in resource Create.
+func CreateWithCreateOpts(createOpts ...client.CreateOption) CreateOption {
+	return func(c *createConfig) {
+		c.createOpts = createOpts
+	}
+}
+
+// CreateWithPolling enables retries over the specified interval.
+func CreateWithPolling(pollTimeout, pollInterval time.Duration) CreateOption {
+	return func(c *createConfig) {
+		c.pollTimeout = pollTimeout
+		c.pollInterval = pollInterval
+	}
+}
+
+// createOrUpdateConfig contains options for use with CreateOrUpdate.
+type createOrUpdateConfig struct {
+	createConfig
+	updateOpts []client.UpdateOption
+}
+
+// CreateOrUpdateOption is a configuration option supplied to CreateOrUpdate.
+type CreateOrUpdateOption func(*createOrUpdateConfig)
+
+// WithLabelSelector allows definition of the LabelSelector to be used in CreateOrUpdate.
+func WithLabelSelector(labelSelector labels.Selector) CreateOrUpdateOption {
+	return func(c *createOrUpdateConfig) {
+		c.labelSelector = labelSelector
+	}
+}
+
+// WithCreateOpts allows definition of the Create options to be used in resource Create.
+func WithCreateOpts(createOpts ...client.CreateOption) CreateOrUpdateOption {
+	return func(c *createOrUpdateConfig) {
+		c.createOpts = createOpts
+	}
+}
+
+// WithUpdateOpts allows definition of the Update options to be used in resource Update.
+func WithUpdateOpts(updateOpts ...client.UpdateOption) CreateOrUpdateOption {
+	return func(c *createOrUpdateConfig) {
+		c.updateOpts = updateOpts
+	}
+}
+
+// WithPolling enables retries over the specified interval.
+func WithPolling(pollTimeout, pollInterval time.Duration) CreateOrUpdateOption {
+	return func(c *createOrUpdateConfig) {
+		c.pollTimeout = pollTimeout
+		c.pollInterval = pollInterval
+	}
+}
+
 // ClusterLogCollector defines an object that can collect logs from a machine.
 type ClusterLogCollector interface {
 	// CollectMachineLog collects log from a machine.
 	// TODO: describe output folder struct
 	CollectMachineLog(ctx context.Context, managementClusterClient client.Client, m *clusterv1.Machine, outputPath string) error
-	CollectMachinePoolLog(ctx context.Context, managementClusterClient client.Client, m *expv1.MachinePool, outputPath string) error
+	CollectMachinePoolLog(ctx context.Context, managementClusterClient client.Client, m *clusterv1.MachinePool, outputPath string) error
 	// CollectInfrastructureLogs collects log from the infrastructure.
 	CollectInfrastructureLogs(ctx context.Context, managementClusterClient client.Client, c *clusterv1.Cluster, outputPath string) error
 }
@@ -123,6 +199,22 @@ func WithMachineLogCollector(logCollector ClusterLogCollector) Option {
 	}
 }
 
+// WithRESTConfigModifier allows to modify the rest config in GetRESTConfig.
+// Using this function it is possible to create ClusterProxy that can work with workload clusters hosted in places
+// not directly accessible from the machine where we run the E2E tests, e.g. inside kind.
+func WithRESTConfigModifier(f func(*rest.Config)) Option {
+	return func(c *clusterProxy) {
+		c.restConfigModifier = f
+	}
+}
+
+// WithCacheOptionsModifier allows to modify the options passed to cache.New the first time it's created.
+func WithCacheOptionsModifier(f func(*cache.Options)) Option {
+	return func(c *clusterProxy) {
+		c.cacheOptionsModifier = f
+	}
+}
+
 // clusterProxy provides a base implementation of the ClusterProxy interface.
 type clusterProxy struct {
 	name                    string
@@ -132,15 +224,20 @@ type clusterProxy struct {
 	logCollector            ClusterLogCollector
 	cache                   cache.Cache
 	onceCache               sync.Once
+
+	restConfigModifier   func(*rest.Config)
+	cacheOptionsModifier func(*cache.Options)
 }
 
 // NewClusterProxy returns a clusterProxy given a KubeconfigPath and the scheme defining the types hosted in the cluster.
-// If a kubeconfig file isn't provided, standard kubeconfig locations will be used (kubectl loading rules apply).
+// If a kubeconfig file isn't provided, standard kubeconfig locations will be used (first with in-cluster, then kubectl loading rules apply).
 func NewClusterProxy(name string, kubeconfigPath string, scheme *runtime.Scheme, options ...Option) ClusterProxy {
 	Expect(scheme).NotTo(BeNil(), "scheme is required for NewClusterProxy")
 
 	if kubeconfigPath == "" {
-		kubeconfigPath = clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
+		if _, err := rest.InClusterConfig(); err != nil {
+			kubeconfigPath = clientcmd.NewDefaultClientConfigLoadingRules().GetDefaultFilename()
+		}
 	}
 
 	proxy := &clusterProxy{
@@ -226,11 +323,16 @@ func (p *clusterProxy) GetClientSet() *kubernetes.Clientset {
 
 func (p *clusterProxy) GetCache(ctx context.Context) cache.Cache {
 	p.onceCache.Do(func() {
-		var err error
-		p.cache, err = cache.New(p.GetRESTConfig(), cache.Options{
+		opts := &cache.Options{
 			Scheme: p.scheme,
 			Mapper: p.GetClient().RESTMapper(),
-		})
+		}
+		if p.cacheOptionsModifier != nil {
+			p.cacheOptionsModifier(opts)
+		}
+
+		var err error
+		p.cache, err = cache.New(p.GetRESTConfig(), *opts)
 		Expect(err).ToNot(HaveOccurred(), "Failed to create controller-runtime cache")
 
 		go func() {
@@ -247,30 +349,157 @@ func (p *clusterProxy) GetCache(ctx context.Context) cache.Cache {
 	return p.cache
 }
 
-// Apply wraps `kubectl apply ...` and prints the output so we can see what gets applied to the cluster.
-func (p *clusterProxy) Apply(ctx context.Context, resources []byte, args ...string) error {
-	Expect(ctx).NotTo(BeNil(), "ctx is required for Apply")
-	Expect(resources).NotTo(BeNil(), "resources is required for Apply")
-
-	if err := testexec.KubectlApply(ctx, p.kubeconfigPath, resources, args...); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return pkgerrors.New(fmt.Sprintf("%s: stderr: %s", err.Error(), exitErr.Stderr))
-		}
+// Create creates objects using the clusterProxy client.
+// It will return an error if any object already exists.
+// Defaults to use FieldValidation: strict, which can be overwritten with CreateOptions.
+func (p *clusterProxy) Create(ctx context.Context, resources []byte, opts ...CreateOption) error {
+	Expect(ctx).NotTo(BeNil(), "ctx is required for CreateOrUpdate")
+	Expect(resources).NotTo(BeNil(), "resources is required for CreateOrUpdate")
+	labelSelector := labels.Everything()
+	config := &createConfig{}
+	for _, opt := range opts {
+		opt(config)
+	}
+	if config.labelSelector != nil {
+		labelSelector = config.labelSelector
+	}
+	// Prepending field validation strict so that it is used per default, but can still be overwritten.
+	config.createOpts = append([]client.CreateOption{client.FieldValidation("Strict")}, config.createOpts...)
+	objs, err := yaml.ToUnstructured(resources)
+	if err != nil {
 		return err
 	}
 
-	return nil
+	retryDisabled := config.pollTimeout == 0 && config.pollInterval == 0
+	var retErrs []error
+	for _, o := range objs {
+		labels := labels.Set(o.GetLabels())
+		if labelSelector.Matches(labels) {
+			var err error
+			if retryDisabled {
+				err = p.GetClient().Create(ctx, &o, config.createOpts...)
+			} else {
+				err = wait.PollUntilContextTimeout(ctx, config.pollInterval, config.pollTimeout, true /*immediate*/, func(ctx context.Context) (bool, error) {
+					if err := p.GetClient().Create(ctx, &o, config.createOpts...); err != nil {
+						if apierrors.IsAlreadyExists(err) {
+							// Retrying won't help. Abort early.
+							return false, fmt.Errorf("create %s %s %s: %v", o.GetAPIVersion(), o.GetKind(), klog.KObj(&o), err)
+						}
+						log.Logf("error creating %s %s %s, will retry: %v", o.GetAPIVersion(), o.GetKind(), klog.KObj(&o), err)
+						return false, nil
+					}
+					return true, nil
+				})
+			}
+			if err != nil {
+				retErrs = append(retErrs, err)
+			}
+		}
+	}
+	return kerrors.NewAggregate(retErrs)
+}
+
+// CreateOrUpdate creates or updates objects using the clusterProxy client.
+// Defaults to use FieldValidation: strict, which can be overwritten with CreateOrUpdateOptions.
+func (p *clusterProxy) CreateOrUpdate(ctx context.Context, resources []byte, opts ...CreateOrUpdateOption) error {
+	Expect(ctx).NotTo(BeNil(), "ctx is required for CreateOrUpdate")
+	Expect(resources).NotTo(BeNil(), "resources is required for CreateOrUpdate")
+	labelSelector := labels.Everything()
+	config := &createOrUpdateConfig{}
+	for _, opt := range opts {
+		opt(config)
+	}
+	if config.labelSelector != nil {
+		labelSelector = config.labelSelector
+	}
+	// Prepending field validation strict so that it is used per default, but can still be overwritten.
+	config.createOpts = append([]client.CreateOption{client.FieldValidation("Strict")}, config.createOpts...)
+	config.updateOpts = append([]client.UpdateOption{client.FieldValidation("Strict")}, config.updateOpts...)
+	objs, err := yaml.ToUnstructured(resources)
+	if err != nil {
+		return err
+	}
+
+	retryDisabled := config.pollTimeout == 0 && config.pollInterval == 0
+	existingObject := &unstructured.Unstructured{}
+	var retErrs []error
+	for _, o := range objs {
+		objectKey := types.NamespacedName{
+			Name:      o.GetName(),
+			Namespace: o.GetNamespace(),
+		}
+		existingObject.SetAPIVersion(o.GetAPIVersion())
+		existingObject.SetKind(o.GetKind())
+		labels := labels.Set(o.GetLabels())
+		if labelSelector.Matches(labels) {
+			if err := p.GetClient().Get(ctx, objectKey, existingObject); err != nil {
+				// Expected error -- if the object does not exist, create it
+				if apierrors.IsNotFound(err) {
+					var err error
+					if retryDisabled {
+						err = p.GetClient().Create(ctx, &o, config.createOpts...)
+					} else {
+						err = wait.PollUntilContextTimeout(ctx, config.pollInterval, config.pollTimeout, true /*immediate*/, func(ctx context.Context) (bool, error) {
+							if err := p.GetClient().Create(ctx, &o, config.createOpts...); err != nil {
+								if apierrors.IsAlreadyExists(err) {
+									// Retrying won't help. Abort early.
+									return false, fmt.Errorf("create %s %s %s: %v", o.GetAPIVersion(), o.GetKind(), klog.KObj(&o), err)
+								}
+								log.Logf("error creating %s %s %s, will retry: %v", o.GetAPIVersion(), o.GetKind(), klog.KObj(&o), err)
+								return false, nil
+							}
+							return true, nil
+						})
+					}
+					if err != nil {
+						retErrs = append(retErrs, err)
+					}
+				} else {
+					retErrs = append(retErrs, err)
+				}
+			} else {
+				o.SetResourceVersion(existingObject.GetResourceVersion())
+				var err error
+				if retryDisabled {
+					err = p.GetClient().Update(ctx, &o, config.updateOpts...)
+				} else {
+					err = wait.PollUntilContextTimeout(ctx, config.pollInterval, config.pollTimeout, true /*immediate*/, func(ctx context.Context) (bool, error) {
+						if err := p.GetClient().Update(ctx, &o, config.updateOpts...); err != nil {
+							log.Logf("error creating %s %s %s, will retry: %v", o.GetAPIVersion(), o.GetKind(), klog.KObj(&o), err)
+							return false, nil
+						}
+						return true, nil
+					})
+				}
+				if err != nil {
+					retErrs = append(retErrs, err)
+				}
+			}
+		}
+	}
+	return kerrors.NewAggregate(retErrs)
 }
 
 func (p *clusterProxy) GetRESTConfig() *rest.Config {
-	config, err := clientcmd.LoadFromFile(p.kubeconfigPath)
-	Expect(err).ToNot(HaveOccurred(), "Failed to load Kubeconfig file from %q", p.kubeconfigPath)
+	var restConfig *rest.Config
+	var err error
+	if p.kubeconfigPath == "" {
+		restConfig, err = rest.InClusterConfig()
+		Expect(err).NotTo(HaveOccurred(), "Failed to get in-cluster config")
+	} else {
+		config, err := clientcmd.LoadFromFile(p.kubeconfigPath)
+		Expect(err).ToNot(HaveOccurred(), "Failed to load Kubeconfig file from %q", p.kubeconfigPath)
 
-	restConfig, err := clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
-	Expect(err).ToNot(HaveOccurred(), "Failed to get ClientConfig from %q", p.kubeconfigPath)
+		restConfig, err = clientcmd.NewDefaultClientConfig(*config, &clientcmd.ConfigOverrides{}).ClientConfig()
+		Expect(err).ToNot(HaveOccurred(), "Failed to get ClientConfig from %q", p.kubeconfigPath)
+	}
 
 	restConfig.UserAgent = "cluster-api-e2e"
+
+	if p.restConfigModifier != nil {
+		p.restConfigModifier(restConfig)
+	}
+
 	return restConfig
 }
 
@@ -287,9 +516,9 @@ func (p *clusterProxy) GetWorkloadCluster(ctx context.Context, namespace, name s
 	// gets the kubeconfig from the cluster
 	config := p.getKubeconfig(ctx, namespace, name)
 
-	// if we are on mac and the cluster is a DockerCluster, it is required to fix the control plane address
+	// if we are on mac or Windows Subsystem for Linux (WSL), and the cluster is a DockerCluster, it is required to fix the control plane address
 	// by using localhost:load-balancer-host-port instead of the address used in the docker network.
-	if goruntime.GOOS == "darwin" && p.isDockerCluster(ctx, namespace, name) {
+	if (goruntime.GOOS == "darwin" || os.Getenv("WSL_DISTRO_NAME") != "") && p.isDockerCluster(ctx, namespace, name) {
 		p.fixConfig(ctx, name, config)
 	}
 
@@ -319,7 +548,7 @@ func (p *clusterProxy) CollectWorkloadClusterLogs(ctx context.Context, namespace
 		}
 	}
 
-	var machinePools *expv1.MachinePoolList
+	var machinePools *clusterv1.MachinePoolList
 	Eventually(func() error {
 		var err error
 		machinePools, err = getMachinePoolsInCluster(ctx, p.GetClient(), namespace, name)
@@ -367,12 +596,12 @@ func getMachinesInCluster(ctx context.Context, c client.Client, namespace, name 
 	return machineList, nil
 }
 
-func getMachinePoolsInCluster(ctx context.Context, c client.Client, namespace, name string) (*expv1.MachinePoolList, error) {
+func getMachinePoolsInCluster(ctx context.Context, c client.Client, namespace, name string) (*clusterv1.MachinePoolList, error) {
 	if name == "" {
 		return nil, errors.New("cluster name should not be empty")
 	}
 
-	machinePoolList := &expv1.MachinePoolList{}
+	machinePoolList := &clusterv1.MachinePoolList{}
 	labels := map[string]string{clusterv1.ClusterNameLabel: name}
 	if err := c.List(ctx, machinePoolList, client.InNamespace(namespace), client.MatchingLabels(labels)); err != nil {
 		return nil, err
@@ -412,7 +641,7 @@ func (p *clusterProxy) isDockerCluster(ctx context.Context, namespace string, na
 		return cl.Get(ctx, key, cluster)
 	}, retryableOperationTimeout, retryableOperationInterval).Should(Succeed(), "Failed to get %s", key)
 
-	return cluster.Spec.InfrastructureRef.Kind == "DockerCluster"
+	return cluster.Spec.InfrastructureRef.IsDefined() && cluster.Spec.InfrastructureRef.Kind == "DockerCluster"
 }
 
 func (p *clusterProxy) fixConfig(ctx context.Context, name string, config *api.Config) {

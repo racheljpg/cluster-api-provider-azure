@@ -33,11 +33,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/node"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/test/framework/kubetest"
 	"sigs.k8s.io/cluster-api/util"
+
+	"sigs.k8s.io/cluster-api-provider-azure/test/e2e/kubernetes/node"
 )
 
 var _ = Describe("Conformance Tests", func() {
@@ -76,23 +77,9 @@ var _ = Describe("Conformance Tests", func() {
 
 		result = new(clusterctl.ApplyClusterTemplateAndWaitResult)
 
-		spClientSecret := os.Getenv(AzureClientSecret)
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "cluster-identity-secret",
-				Namespace: namespace.Name,
-			},
-			Type: corev1.SecretTypeOpaque,
-			Data: map[string][]byte{"clientSecret": []byte(spClientSecret)},
-		}
-		err = bootstrapClusterProxy.GetClient().Create(ctx, secret)
-		Expect(err).NotTo(HaveOccurred())
-
-		identityName := e2eConfig.GetVariable(ClusterIdentityName)
+		identityName := e2eConfig.MustGetVariable(ClusterIdentityName)
 		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
 		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).To(Succeed())
-		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).To(Succeed())
-		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).To(Succeed())
 	})
 
 	It(specName, func() {
@@ -101,8 +88,8 @@ var _ = Describe("Conformance Tests", func() {
 
 		var err error
 
-		kubernetesVersion := e2eConfig.GetVariable(capi_e2e.KubernetesVersion)
-		flavor := e2eConfig.GetVariable("CONFORMANCE_FLAVOR")
+		kubernetesVersion := e2eConfig.MustGetVariable(capi_e2e.KubernetesVersion)
+		flavor := e2eConfig.MustGetVariable("CONFORMANCE_FLAVOR")
 
 		// clusters with CI artifacts or PR artifacts are based on a known CI version
 		// PR artifacts will replace the CI artifacts during kubeadm init
@@ -111,21 +98,22 @@ var _ = Describe("Conformance Tests", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(os.Setenv("CI_VERSION", kubernetesVersion)).To(Succeed())
 			Expect(os.Setenv("CLOUD_PROVIDER_AZURE_LABEL", "azure-ci")).To(Succeed())
+		}
 
+		if flavor == "" {
 			if useCIArtifacts {
 				flavor = "conformance-ci-artifacts"
 			} else if usePRArtifacts {
 				flavor = "conformance-presubmit-artifacts"
 			}
-		}
-
-		// use the ipv6 flavor if ipv6 IP family is specified.
-		if e2eConfig.GetVariable(capi_e2e.IPFamily) == "IPv6" {
-			flavor += "-ipv6"
-			kubetestConfigFilePath = strings.Replace(kubetestConfigFilePath, ".yaml", "-ipv6.yaml", 1)
-		} else if e2eConfig.GetVariable(capi_e2e.IPFamily) == "dual" {
-			flavor += "-dual-stack"
-			kubetestConfigFilePath = strings.Replace(kubetestConfigFilePath, ".yaml", "-dual-stack.yaml", 1)
+			// use the ipv6 flavor if ipv6 IP family is specified.
+			if e2eConfig.MustGetVariable(capi_e2e.IPFamily) == "ipv6" {
+				flavor += "-ipv6"
+				kubetestConfigFilePath = strings.Replace(kubetestConfigFilePath, ".yaml", "-ipv6.yaml", 1)
+			} else if e2eConfig.MustGetVariable(capi_e2e.IPFamily) == "dual" {
+				flavor += "-dual-stack"
+				kubetestConfigFilePath = strings.Replace(kubetestConfigFilePath, ".yaml", "-dual-stack.yaml", 1)
+			}
 		}
 
 		// Starting with Kubernetes v1.25, the kubetest config file needs to be compatible with Ginkgo V2.
@@ -139,7 +127,7 @@ var _ = Describe("Conformance Tests", func() {
 
 		// Set the worker counts for conformance tests that use Windows
 		// This is a work around until we can update cluster-api test framework to be aware of windows node counts.
-		conformanceNodeCount := e2eConfig.GetVariable("CONFORMANCE_WORKER_MACHINE_COUNT")
+		conformanceNodeCount := e2eConfig.MustGetVariable("CONFORMANCE_WORKER_MACHINE_COUNT")
 		numOfConformanceNodes, err := strconv.ParseInt(conformanceNodeCount, 10, 64)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -152,7 +140,7 @@ var _ = Describe("Conformance Tests", func() {
 			linuxWorkerMachineCount = 0
 		}
 
-		controlPlaneMachineCount, err := strconv.ParseInt(e2eConfig.GetVariable("CONFORMANCE_CONTROL_PLANE_MACHINE_COUNT"), 10, 64)
+		controlPlaneMachineCount, err := strconv.ParseInt(e2eConfig.MustGetVariable("CONFORMANCE_CONTROL_PLANE_MACHINE_COUNT"), 10, 64)
 		Expect(err).NotTo(HaveOccurred())
 
 		stopwatch := experiment.NewStopwatch()
@@ -165,7 +153,7 @@ var _ = Describe("Conformance Tests", func() {
 			withControlPlaneMachineCount(controlPlaneMachineCount),
 			withWorkerMachineCount(linuxWorkerMachineCount),
 			withControlPlaneWaiters(clusterctl.ControlPlaneWaiters{
-				WaitForControlPlaneInitialized: EnsureControlPlaneInitializedNoAddons,
+				WaitForControlPlaneInitialized: EnsureControlPlaneInitialized,
 			}),
 		), result)
 		stopwatch.Record("cluster creation")
@@ -204,7 +192,7 @@ var _ = Describe("Conformance Tests", func() {
 			fmt.Fprintf(GinkgoWriter, "INFO: Using repo-list '%s' for version '%s'\n", repoList, kubernetesVersion)
 		}
 
-		ginkgoNodes, err := strconv.Atoi(e2eConfig.GetVariable("CONFORMANCE_NODES"))
+		ginkgoNodes, err := strconv.Atoi(e2eConfig.MustGetVariable("CONFORMANCE_NODES"))
 		Expect(err).NotTo(HaveOccurred())
 
 		stopwatch.Reset()
@@ -214,7 +202,7 @@ var _ = Describe("Conformance Tests", func() {
 				NumberOfNodes:        int(numOfConformanceNodes),
 				ConfigFilePath:       kubetestConfigFilePath,
 				KubeTestRepoListPath: repoList,
-				ConformanceImage:     e2eConfig.GetVariable("CONFORMANCE_IMAGE"),
+				ConformanceImage:     e2eConfig.MustGetVariable("CONFORMANCE_IMAGE"),
 				GinkgoNodes:          ginkgoNodes,
 			},
 		)

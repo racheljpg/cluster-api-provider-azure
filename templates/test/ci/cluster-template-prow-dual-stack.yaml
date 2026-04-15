@@ -69,8 +69,7 @@ spec:
   kubeadmConfigSpec:
     clusterConfiguration:
       apiServer:
-        extraArgs:
-          cloud-provider: external
+        extraArgs: {}
         timeoutForControlPlane: 20m
       controllerManager:
         extraArgs:
@@ -130,6 +129,7 @@ spec:
       - /var/lib/etcddisk
     postKubeadmCommands: []
     preKubeadmCommands: []
+    verbosity: 10
   machineTemplate:
     infrastructureRef:
       apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -157,7 +157,7 @@ spec:
         osType: Linux
       sshPublicKey: ${AZURE_SSH_PUBLIC_KEY_B64:=""}
       userAssignedIdentities:
-      - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG:=capz-ci}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY:=cloud-provider-user-identity}
+      - providerID: azure:///subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG:=capz-ci}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY:=cloud-provider-user-identity}
       vmSize: ${AZURE_CONTROL_PLANE_MACHINE_TYPE}
 ---
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
@@ -169,12 +169,9 @@ metadata:
   namespace: default
 spec:
   allowedNamespaces: {}
-  clientID: ${AZURE_CLIENT_ID}
-  clientSecret:
-    name: ${AZURE_CLUSTER_IDENTITY_SECRET_NAME}
-    namespace: ${AZURE_CLUSTER_IDENTITY_SECRET_NAMESPACE}
+  clientID: ${AZURE_CLIENT_ID_USER_ASSIGNED_IDENTITY}
   tenantID: ${AZURE_TENANT_ID}
-  type: ServicePrincipal
+  type: ${CLUSTER_IDENTITY_TYPE:=WorkloadIdentity}
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachineDeployment
@@ -217,7 +214,7 @@ spec:
         osType: Linux
       sshPublicKey: ${AZURE_SSH_PUBLIC_KEY_B64:=""}
       userAssignedIdentities:
-      - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG:=capz-ci}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY:=cloud-provider-user-identity}
+      - providerID: azure:///subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${CI_RG:=capz-ci}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_IDENTITY:=cloud-provider-user-identity}
       vmSize: ${AZURE_NODE_MACHINE_TYPE}
 ---
 apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
@@ -241,6 +238,25 @@ spec:
           kubeletExtraArgs:
             cloud-provider: external
           name: '{{ ds.meta_data["local_hostname"] }}'
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineHealthCheck
+metadata:
+  name: ${CLUSTER_NAME}-control-plane
+  namespace: default
+spec:
+  clusterName: ${CLUSTER_NAME}
+  maxUnhealthy: 100%
+  selector:
+    matchLabels:
+      cluster.x-k8s.io/control-plane: ""
+  unhealthyConditions:
+  - status: Unknown
+    timeout: 300s
+    type: Ready
+  - status: "False"
+    timeout: 300s
+    type: Ready
 ---
 apiVersion: cluster.x-k8s.io/v1beta1
 kind: MachinePool
@@ -340,13 +356,50 @@ spec:
           encapsulation: None
           natOutgoing: Enabled
           nodeSelector: all()
-      registry: mcr.microsoft.com/oss
+      typhaDeployment:
+        spec:
+          template:
+            spec:
+              # By default, typha tolerates all NoSchedule taints. This breaks
+              # scale-ins when it continuously gets scheduled onto an
+              # out-of-date Node that is being deleted. Tolerate only the
+              # NoSchedule taints that are expected.
+              tolerations:
+                - effect: NoExecute
+                  operator: Exists
+                - effect: NoSchedule
+                  key: node-role.kubernetes.io/control-plane
+                  operator: Exists
+                - effect: NoSchedule
+                  key: node.kubernetes.io/not-ready
+                  operator: Exists
+              affinity:
+                nodeAffinity:
+                  preferredDuringSchedulingIgnoredDuringExecution:
+                  - weight: 50
+                    preference:
+                      matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: Exists
+      registry: capzcicommunity.azurecr.io
     # Image and registry configuration for the tigera/operator pod.
     tigeraOperator:
       image: tigera/operator
-      registry: mcr.microsoft.com/oss
+      registry: capzcicommunity.azurecr.io
     calicoctl:
-      image: mcr.microsoft.com/oss/calico/ctl
+      image: capzcicommunity.azurecr.io/calico/ctl
+    # By default, tigera tolerates all NoSchedule taints. This breaks upgrades
+    # when it continuously gets scheduled onto an out-of-date Node that is being
+    # deleted. Tolerate only the NoSchedule taints that are expected.
+    tolerations:
+      - effect: NoExecute
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+        operator: Exists
+      - effect: NoSchedule
+        key: node.kubernetes.io/not-ready
+        operator: Exists
   version: ${CALICO_VERSION}
 ---
 apiVersion: addons.cluster.x-k8s.io/v1alpha1

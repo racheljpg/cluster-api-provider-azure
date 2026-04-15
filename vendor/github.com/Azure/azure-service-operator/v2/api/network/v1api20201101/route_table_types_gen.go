@@ -5,16 +5,17 @@ package v1api20201101
 
 import (
 	"fmt"
-	v20201101s "github.com/Azure/azure-service-operator/v2/api/network/v1api20201101/storage"
-	"github.com/Azure/azure-service-operator/v2/internal/reflecthelpers"
+	arm "github.com/Azure/azure-service-operator/v2/api/network/v1api20201101/arm"
+	storage "github.com/Azure/azure-service-operator/v2/api/network/v1api20201101/storage"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime/conditions"
-	"github.com/pkg/errors"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime/configmaps"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime/core"
+	"github.com/Azure/azure-service-operator/v2/pkg/genruntime/secrets"
+	"github.com/rotisserie/eris"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/conversion"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // +kubebuilder:object:root=true
@@ -49,56 +50,56 @@ var _ conversion.Convertible = &RouteTable{}
 
 // ConvertFrom populates our RouteTable from the provided hub RouteTable
 func (table *RouteTable) ConvertFrom(hub conversion.Hub) error {
-	source, ok := hub.(*v20201101s.RouteTable)
-	if !ok {
-		return fmt.Errorf("expected network/v1api20201101/storage/RouteTable but received %T instead", hub)
+	// intermediate variable for conversion
+	var source storage.RouteTable
+
+	err := source.ConvertFrom(hub)
+	if err != nil {
+		return eris.Wrap(err, "converting from hub to source")
 	}
 
-	return table.AssignProperties_From_RouteTable(source)
+	err = table.AssignProperties_From_RouteTable(&source)
+	if err != nil {
+		return eris.Wrap(err, "converting from source to table")
+	}
+
+	return nil
 }
 
 // ConvertTo populates the provided hub RouteTable from our RouteTable
 func (table *RouteTable) ConvertTo(hub conversion.Hub) error {
-	destination, ok := hub.(*v20201101s.RouteTable)
-	if !ok {
-		return fmt.Errorf("expected network/v1api20201101/storage/RouteTable but received %T instead", hub)
+	// intermediate variable for conversion
+	var destination storage.RouteTable
+	err := table.AssignProperties_To_RouteTable(&destination)
+	if err != nil {
+		return eris.Wrap(err, "converting to destination from table")
+	}
+	err = destination.ConvertTo(hub)
+	if err != nil {
+		return eris.Wrap(err, "converting from destination to hub")
 	}
 
-	return table.AssignProperties_To_RouteTable(destination)
+	return nil
 }
 
-// +kubebuilder:webhook:path=/mutate-network-azure-com-v1api20201101-routetable,mutating=true,sideEffects=None,matchPolicy=Exact,failurePolicy=fail,groups=network.azure.com,resources=routetables,verbs=create;update,versions=v1api20201101,name=default.v1api20201101.routetables.network.azure.com,admissionReviewVersions=v1
+var _ configmaps.Exporter = &RouteTable{}
 
-var _ admission.Defaulter = &RouteTable{}
-
-// Default applies defaults to the RouteTable resource
-func (table *RouteTable) Default() {
-	table.defaultImpl()
-	var temp any = table
-	if runtimeDefaulter, ok := temp.(genruntime.Defaulter); ok {
-		runtimeDefaulter.CustomDefault()
+// ConfigMapDestinationExpressions returns the Spec.OperatorSpec.ConfigMapExpressions property
+func (table *RouteTable) ConfigMapDestinationExpressions() []*core.DestinationExpression {
+	if table.Spec.OperatorSpec == nil {
+		return nil
 	}
+	return table.Spec.OperatorSpec.ConfigMapExpressions
 }
 
-// defaultAzureName defaults the Azure name of the resource to the Kubernetes name
-func (table *RouteTable) defaultAzureName() {
-	if table.Spec.AzureName == "" {
-		table.Spec.AzureName = table.Name
+var _ secrets.Exporter = &RouteTable{}
+
+// SecretDestinationExpressions returns the Spec.OperatorSpec.SecretExpressions property
+func (table *RouteTable) SecretDestinationExpressions() []*core.DestinationExpression {
+	if table.Spec.OperatorSpec == nil {
+		return nil
 	}
-}
-
-// defaultImpl applies the code generated defaults to the RouteTable resource
-func (table *RouteTable) defaultImpl() { table.defaultAzureName() }
-
-var _ genruntime.ImportableResource = &RouteTable{}
-
-// InitializeSpec initializes the spec for this resource from the given status
-func (table *RouteTable) InitializeSpec(status genruntime.ConvertibleStatus) error {
-	if s, ok := status.(*RouteTable_STATUS); ok {
-		return table.Spec.Initialize_From_RouteTable_STATUS(s)
-	}
-
-	return fmt.Errorf("expected Status of type RouteTable_STATUS but received %T instead", status)
+	return table.Spec.OperatorSpec.SecretExpressions
 }
 
 var _ genruntime.KubernetesResource = &RouteTable{}
@@ -110,7 +111,7 @@ func (table *RouteTable) AzureName() string {
 
 // GetAPIVersion returns the ARM API version of the resource. This is always "2020-11-01"
 func (table RouteTable) GetAPIVersion() string {
-	return string(APIVersion_Value)
+	return "2020-11-01"
 }
 
 // GetResourceScope returns the scope of the resource
@@ -149,6 +150,10 @@ func (table *RouteTable) NewEmptyStatus() genruntime.ConvertibleStatus {
 
 // Owner returns the ResourceReference of the owner
 func (table *RouteTable) Owner() *genruntime.ResourceReference {
+	if table.Spec.Owner == nil {
+		return nil
+	}
+
 	group, kind := genruntime.LookupOwnerGroupKind(table.Spec)
 	return table.Spec.Owner.AsResourceReference(group, kind)
 }
@@ -165,96 +170,15 @@ func (table *RouteTable) SetStatus(status genruntime.ConvertibleStatus) error {
 	var st RouteTable_STATUS
 	err := status.ConvertStatusTo(&st)
 	if err != nil {
-		return errors.Wrap(err, "failed to convert status")
+		return eris.Wrap(err, "failed to convert status")
 	}
 
 	table.Status = st
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-network-azure-com-v1api20201101-routetable,mutating=false,sideEffects=None,matchPolicy=Exact,failurePolicy=fail,groups=network.azure.com,resources=routetables,verbs=create;update,versions=v1api20201101,name=validate.v1api20201101.routetables.network.azure.com,admissionReviewVersions=v1
-
-var _ admission.Validator = &RouteTable{}
-
-// ValidateCreate validates the creation of the resource
-func (table *RouteTable) ValidateCreate() (admission.Warnings, error) {
-	validations := table.createValidations()
-	var temp any = table
-	if runtimeValidator, ok := temp.(genruntime.Validator); ok {
-		validations = append(validations, runtimeValidator.CreateValidations()...)
-	}
-	return genruntime.ValidateCreate(validations)
-}
-
-// ValidateDelete validates the deletion of the resource
-func (table *RouteTable) ValidateDelete() (admission.Warnings, error) {
-	validations := table.deleteValidations()
-	var temp any = table
-	if runtimeValidator, ok := temp.(genruntime.Validator); ok {
-		validations = append(validations, runtimeValidator.DeleteValidations()...)
-	}
-	return genruntime.ValidateDelete(validations)
-}
-
-// ValidateUpdate validates an update of the resource
-func (table *RouteTable) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	validations := table.updateValidations()
-	var temp any = table
-	if runtimeValidator, ok := temp.(genruntime.Validator); ok {
-		validations = append(validations, runtimeValidator.UpdateValidations()...)
-	}
-	return genruntime.ValidateUpdate(old, validations)
-}
-
-// createValidations validates the creation of the resource
-func (table *RouteTable) createValidations() []func() (admission.Warnings, error) {
-	return []func() (admission.Warnings, error){table.validateResourceReferences, table.validateOwnerReference}
-}
-
-// deleteValidations validates the deletion of the resource
-func (table *RouteTable) deleteValidations() []func() (admission.Warnings, error) {
-	return nil
-}
-
-// updateValidations validates the update of the resource
-func (table *RouteTable) updateValidations() []func(old runtime.Object) (admission.Warnings, error) {
-	return []func(old runtime.Object) (admission.Warnings, error){
-		func(old runtime.Object) (admission.Warnings, error) {
-			return table.validateResourceReferences()
-		},
-		table.validateWriteOnceProperties,
-		func(old runtime.Object) (admission.Warnings, error) {
-			return table.validateOwnerReference()
-		},
-	}
-}
-
-// validateOwnerReference validates the owner field
-func (table *RouteTable) validateOwnerReference() (admission.Warnings, error) {
-	return genruntime.ValidateOwner(table)
-}
-
-// validateResourceReferences validates all resource references
-func (table *RouteTable) validateResourceReferences() (admission.Warnings, error) {
-	refs, err := reflecthelpers.FindResourceReferences(&table.Spec)
-	if err != nil {
-		return nil, err
-	}
-	return genruntime.ValidateResourceReferences(refs)
-}
-
-// validateWriteOnceProperties validates all WriteOnce properties
-func (table *RouteTable) validateWriteOnceProperties(old runtime.Object) (admission.Warnings, error) {
-	oldObj, ok := old.(*RouteTable)
-	if !ok {
-		return nil, nil
-	}
-
-	return genruntime.ValidateWriteOnceProperties(oldObj, table)
-}
-
 // AssignProperties_From_RouteTable populates our RouteTable from the provided source RouteTable
-func (table *RouteTable) AssignProperties_From_RouteTable(source *v20201101s.RouteTable) error {
+func (table *RouteTable) AssignProperties_From_RouteTable(source *storage.RouteTable) error {
 
 	// ObjectMeta
 	table.ObjectMeta = *source.ObjectMeta.DeepCopy()
@@ -263,7 +187,7 @@ func (table *RouteTable) AssignProperties_From_RouteTable(source *v20201101s.Rou
 	var spec RouteTable_Spec
 	err := spec.AssignProperties_From_RouteTable_Spec(&source.Spec)
 	if err != nil {
-		return errors.Wrap(err, "calling AssignProperties_From_RouteTable_Spec() to populate field Spec")
+		return eris.Wrap(err, "calling AssignProperties_From_RouteTable_Spec() to populate field Spec")
 	}
 	table.Spec = spec
 
@@ -271,7 +195,7 @@ func (table *RouteTable) AssignProperties_From_RouteTable(source *v20201101s.Rou
 	var status RouteTable_STATUS
 	err = status.AssignProperties_From_RouteTable_STATUS(&source.Status)
 	if err != nil {
-		return errors.Wrap(err, "calling AssignProperties_From_RouteTable_STATUS() to populate field Status")
+		return eris.Wrap(err, "calling AssignProperties_From_RouteTable_STATUS() to populate field Status")
 	}
 	table.Status = status
 
@@ -280,24 +204,24 @@ func (table *RouteTable) AssignProperties_From_RouteTable(source *v20201101s.Rou
 }
 
 // AssignProperties_To_RouteTable populates the provided destination RouteTable from our RouteTable
-func (table *RouteTable) AssignProperties_To_RouteTable(destination *v20201101s.RouteTable) error {
+func (table *RouteTable) AssignProperties_To_RouteTable(destination *storage.RouteTable) error {
 
 	// ObjectMeta
 	destination.ObjectMeta = *table.ObjectMeta.DeepCopy()
 
 	// Spec
-	var spec v20201101s.RouteTable_Spec
+	var spec storage.RouteTable_Spec
 	err := table.Spec.AssignProperties_To_RouteTable_Spec(&spec)
 	if err != nil {
-		return errors.Wrap(err, "calling AssignProperties_To_RouteTable_Spec() to populate field Spec")
+		return eris.Wrap(err, "calling AssignProperties_To_RouteTable_Spec() to populate field Spec")
 	}
 	destination.Spec = spec
 
 	// Status
-	var status v20201101s.RouteTable_STATUS
+	var status storage.RouteTable_STATUS
 	err = table.Status.AssignProperties_To_RouteTable_STATUS(&status)
 	if err != nil {
-		return errors.Wrap(err, "calling AssignProperties_To_RouteTable_STATUS() to populate field Status")
+		return eris.Wrap(err, "calling AssignProperties_To_RouteTable_STATUS() to populate field Status")
 	}
 	destination.Status = status
 
@@ -335,6 +259,10 @@ type RouteTable_Spec struct {
 	// Location: Resource location.
 	Location *string `json:"location,omitempty"`
 
+	// OperatorSpec: The specification for configuring operator behavior. This field is interpreted by the operator and not
+	// passed directly to Azure
+	OperatorSpec *RouteTableOperatorSpec `json:"operatorSpec,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// Owner: The owner of the resource. The owner controls where the resource goes when it is deployed. The owner also
 	// controls the resources lifecycle. When the owner is deleted the resource will also be deleted. Owner is expected to be a
@@ -352,7 +280,7 @@ func (table *RouteTable_Spec) ConvertToARM(resolved genruntime.ConvertToARMResol
 	if table == nil {
 		return nil, nil
 	}
-	result := &RouteTable_Spec_ARM{}
+	result := &arm.RouteTable_Spec{}
 
 	// Set property "Location":
 	if table.Location != nil {
@@ -365,7 +293,7 @@ func (table *RouteTable_Spec) ConvertToARM(resolved genruntime.ConvertToARMResol
 
 	// Set property "Properties":
 	if table.DisableBgpRoutePropagation != nil {
-		result.Properties = &RouteTablePropertiesFormat_ARM{}
+		result.Properties = &arm.RouteTablePropertiesFormat{}
 	}
 	if table.DisableBgpRoutePropagation != nil {
 		disableBgpRoutePropagation := *table.DisableBgpRoutePropagation
@@ -384,14 +312,14 @@ func (table *RouteTable_Spec) ConvertToARM(resolved genruntime.ConvertToARMResol
 
 // NewEmptyARMValue returns an empty ARM value suitable for deserializing into
 func (table *RouteTable_Spec) NewEmptyARMValue() genruntime.ARMResourceStatus {
-	return &RouteTable_Spec_ARM{}
+	return &arm.RouteTable_Spec{}
 }
 
 // PopulateFromARM populates a Kubernetes CRD object from an Azure ARM object
 func (table *RouteTable_Spec) PopulateFromARM(owner genruntime.ArbitraryOwnerReference, armInput interface{}) error {
-	typedInput, ok := armInput.(RouteTable_Spec_ARM)
+	typedInput, ok := armInput.(arm.RouteTable_Spec)
 	if !ok {
-		return fmt.Errorf("unexpected type supplied for PopulateFromARM() function. Expected RouteTable_Spec_ARM, got %T", armInput)
+		return fmt.Errorf("unexpected type supplied for PopulateFromARM() function. Expected arm.RouteTable_Spec, got %T", armInput)
 	}
 
 	// Set property "AzureName":
@@ -411,6 +339,8 @@ func (table *RouteTable_Spec) PopulateFromARM(owner genruntime.ArbitraryOwnerRef
 		location := *typedInput.Location
 		table.Location = &location
 	}
+
+	// no assignment for property "OperatorSpec"
 
 	// Set property "Owner":
 	table.Owner = &genruntime.KnownResourceReference{
@@ -434,23 +364,23 @@ var _ genruntime.ConvertibleSpec = &RouteTable_Spec{}
 
 // ConvertSpecFrom populates our RouteTable_Spec from the provided source
 func (table *RouteTable_Spec) ConvertSpecFrom(source genruntime.ConvertibleSpec) error {
-	src, ok := source.(*v20201101s.RouteTable_Spec)
+	src, ok := source.(*storage.RouteTable_Spec)
 	if ok {
 		// Populate our instance from source
 		return table.AssignProperties_From_RouteTable_Spec(src)
 	}
 
 	// Convert to an intermediate form
-	src = &v20201101s.RouteTable_Spec{}
+	src = &storage.RouteTable_Spec{}
 	err := src.ConvertSpecFrom(source)
 	if err != nil {
-		return errors.Wrap(err, "initial step of conversion in ConvertSpecFrom()")
+		return eris.Wrap(err, "initial step of conversion in ConvertSpecFrom()")
 	}
 
 	// Update our instance from src
 	err = table.AssignProperties_From_RouteTable_Spec(src)
 	if err != nil {
-		return errors.Wrap(err, "final step of conversion in ConvertSpecFrom()")
+		return eris.Wrap(err, "final step of conversion in ConvertSpecFrom()")
 	}
 
 	return nil
@@ -458,30 +388,30 @@ func (table *RouteTable_Spec) ConvertSpecFrom(source genruntime.ConvertibleSpec)
 
 // ConvertSpecTo populates the provided destination from our RouteTable_Spec
 func (table *RouteTable_Spec) ConvertSpecTo(destination genruntime.ConvertibleSpec) error {
-	dst, ok := destination.(*v20201101s.RouteTable_Spec)
+	dst, ok := destination.(*storage.RouteTable_Spec)
 	if ok {
 		// Populate destination from our instance
 		return table.AssignProperties_To_RouteTable_Spec(dst)
 	}
 
 	// Convert to an intermediate form
-	dst = &v20201101s.RouteTable_Spec{}
+	dst = &storage.RouteTable_Spec{}
 	err := table.AssignProperties_To_RouteTable_Spec(dst)
 	if err != nil {
-		return errors.Wrap(err, "initial step of conversion in ConvertSpecTo()")
+		return eris.Wrap(err, "initial step of conversion in ConvertSpecTo()")
 	}
 
 	// Update dst from our instance
 	err = dst.ConvertSpecTo(destination)
 	if err != nil {
-		return errors.Wrap(err, "final step of conversion in ConvertSpecTo()")
+		return eris.Wrap(err, "final step of conversion in ConvertSpecTo()")
 	}
 
 	return nil
 }
 
 // AssignProperties_From_RouteTable_Spec populates our RouteTable_Spec from the provided source RouteTable_Spec
-func (table *RouteTable_Spec) AssignProperties_From_RouteTable_Spec(source *v20201101s.RouteTable_Spec) error {
+func (table *RouteTable_Spec) AssignProperties_From_RouteTable_Spec(source *storage.RouteTable_Spec) error {
 
 	// AzureName
 	table.AzureName = source.AzureName
@@ -496,6 +426,18 @@ func (table *RouteTable_Spec) AssignProperties_From_RouteTable_Spec(source *v202
 
 	// Location
 	table.Location = genruntime.ClonePointerToString(source.Location)
+
+	// OperatorSpec
+	if source.OperatorSpec != nil {
+		var operatorSpec RouteTableOperatorSpec
+		err := operatorSpec.AssignProperties_From_RouteTableOperatorSpec(source.OperatorSpec)
+		if err != nil {
+			return eris.Wrap(err, "calling AssignProperties_From_RouteTableOperatorSpec() to populate field OperatorSpec")
+		}
+		table.OperatorSpec = &operatorSpec
+	} else {
+		table.OperatorSpec = nil
+	}
 
 	// Owner
 	if source.Owner != nil {
@@ -513,7 +455,7 @@ func (table *RouteTable_Spec) AssignProperties_From_RouteTable_Spec(source *v202
 }
 
 // AssignProperties_To_RouteTable_Spec populates the provided destination RouteTable_Spec from our RouteTable_Spec
-func (table *RouteTable_Spec) AssignProperties_To_RouteTable_Spec(destination *v20201101s.RouteTable_Spec) error {
+func (table *RouteTable_Spec) AssignProperties_To_RouteTable_Spec(destination *storage.RouteTable_Spec) error {
 	// Create a new property bag
 	propertyBag := genruntime.NewPropertyBag()
 
@@ -530,6 +472,18 @@ func (table *RouteTable_Spec) AssignProperties_To_RouteTable_Spec(destination *v
 
 	// Location
 	destination.Location = genruntime.ClonePointerToString(table.Location)
+
+	// OperatorSpec
+	if table.OperatorSpec != nil {
+		var operatorSpec storage.RouteTableOperatorSpec
+		err := table.OperatorSpec.AssignProperties_To_RouteTableOperatorSpec(&operatorSpec)
+		if err != nil {
+			return eris.Wrap(err, "calling AssignProperties_To_RouteTableOperatorSpec() to populate field OperatorSpec")
+		}
+		destination.OperatorSpec = &operatorSpec
+	} else {
+		destination.OperatorSpec = nil
+	}
 
 	// OriginalVersion
 	destination.OriginalVersion = table.OriginalVersion()
@@ -551,27 +505,6 @@ func (table *RouteTable_Spec) AssignProperties_To_RouteTable_Spec(destination *v
 	} else {
 		destination.PropertyBag = nil
 	}
-
-	// No error
-	return nil
-}
-
-// Initialize_From_RouteTable_STATUS populates our RouteTable_Spec from the provided source RouteTable_STATUS
-func (table *RouteTable_Spec) Initialize_From_RouteTable_STATUS(source *RouteTable_STATUS) error {
-
-	// DisableBgpRoutePropagation
-	if source.DisableBgpRoutePropagation != nil {
-		disableBgpRoutePropagation := *source.DisableBgpRoutePropagation
-		table.DisableBgpRoutePropagation = &disableBgpRoutePropagation
-	} else {
-		table.DisableBgpRoutePropagation = nil
-	}
-
-	// Location
-	table.Location = genruntime.ClonePointerToString(source.Location)
-
-	// Tags
-	table.Tags = genruntime.CloneMapOfStringToString(source.Tags)
 
 	// No error
 	return nil
@@ -622,23 +555,23 @@ var _ genruntime.ConvertibleStatus = &RouteTable_STATUS{}
 
 // ConvertStatusFrom populates our RouteTable_STATUS from the provided source
 func (table *RouteTable_STATUS) ConvertStatusFrom(source genruntime.ConvertibleStatus) error {
-	src, ok := source.(*v20201101s.RouteTable_STATUS)
+	src, ok := source.(*storage.RouteTable_STATUS)
 	if ok {
 		// Populate our instance from source
 		return table.AssignProperties_From_RouteTable_STATUS(src)
 	}
 
 	// Convert to an intermediate form
-	src = &v20201101s.RouteTable_STATUS{}
+	src = &storage.RouteTable_STATUS{}
 	err := src.ConvertStatusFrom(source)
 	if err != nil {
-		return errors.Wrap(err, "initial step of conversion in ConvertStatusFrom()")
+		return eris.Wrap(err, "initial step of conversion in ConvertStatusFrom()")
 	}
 
 	// Update our instance from src
 	err = table.AssignProperties_From_RouteTable_STATUS(src)
 	if err != nil {
-		return errors.Wrap(err, "final step of conversion in ConvertStatusFrom()")
+		return eris.Wrap(err, "final step of conversion in ConvertStatusFrom()")
 	}
 
 	return nil
@@ -646,23 +579,23 @@ func (table *RouteTable_STATUS) ConvertStatusFrom(source genruntime.ConvertibleS
 
 // ConvertStatusTo populates the provided destination from our RouteTable_STATUS
 func (table *RouteTable_STATUS) ConvertStatusTo(destination genruntime.ConvertibleStatus) error {
-	dst, ok := destination.(*v20201101s.RouteTable_STATUS)
+	dst, ok := destination.(*storage.RouteTable_STATUS)
 	if ok {
 		// Populate destination from our instance
 		return table.AssignProperties_To_RouteTable_STATUS(dst)
 	}
 
 	// Convert to an intermediate form
-	dst = &v20201101s.RouteTable_STATUS{}
+	dst = &storage.RouteTable_STATUS{}
 	err := table.AssignProperties_To_RouteTable_STATUS(dst)
 	if err != nil {
-		return errors.Wrap(err, "initial step of conversion in ConvertStatusTo()")
+		return eris.Wrap(err, "initial step of conversion in ConvertStatusTo()")
 	}
 
 	// Update dst from our instance
 	err = dst.ConvertStatusTo(destination)
 	if err != nil {
-		return errors.Wrap(err, "final step of conversion in ConvertStatusTo()")
+		return eris.Wrap(err, "final step of conversion in ConvertStatusTo()")
 	}
 
 	return nil
@@ -672,14 +605,14 @@ var _ genruntime.FromARMConverter = &RouteTable_STATUS{}
 
 // NewEmptyARMValue returns an empty ARM value suitable for deserializing into
 func (table *RouteTable_STATUS) NewEmptyARMValue() genruntime.ARMResourceStatus {
-	return &RouteTable_STATUS_ARM{}
+	return &arm.RouteTable_STATUS{}
 }
 
 // PopulateFromARM populates a Kubernetes CRD object from an Azure ARM object
 func (table *RouteTable_STATUS) PopulateFromARM(owner genruntime.ArbitraryOwnerReference, armInput interface{}) error {
-	typedInput, ok := armInput.(RouteTable_STATUS_ARM)
+	typedInput, ok := armInput.(arm.RouteTable_STATUS)
 	if !ok {
-		return fmt.Errorf("unexpected type supplied for PopulateFromARM() function. Expected RouteTable_STATUS_ARM, got %T", armInput)
+		return fmt.Errorf("unexpected type supplied for PopulateFromARM() function. Expected arm.RouteTable_STATUS, got %T", armInput)
 	}
 
 	// no assignment for property "Conditions"
@@ -721,7 +654,9 @@ func (table *RouteTable_STATUS) PopulateFromARM(owner genruntime.ArbitraryOwnerR
 	// copying flattened property:
 	if typedInput.Properties != nil {
 		if typedInput.Properties.ProvisioningState != nil {
-			provisioningState := *typedInput.Properties.ProvisioningState
+			var temp string
+			temp = string(*typedInput.Properties.ProvisioningState)
+			provisioningState := ProvisioningState_STATUS(temp)
 			table.ProvisioningState = &provisioningState
 		}
 	}
@@ -754,7 +689,7 @@ func (table *RouteTable_STATUS) PopulateFromARM(owner genruntime.ArbitraryOwnerR
 }
 
 // AssignProperties_From_RouteTable_STATUS populates our RouteTable_STATUS from the provided source RouteTable_STATUS
-func (table *RouteTable_STATUS) AssignProperties_From_RouteTable_STATUS(source *v20201101s.RouteTable_STATUS) error {
+func (table *RouteTable_STATUS) AssignProperties_From_RouteTable_STATUS(source *storage.RouteTable_STATUS) error {
 
 	// Conditions
 	table.Conditions = genruntime.CloneSliceOfCondition(source.Conditions)
@@ -781,8 +716,9 @@ func (table *RouteTable_STATUS) AssignProperties_From_RouteTable_STATUS(source *
 
 	// ProvisioningState
 	if source.ProvisioningState != nil {
-		provisioningState := ProvisioningState_STATUS(*source.ProvisioningState)
-		table.ProvisioningState = &provisioningState
+		provisioningState := *source.ProvisioningState
+		provisioningStateTemp := genruntime.ToEnum(provisioningState, provisioningState_STATUS_Values)
+		table.ProvisioningState = &provisioningStateTemp
 	} else {
 		table.ProvisioningState = nil
 	}
@@ -801,7 +737,7 @@ func (table *RouteTable_STATUS) AssignProperties_From_RouteTable_STATUS(source *
 }
 
 // AssignProperties_To_RouteTable_STATUS populates the provided destination RouteTable_STATUS from our RouteTable_STATUS
-func (table *RouteTable_STATUS) AssignProperties_To_RouteTable_STATUS(destination *v20201101s.RouteTable_STATUS) error {
+func (table *RouteTable_STATUS) AssignProperties_To_RouteTable_STATUS(destination *storage.RouteTable_STATUS) error {
 	// Create a new property bag
 	propertyBag := genruntime.NewPropertyBag()
 
@@ -844,6 +780,110 @@ func (table *RouteTable_STATUS) AssignProperties_To_RouteTable_STATUS(destinatio
 
 	// Type
 	destination.Type = genruntime.ClonePointerToString(table.Type)
+
+	// Update the property bag
+	if len(propertyBag) > 0 {
+		destination.PropertyBag = propertyBag
+	} else {
+		destination.PropertyBag = nil
+	}
+
+	// No error
+	return nil
+}
+
+// Details for configuring operator behavior. Fields in this struct are interpreted by the operator directly rather than being passed to Azure
+type RouteTableOperatorSpec struct {
+	// ConfigMapExpressions: configures where to place operator written dynamic ConfigMaps (created with CEL expressions).
+	ConfigMapExpressions []*core.DestinationExpression `json:"configMapExpressions,omitempty"`
+
+	// SecretExpressions: configures where to place operator written dynamic secrets (created with CEL expressions).
+	SecretExpressions []*core.DestinationExpression `json:"secretExpressions,omitempty"`
+}
+
+// AssignProperties_From_RouteTableOperatorSpec populates our RouteTableOperatorSpec from the provided source RouteTableOperatorSpec
+func (operator *RouteTableOperatorSpec) AssignProperties_From_RouteTableOperatorSpec(source *storage.RouteTableOperatorSpec) error {
+
+	// ConfigMapExpressions
+	if source.ConfigMapExpressions != nil {
+		configMapExpressionList := make([]*core.DestinationExpression, len(source.ConfigMapExpressions))
+		for configMapExpressionIndex, configMapExpressionItem := range source.ConfigMapExpressions {
+			// Shadow the loop variable to avoid aliasing
+			configMapExpressionItem := configMapExpressionItem
+			if configMapExpressionItem != nil {
+				configMapExpression := *configMapExpressionItem.DeepCopy()
+				configMapExpressionList[configMapExpressionIndex] = &configMapExpression
+			} else {
+				configMapExpressionList[configMapExpressionIndex] = nil
+			}
+		}
+		operator.ConfigMapExpressions = configMapExpressionList
+	} else {
+		operator.ConfigMapExpressions = nil
+	}
+
+	// SecretExpressions
+	if source.SecretExpressions != nil {
+		secretExpressionList := make([]*core.DestinationExpression, len(source.SecretExpressions))
+		for secretExpressionIndex, secretExpressionItem := range source.SecretExpressions {
+			// Shadow the loop variable to avoid aliasing
+			secretExpressionItem := secretExpressionItem
+			if secretExpressionItem != nil {
+				secretExpression := *secretExpressionItem.DeepCopy()
+				secretExpressionList[secretExpressionIndex] = &secretExpression
+			} else {
+				secretExpressionList[secretExpressionIndex] = nil
+			}
+		}
+		operator.SecretExpressions = secretExpressionList
+	} else {
+		operator.SecretExpressions = nil
+	}
+
+	// No error
+	return nil
+}
+
+// AssignProperties_To_RouteTableOperatorSpec populates the provided destination RouteTableOperatorSpec from our RouteTableOperatorSpec
+func (operator *RouteTableOperatorSpec) AssignProperties_To_RouteTableOperatorSpec(destination *storage.RouteTableOperatorSpec) error {
+	// Create a new property bag
+	propertyBag := genruntime.NewPropertyBag()
+
+	// ConfigMapExpressions
+	if operator.ConfigMapExpressions != nil {
+		configMapExpressionList := make([]*core.DestinationExpression, len(operator.ConfigMapExpressions))
+		for configMapExpressionIndex, configMapExpressionItem := range operator.ConfigMapExpressions {
+			// Shadow the loop variable to avoid aliasing
+			configMapExpressionItem := configMapExpressionItem
+			if configMapExpressionItem != nil {
+				configMapExpression := *configMapExpressionItem.DeepCopy()
+				configMapExpressionList[configMapExpressionIndex] = &configMapExpression
+			} else {
+				configMapExpressionList[configMapExpressionIndex] = nil
+			}
+		}
+		destination.ConfigMapExpressions = configMapExpressionList
+	} else {
+		destination.ConfigMapExpressions = nil
+	}
+
+	// SecretExpressions
+	if operator.SecretExpressions != nil {
+		secretExpressionList := make([]*core.DestinationExpression, len(operator.SecretExpressions))
+		for secretExpressionIndex, secretExpressionItem := range operator.SecretExpressions {
+			// Shadow the loop variable to avoid aliasing
+			secretExpressionItem := secretExpressionItem
+			if secretExpressionItem != nil {
+				secretExpression := *secretExpressionItem.DeepCopy()
+				secretExpressionList[secretExpressionIndex] = &secretExpression
+			} else {
+				secretExpressionList[secretExpressionIndex] = nil
+			}
+		}
+		destination.SecretExpressions = secretExpressionList
+	} else {
+		destination.SecretExpressions = nil
+	}
 
 	// Update the property bag
 	if len(propertyBag) > 0 {

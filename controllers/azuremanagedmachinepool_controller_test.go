@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -31,6 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -39,10 +43,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools/mock_agentpools"
 	gomock2 "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	reconcilerutils "sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestAzureManagedMachinePoolReconcile(t *testing.T) {
@@ -61,8 +61,14 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder) {
 				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
 				fakeAgentPoolSpec := fakeAgentPool()
-				providerIDs := []string{"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"}
+				// Provider IDs should be sorted alphabetically for deterministic ordering (100 < 12 < 156)
+				providerIDs := []string{
+					"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/100",
+					"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/12",
+					"azure:///subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myresourcegroupname/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156",
+				}
 				fakeVirtualMachineScaleSet := fakeVirtualMachineScaleSet()
+				// fakeVirtualMachineScaleSetVM returns VMs in unsorted order (156, 12, 100)
 				fakeVirtualMachineScaleSetVM := fakeVirtualMachineScaleSetVM()
 
 				reconciler.MockReconciler.EXPECT().Reconcile(gomock2.AContext()).Return(nil)
@@ -87,7 +93,7 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			name: "Reconcile pause",
 			Setup: func(cb *fake.ClientBuilder, reconciler pausingReconciler, agentpools *mock_agentpools.MockAgentPoolScopeMockRecorder, nodelister *MockNodeListerMockRecorder) {
 				cluster, azManagedCluster, azManagedControlPlane, ammp, mp := newReadyAzureManagedMachinePoolCluster()
-				cluster.Spec.Paused = true
+				cluster.Spec.Paused = ptr.To(true)
 
 				reconciler.MockPauser.EXPECT().Pause(gomock2.AContext()).Return(nil)
 
@@ -130,7 +136,6 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
 			var (
 				g          = NewWithT(t)
@@ -158,7 +163,6 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 					for _, addTo := range []func(s *runtime.Scheme) error{
 						scheme.AddToScheme,
 						clusterv1.AddToScheme,
-						expv1.AddToScheme,
 						infrav1.AddToScheme,
 						corev1.AddToScheme,
 					} {
@@ -177,7 +181,7 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 			defer mockCtrl.Finish()
 
 			c.Setup(cb, reconciler, agentpools.EXPECT(), nodelister.EXPECT())
-			controller := NewAzureManagedMachinePoolReconciler(cb.Build(), nil, reconcilerutils.Timeouts{}, "foo")
+			controller := NewAzureManagedMachinePoolReconciler(cb.Build(), nil, reconcilerutils.Timeouts{}, "foo", azure.NewCredentialCache())
 			controller.createAzureManagedMachinePoolService = func(_ *scope.ManagedMachinePoolScope, _ time.Duration) (*azureManagedMachinePoolService, error) {
 				return &azureManagedMachinePoolService{
 					scope:         agentpools,
@@ -185,7 +189,7 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 					scaleSetsSvc:  nodelister,
 				}, nil
 			}
-			res, err := controller.Reconcile(context.TODO(), ctrl.Request{
+			res, err := controller.Reconcile(t.Context(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "foo-ammp",
 					Namespace: "foobar",
@@ -196,7 +200,7 @@ func TestAzureManagedMachinePoolReconcile(t *testing.T) {
 	}
 }
 
-func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.AzureManagedCluster, *infrav1.AzureManagedControlPlane, *infrav1.AzureManagedMachinePool, *expv1.MachinePool) {
+func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.AzureManagedCluster, *infrav1.AzureManagedControlPlane, *infrav1.AzureManagedMachinePool, *clusterv1.MachinePool) {
 	// AzureManagedCluster
 	azManagedCluster := &infrav1.AzureManagedCluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -211,7 +215,7 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 			},
 		},
 		Spec: infrav1.AzureManagedClusterSpec{
-			ControlPlaneEndpoint: clusterv1.APIEndpoint{
+			ControlPlaneEndpoint: clusterv1beta1.APIEndpoint{
 				Host: "foo.bar",
 				Port: 123,
 			},
@@ -231,7 +235,7 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 			},
 		},
 		Spec: infrav1.AzureManagedControlPlaneSpec{
-			ControlPlaneEndpoint: clusterv1.APIEndpoint{
+			ControlPlaneEndpoint: clusterv1beta1.APIEndpoint{
 				Host: "foo.bar",
 				Port: 123,
 			},
@@ -255,17 +259,15 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 			Namespace: "foobar",
 		},
 		Spec: clusterv1.ClusterSpec{
-			ControlPlaneRef: &corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
-				Kind:       infrav1.AzureManagedControlPlaneKind,
-				Name:       azManagedControlPlane.Name,
-				Namespace:  azManagedControlPlane.Namespace,
+			ControlPlaneRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: "infrastructure.cluster.x-k8s.io",
+				Kind:     infrav1.AzureManagedControlPlaneKind,
+				Name:     azManagedControlPlane.Name,
 			},
-			InfrastructureRef: &corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
-				Kind:       infrav1.AzureManagedClusterKind,
-				Name:       azManagedCluster.Name,
-				Namespace:  azManagedCluster.Namespace,
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: "infrastructure.cluster.x-k8s.io",
+				Kind:     infrav1.AzureManagedClusterKind,
+				Name:     azManagedCluster.Name,
 			},
 		},
 	}
@@ -285,7 +287,7 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 		},
 	}
 	// MachinePool
-	mp := &expv1.MachinePool{
+	mp := &clusterv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "foo-mp1",
 			Namespace: "foobar",
@@ -300,15 +302,14 @@ func newReadyAzureManagedMachinePoolCluster() (*clusterv1.Cluster, *infrav1.Azur
 				},
 			},
 		},
-		Spec: expv1.MachinePoolSpec{
+		Spec: clusterv1.MachinePoolSpec{
 			Template: clusterv1.MachineTemplateSpec{
 				Spec: clusterv1.MachineSpec{
 					ClusterName: cluster.Name,
-					InfrastructureRef: corev1.ObjectReference{
-						APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
-						Kind:       "AzureManagedMachinePool",
-						Name:       ammp.Name,
-						Namespace:  ammp.Namespace,
+					InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+						APIGroup: "infrastructure.cluster.x-k8s.io",
+						Kind:     "AzureManagedMachinePool",
+						Name:     ammp.Name,
 					},
 				},
 			},
@@ -351,22 +352,26 @@ func fakeAgentPool(changes ...func(*agentpools.AgentPoolSpec)) agentpools.AgentP
 	return pool
 }
 
+// fakeVirtualMachineScaleSetVM returns VMs in non-sorted order (156, 12, 100) to verify
+// that provider IDs are sorted for deterministic ordering.
 func fakeVirtualMachineScaleSetVM() []armcompute.VirtualMachineScaleSetVM {
-	virtualMachineScaleSetVM := []armcompute.VirtualMachineScaleSetVM{
+	return []armcompute.VirtualMachineScaleSetVM{
+		{
+			InstanceID: ptr.To("2"),
+			ID:         ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"),
+			Name:       ptr.To("vm2"),
+		},
 		{
 			InstanceID: ptr.To("0"),
-			ID:         ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/156"),
+			ID:         ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/12"),
 			Name:       ptr.To("vm0"),
-			Zones:      []*string{ptr.To("zone0")},
-			Properties: &armcompute.VirtualMachineScaleSetVMProperties{
-				ProvisioningState: ptr.To("Succeeded"),
-				OSProfile: &armcompute.OSProfile{
-					ComputerName: ptr.To("instance-000000"),
-				},
-			},
+		},
+		{
+			InstanceID: ptr.To("1"),
+			ID:         ptr.To("/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/myResourceGroupName/providers/Microsoft.Compute/virtualMachineScaleSets/myScaleSetName/virtualMachines/100"),
+			Name:       ptr.To("vm1"),
 		},
 	}
-	return virtualMachineScaleSetVM
 }
 
 func fakeVirtualMachineScaleSet() []armcompute.VirtualMachineScaleSet {

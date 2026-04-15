@@ -24,24 +24,25 @@ import (
 	"github.com/pkg/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/annotations"
+	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	"sigs.k8s.io/cluster-api/util/predicates"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/coalescing"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api/util"
-	"sigs.k8s.io/cluster-api/util/annotations"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/predicates"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 // AzureManagedMachinePoolReconciler reconciles an AzureManagedMachinePool object.
@@ -50,18 +51,20 @@ type AzureManagedMachinePoolReconciler struct {
 	Recorder                             record.EventRecorder
 	Timeouts                             reconciler.Timeouts
 	WatchFilterValue                     string
+	CredentialCache                      azure.CredentialCache
 	createAzureManagedMachinePoolService azureManagedMachinePoolServiceCreator
 }
 
 type azureManagedMachinePoolServiceCreator func(managedMachinePoolScope *scope.ManagedMachinePoolScope, apiCallTimeout time.Duration) (*azureManagedMachinePoolService, error)
 
 // NewAzureManagedMachinePoolReconciler returns a new AzureManagedMachinePoolReconciler instance.
-func NewAzureManagedMachinePoolReconciler(client client.Client, recorder record.EventRecorder, timeouts reconciler.Timeouts, watchFilterValue string) *AzureManagedMachinePoolReconciler {
+func NewAzureManagedMachinePoolReconciler(client client.Client, recorder record.EventRecorder, timeouts reconciler.Timeouts, watchFilterValue string, credCache azure.CredentialCache) *AzureManagedMachinePoolReconciler {
 	ampr := &AzureManagedMachinePoolReconciler{
 		Client:           client,
 		Recorder:         recorder,
 		Timeouts:         timeouts,
 		WatchFilterValue: watchFilterValue,
+		CredentialCache:  credCache,
 	}
 
 	ampr.createAzureManagedMachinePoolService = newAzureManagedMachinePoolService
@@ -89,13 +92,18 @@ func (ammpr *AzureManagedMachinePoolReconciler) SetupWithManager(ctx context.Con
 		return errors.Wrap(err, "failed to create AzureManagedControlPlane to AzureManagedMachinePools mapper")
 	}
 
-	c, err := ctrl.NewControllerManagedBy(mgr).
+	azureManagedMachinePoolMapper, err := util.ClusterToTypedObjectsMapper(ammpr.Client, &infrav1.AzureManagedMachinePoolList{}, mgr.GetScheme())
+	if err != nil {
+		return errors.Wrap(err, "failed to create mapper for Cluster to AzureManagedMachinePools")
+	}
+
+	return ctrl.NewControllerManagedBy(mgr).
 		WithOptions(options.Options).
 		For(azManagedMachinePool).
-		WithEventFilter(predicates.ResourceHasFilterLabel(log, ammpr.WatchFilterValue)).
+		WithEventFilter(predicates.ResourceHasFilterLabel(mgr.GetScheme(), log, ammpr.WatchFilterValue)).
 		// watch for changes in CAPI MachinePool resources
 		Watches(
-			&expv1.MachinePool{},
+			&clusterv1.MachinePool{},
 			handler.EnqueueRequestsFromMapFunc(MachinePoolToInfrastructureMapFunc(infrav1.GroupVersion.WithKind("AzureManagedMachinePool"), log)),
 		).
 		// watch for changes in AzureManagedControlPlanes
@@ -103,27 +111,16 @@ func (ammpr *AzureManagedMachinePoolReconciler) SetupWithManager(ctx context.Con
 			&infrav1.AzureManagedControlPlane{},
 			handler.EnqueueRequestsFromMapFunc(azureManagedControlPlaneMapper),
 		).
-		Build(r)
-	if err != nil {
-		return errors.Wrap(err, "error creating controller")
-	}
-
-	azureManagedMachinePoolMapper, err := util.ClusterToTypedObjectsMapper(ammpr.Client, &infrav1.AzureManagedMachinePoolList{}, mgr.GetScheme())
-	if err != nil {
-		return errors.Wrap(err, "failed to create mapper for Cluster to AzureManagedMachinePools")
-	}
-
-	// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
-	if err = c.Watch(
-		source.Kind(mgr.GetCache(), &clusterv1.Cluster{}),
-		handler.EnqueueRequestsFromMapFunc(azureManagedMachinePoolMapper),
-		ClusterPauseChangeAndInfrastructureReady(log),
-		predicates.ResourceHasFilterLabel(log, ammpr.WatchFilterValue),
-	); err != nil {
-		return errors.Wrap(err, "failed adding a watch for ready clusters")
-	}
-
-	return nil
+		// Add a watch on clusterv1.Cluster object for pause/unpause & ready notifications.
+		Watches(
+			&clusterv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(azureManagedMachinePoolMapper),
+			builder.WithPredicates(
+				predicates.ClusterPausedTransitionsOrInfrastructureProvisioned(mgr.GetScheme(), log),
+				predicates.ResourceHasFilterLabel(mgr.GetScheme(), log, ammpr.WatchFilterValue),
+			),
+		).
+		Complete(r)
 }
 
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=azuremanagedmachinepools,verbs=get;list;watch;create;update;patch;delete
@@ -180,7 +177,7 @@ func (ammpr *AzureManagedMachinePoolReconciler) Reconcile(ctx context.Context, r
 	// Fetch the corresponding control plane which has all the interesting data.
 	controlPlane := &infrav1.AzureManagedControlPlane{}
 	controlPlaneName := client.ObjectKey{
-		Namespace: ownerCluster.Spec.ControlPlaneRef.Namespace,
+		Namespace: ownerCluster.Namespace,
 		Name:      ownerCluster.Spec.ControlPlaneRef.Name,
 	}
 	if err := ammpr.Client.Get(ctx, controlPlaneName, controlPlane); err != nil {
@@ -197,10 +194,11 @@ func (ammpr *AzureManagedMachinePoolReconciler) Reconcile(ctx context.Context, r
 
 	// create the managed control plane scope
 	managedControlPlaneScope, err := scope.NewManagedControlPlaneScope(ctx, scope.ManagedControlPlaneScopeParams{
-		Client:       ammpr.Client,
-		ControlPlane: controlPlane,
-		Cluster:      ownerCluster,
-		Timeouts:     ammpr.Timeouts,
+		Client:          ammpr.Client,
+		ControlPlane:    controlPlane,
+		Cluster:         ownerCluster,
+		Timeouts:        ammpr.Timeouts,
+		CredentialCache: ammpr.CredentialCache,
 	})
 	if err != nil {
 		return reconcile.Result{}, errors.Wrap(err, "failed to create ManagedControlPlane scope")
@@ -271,8 +269,8 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileNormal(ctx context.Cont
 		scope.SetAgentPoolReady(false)
 		// Ensure the ready condition is false, but do not overwrite an existing
 		// error condition which might provide more details.
-		if conditions.IsTrue(scope.InfraMachinePool, infrav1.AgentPoolsReadyCondition) {
-			conditions.MarkFalse(scope.InfraMachinePool, infrav1.AgentPoolsReadyCondition, infrav1.FailedReason, clusterv1.ConditionSeverityError, err.Error())
+		if v1beta1conditions.IsTrue(scope.InfraMachinePool, infrav1.AgentPoolsReadyCondition) {
+			v1beta1conditions.MarkFalse(scope.InfraMachinePool, infrav1.AgentPoolsReadyCondition, infrav1.FailedReason, clusterv1beta1.ConditionSeverityError, "%s", err.Error())
 		}
 
 		// Handle transient and terminal errors
@@ -300,7 +298,6 @@ func (ammpr *AzureManagedMachinePoolReconciler) reconcileNormal(ctx context.Cont
 	return reconcile.Result{}, nil
 }
 
-//nolint:unparam // Always returns an empty struct for reconcile.Result
 func (ammpr *AzureManagedMachinePoolReconciler) reconcilePause(ctx context.Context, scope *scope.ManagedMachinePoolScope) (reconcile.Result, error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "controllers.AzureManagedMachinePool.reconcilePause")
 	defer done()

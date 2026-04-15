@@ -17,7 +17,6 @@ limitations under the License.
 package subnets
 
 import (
-	"context"
 	"testing"
 
 	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20201101"
@@ -25,6 +24,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets/mock_subnets"
 )
 
@@ -34,7 +34,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		scope := mock_subnets.NewMockSubnetScope(mockCtrl)
 		err := errors.New("an error")
-		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, nil, err)).To(MatchError(err))
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, nil, err)).To(MatchError(err))
 	})
 
 	t.Run("successfully created or updated", func(t *testing.T) {
@@ -44,14 +44,46 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		scope.EXPECT().UpdateSubnetID("subnet", "id")
 		scope.EXPECT().UpdateSubnetCIDRs("subnet", []string{"cidr"})
 		subnet := &asonetworkv1.VirtualNetworksSubnet{
-			Spec: asonetworkv1.VirtualNetworks_Subnet_Spec{
+			Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
 				AzureName: "subnet",
 			},
-			Status: asonetworkv1.VirtualNetworks_Subnet_STATUS{
+			Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
 				Id:              ptr.To("id"),
 				AddressPrefixes: []string{"cidr"},
 			},
 		}
-		g.Expect(postCreateOrUpdateResourceHook(context.Background(), scope, subnet, nil)).To(Succeed())
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, subnet, nil)).To(Succeed())
+	})
+
+	t.Run("correctly handles empty and non-empty ASO Status CIDRBlocks", func(t *testing.T) {
+		g := NewGomegaWithT(t)
+		mockCtrl := gomock.NewController(t)
+		scope := mock_subnets.NewMockSubnetScope(mockCtrl)
+
+		emptyCIDRSubnet := &asonetworkv1.VirtualNetworksSubnet{
+			Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
+				AzureName: "empty-cidr-status-subnet",
+			},
+			Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
+				Id:              ptr.To("id-empty"),
+				AddressPrefixes: []string{},
+			},
+		}
+		scope.EXPECT().UpdateSubnetID("empty-cidr-status-subnet", "id-empty").Times(0)
+		scope.EXPECT().UpdateSubnetCIDRs("empty-cidr-status-subnet", []string{}).Times(0)
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, emptyCIDRSubnet, nil)).To(Succeed())
+
+		nonEmptyCIDRSubnet := &asonetworkv1.VirtualNetworksSubnet{
+			Spec: asonetworkv1.VirtualNetworksSubnet_Spec{
+				AzureName: "nonempty-cidr-status-subnet",
+			},
+			Status: asonetworkv1.VirtualNetworksSubnet_STATUS{
+				Id:              ptr.To("id-nonempty"),
+				AddressPrefixes: []string{"cidr"},
+			},
+		}
+		scope.EXPECT().UpdateSubnetID("nonempty-cidr-status-subnet", "id-nonempty").Times(1)
+		scope.EXPECT().UpdateSubnetCIDRs("nonempty-cidr-status-subnet", []string{"cidr"}).Times(1)
+		g.Expect(postCreateOrUpdateResourceHook(t.Context(), scope, nonEmptyCIDRSubnet, nil)).To(Succeed())
 	})
 }

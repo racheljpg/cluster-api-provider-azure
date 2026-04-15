@@ -17,13 +17,14 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -31,8 +32,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
 )
 
 func TestAzureMachinePoolServiceReconcile(t *testing.T) {
@@ -61,7 +60,6 @@ func TestAzureMachinePoolServiceReconcile(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -80,7 +78,7 @@ func TestAzureMachinePoolServiceReconcile(t *testing.T) {
 						AzureCluster: &infrav1.AzureCluster{},
 						Cluster:      &clusterv1.Cluster{},
 					},
-					MachinePool: &expv1.MachinePool{},
+					MachinePool: &clusterv1.MachinePool{},
 					AzureMachinePool: &infrav1exp.AzureMachinePool{
 						Spec: infrav1exp.AzureMachinePoolSpec{
 							Template: infrav1exp.AzureMachinePoolMachineTemplate{
@@ -97,7 +95,7 @@ func TestAzureMachinePoolServiceReconcile(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -139,7 +137,6 @@ func TestAzureMachinePoolServicePause(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -167,7 +164,7 @@ func TestAzureMachinePoolServicePause(t *testing.T) {
 				},
 			}
 
-			err := s.Pause(context.TODO())
+			err := s.Pause(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -204,7 +201,6 @@ func TestAzureMachinePoolServiceDelete(t *testing.T) {
 	}
 
 	for name, tc := range cases {
-		tc := tc
 		t.Run(name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -223,7 +219,7 @@ func TestAzureMachinePoolServiceDelete(t *testing.T) {
 						AzureCluster: &infrav1.AzureCluster{},
 						Cluster:      &clusterv1.Cluster{},
 					},
-					MachinePool:      &expv1.MachinePool{},
+					MachinePool:      &clusterv1.MachinePool{},
 					AzureMachinePool: &infrav1exp.AzureMachinePool{},
 				},
 				services: []azure.ServiceReconciler{
@@ -234,7 +230,7 @@ func TestAzureMachinePoolServiceDelete(t *testing.T) {
 				skuCache: resourceskus.NewStaticCache([]armcompute.ResourceSKU{}, ""),
 			}
 
-			err := s.Delete(context.TODO())
+			err := s.Delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

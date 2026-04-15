@@ -17,7 +17,6 @@ limitations under the License.
 package virtualnetworks
 
 import (
-	"context"
 	"testing"
 
 	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20201101"
@@ -25,6 +24,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -120,7 +120,7 @@ func TestParameters(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			g := NewGomegaWithT(t)
-			actual, err := test.spec.Parameters(context.Background(), test.existing)
+			actual, err := test.spec.Parameters(t.Context(), test.existing)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(cmp.Diff(test.expected, actual)).To(BeEmpty())
 		})

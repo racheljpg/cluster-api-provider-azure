@@ -21,10 +21,11 @@ import (
 
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/pkg/errors"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Service provides operations on Azure resources.
@@ -38,7 +39,7 @@ type Service[T genruntime.MetaObject, S Scope] struct {
 	// may be skipped for a service by leaving this field nil.
 	ListFunc func(ctx context.Context, client client.Client, opts ...client.ListOption) (resources []T, err error)
 
-	ConditionType                  clusterv1.ConditionType
+	ConditionType                  clusterv1beta1.ConditionType
 	PostCreateOrUpdateResourceHook func(ctx context.Context, scope S, result T, err error) error
 	PostReconcileHook              func(ctx context.Context, scope S, err error) error
 	PostDeleteHook                 func(ctx context.Context, scope S, err error) error

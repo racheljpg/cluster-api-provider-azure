@@ -17,16 +17,16 @@ limitations under the License.
 package agentpools
 
 import (
-	"context"
 	"testing"
 
-	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231102preview"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -74,7 +74,7 @@ func TestParameters(t *testing.T) {
 			EnableEncryptionAtHost: ptr.To(false),
 		}
 		expected := &asocontainerservicev1.ManagedClustersAgentPool{
-			Spec: asocontainerservicev1.ManagedClusters_AgentPool_Spec{
+			Spec: asocontainerservicev1.ManagedClustersAgentPool_Spec{
 				AzureName: "azure name",
 				Owner: &genruntime.KnownResourceReference{
 					Name: "cluster",
@@ -120,7 +120,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), nil)
+		actual, err := spec.Parameters(t.Context(), nil)
 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(cmp.Diff(actual, expected)).To(BeEmpty())
@@ -170,7 +170,7 @@ func TestParameters(t *testing.T) {
 			EnableEncryptionAtHost: ptr.To(false),
 		}
 		expected := &asocontainerservicev1preview.ManagedClustersAgentPool{
-			Spec: asocontainerservicev1preview.ManagedClusters_AgentPool_Spec{
+			Spec: asocontainerservicev1preview.ManagedClustersAgentPool_Spec{
 				AzureName: "azure name",
 				Owner: &genruntime.KnownResourceReference{
 					Name: "cluster",
@@ -216,7 +216,7 @@ func TestParameters(t *testing.T) {
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), nil)
+		actual, err := spec.Parameters(t.Context(), nil)
 
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(cmp.Diff(actual, expected)).To(BeEmpty())
@@ -232,19 +232,19 @@ func TestParameters(t *testing.T) {
 			Version:           ptr.To("1.26.6"),
 		}
 		existing := &asocontainerservicev1.ManagedClustersAgentPool{
-			Spec: asocontainerservicev1.ManagedClusters_AgentPool_Spec{
+			Spec: asocontainerservicev1.ManagedClustersAgentPool_Spec{
 				AzureName: "set by the user",
 				PowerState: &asocontainerservicev1.PowerState{
 					Code: ptr.To(asocontainerservicev1.PowerState_Code("set by the user")),
 				},
 				OrchestratorVersion: ptr.To("1.27.2"),
 			},
-			Status: asocontainerservicev1.ManagedClusters_AgentPool_STATUS{
+			Status: asocontainerservicev1.ManagedClustersAgentPool_STATUS{
 				Count: ptr.To(1212),
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), existing)
+		actual, err := spec.Parameters(t.Context(), existing)
 		actualTyped, ok := actual.(*asocontainerservicev1.ManagedClustersAgentPool)
 		g.Expect(ok).To(BeTrue())
 
@@ -267,19 +267,19 @@ func TestParameters(t *testing.T) {
 			Preview:           true,
 		}
 		existing := &asocontainerservicev1preview.ManagedClustersAgentPool{
-			Spec: asocontainerservicev1preview.ManagedClusters_AgentPool_Spec{
+			Spec: asocontainerservicev1preview.ManagedClustersAgentPool_Spec{
 				AzureName: "set by the user",
 				PowerState: &asocontainerservicev1preview.PowerState{
 					Code: ptr.To(asocontainerservicev1preview.PowerState_Code("set by the user")),
 				},
 				OrchestratorVersion: ptr.To("1.27.2"),
 			},
-			Status: asocontainerservicev1preview.ManagedClusters_AgentPool_STATUS{
+			Status: asocontainerservicev1preview.ManagedClustersAgentPool_STATUS{
 				Count: ptr.To(1212),
 			},
 		}
 
-		actual, err := spec.Parameters(context.Background(), existing)
+		actual, err := spec.Parameters(t.Context(), existing)
 		actualTyped, ok := actual.(*asocontainerservicev1preview.ManagedClustersAgentPool)
 		g.Expect(ok).To(BeTrue())
 

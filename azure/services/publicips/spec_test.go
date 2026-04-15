@@ -17,7 +17,6 @@ limitations under the License.
 package publicips
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -110,9 +110,9 @@ var (
 func TestParameters(t *testing.T) {
 	testCases := []struct {
 		name          string
-		existing      interface{}
+		existing      any
 		spec          PublicIPSpec
-		expected      interface{}
+		expected      any
 		expectedError string
 	}{
 		{
@@ -146,12 +146,11 @@ func TestParameters(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

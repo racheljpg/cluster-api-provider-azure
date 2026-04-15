@@ -17,7 +17,6 @@ limitations under the License.
 package roleassignments
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
@@ -41,15 +40,15 @@ func TestRoleAssignmentSpec_Parameters(t *testing.T) {
 	testCases := []struct {
 		name          string
 		spec          *RoleAssignmentSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:     "error when existing is not of RoleAssignment type",
 			spec:     &RoleAssignmentSpec{},
 			existing: struct{}{},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "struct {} is not an armauthorization.RoleAssignment",
@@ -58,7 +57,7 @@ func TestRoleAssignmentSpec_Parameters(t *testing.T) {
 			name:     "get result as nil when existing NatGateway is present",
 			spec:     &fakeRoleAssignmentSpec,
 			existing: fakeRoleAssignment,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "",
@@ -67,7 +66,7 @@ func TestRoleAssignmentSpec_Parameters(t *testing.T) {
 			name:     "get result as nil when existing NatGateway is present with empty data",
 			spec:     &fakeRoleAssignmentSpec,
 			existing: armauthorization.RoleAssignment{},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "",
@@ -76,7 +75,7 @@ func TestRoleAssignmentSpec_Parameters(t *testing.T) {
 			name:     "get RoleAssignment when all values are present",
 			spec:     &fakeRoleAssignmentSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armauthorization.RoleAssignmentCreateParameters{}))
 				g.Expect(result.(armauthorization.RoleAssignmentCreateParameters).Properties.RoleDefinitionID).To(Equal(ptr.To[string](fakeRoleAssignmentSpec.RoleDefinitionID)))
 				g.Expect(result.(armauthorization.RoleAssignmentCreateParameters).Properties.PrincipalID).To(Equal(fakeRoleAssignmentSpec.PrincipalID))
@@ -85,12 +84,11 @@ func TestRoleAssignmentSpec_Parameters(t *testing.T) {
 		},
 	}
 	for _, tc := range testCases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

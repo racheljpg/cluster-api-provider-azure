@@ -26,15 +26,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/internal/test"
-	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/internal/test"
+	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
 )
 
 var _ = Describe("AzureMachinePoolReconciler", func() {
@@ -44,7 +46,7 @@ var _ = Describe("AzureMachinePoolReconciler", func() {
 	Context("Reconcile an AzureMachinePool", func() {
 		It("should not error with minimal set up", func() {
 			reconciler := NewAzureMachinePoolReconciler(testEnv, testEnv.GetEventRecorderFor("azuremachinepool-reconciler"),
-				reconciler.Timeouts{}, "")
+				reconciler.Timeouts{}, "", testEnv.CredentialCache)
 			By("Calling reconcile")
 			instance := &infrav1exp.AzureMachinePool{ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"}}
 			result, err := reconciler.Reconcile(context.Background(), ctrl.Request{
@@ -62,12 +64,11 @@ var _ = Describe("AzureMachinePoolReconciler", func() {
 func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 	g := NewWithT(t)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	sb := runtime.NewSchemeBuilder(
 		clusterv1.AddToScheme,
 		infrav1.AddToScheme,
-		expv1.AddToScheme,
 		infrav1exp.AddToScheme,
 		corev1.AddToScheme,
 	)
@@ -79,7 +80,7 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 
 	recorder := record.NewFakeRecorder(1)
 
-	reconciler := NewAzureMachinePoolReconciler(c, recorder, reconciler.Timeouts{}, "")
+	reconciler := NewAzureMachinePoolReconciler(c, recorder, reconciler.Timeouts{}, "", azure.NewCredentialCache())
 	name := test.RandomName("paused", 10)
 	namespace := "default"
 
@@ -89,11 +90,10 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 			Namespace: namespace,
 		},
 		Spec: clusterv1.ClusterSpec{
-			Paused: true,
-			InfrastructureRef: &corev1.ObjectReference{
-				Kind:      "AzureCluster",
-				Name:      name,
-				Namespace: namespace,
+			Paused: ptr.To(true),
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				Kind: "AzureCluster",
+				Name: name,
 			},
 		},
 	}
@@ -143,7 +143,7 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 	g.Expect(c.Create(ctx, fakeIdentity)).To(Succeed())
 	g.Expect(c.Create(ctx, fakeSecret)).To(Succeed())
 
-	mp := &expv1.MachinePool{
+	mp := &clusterv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -151,7 +151,7 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 				clusterv1.ClusterNameLabel: name,
 			},
 		},
-		Spec: expv1.MachinePoolSpec{
+		Spec: clusterv1.MachinePoolSpec{
 			ClusterName: name,
 			Template: clusterv1.MachineTemplateSpec{
 				Spec: clusterv1.MachineSpec{
@@ -169,7 +169,7 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					Kind:       "MachinePool",
-					APIVersion: expv1.GroupVersion.String(),
+					APIVersion: clusterv1.GroupVersion.String(),
 					Name:       mp.Name,
 				},
 			},
@@ -177,7 +177,7 @@ func TestAzureMachinePoolReconcilePaused(t *testing.T) {
 	}
 	g.Expect(c.Create(ctx, instance)).To(Succeed())
 
-	result, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+	result, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 		NamespacedName: client.ObjectKey{
 			Namespace: instance.Namespace,
 			Name:      instance.Name,

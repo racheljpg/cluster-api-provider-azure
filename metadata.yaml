@@ -4,6 +4,7 @@
 #
 # update this file only when a new major or minor version is released
 apiVersion: clusterctl.cluster.x-k8s.io/v1alpha3
+kind: Metadata
 releaseSeries:
   - major: 0
     minor: 3
@@ -61,4 +62,28 @@ releaseSeries:
     contract: v1beta1
   - major: 1
     minor: 15
+    contract: v1beta1
+  - major: 1
+    minor: 16
+    contract: v1beta1
+  - major: 1
+    minor: 17
+    contract: v1beta1
+  - major: 1
+    minor: 18
+    contract: v1beta1
+  - major: 1
+    minor: 19
+    contract: v1beta1
+  - major: 1
+    minor: 20
+    contract: v1beta1
+  - major: 1
+    minor: 21
+    contract: v1beta1
+  - major: 1
+    minor: 22
+    contract: v1beta1
+  - major: 1
+    minor: 23
     contract: v1beta1

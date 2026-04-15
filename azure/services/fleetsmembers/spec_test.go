@@ -17,7 +17,6 @@ limitations under the License.
 package fleetsmembers
 
 import (
-	"context"
 	"testing"
 
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230315preview"
@@ -25,12 +24,13 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
 var (
 	fakeAzureFleetsMember = asocontainerservicev1.FleetsMember{
-		Spec: asocontainerservicev1.Fleets_Member_Spec{
+		Spec: asocontainerservicev1.FleetsMember_Spec{
 			AzureName: fakeAzureFleetsMemberSpec.Name,
 			Owner: &genruntime.KnownResourceReference{
 				ARMID: azure.FleetID(fakeAzureFleetsMemberSpec.SubscriptionID, fakeAzureFleetsMemberSpec.ManagerResourceGroup, fakeAzureFleetsMemberSpec.ManagerName),
@@ -50,7 +50,7 @@ var (
 		ManagerName:          "fake-manager-name",
 		ManagerResourceGroup: "fake-manager-resource-group",
 	}
-	fakeFleetsMemberStatus = asocontainerservicev1.Fleets_Member_STATUS{
+	fakeFleetsMemberStatus = asocontainerservicev1.FleetsMember_STATUS{
 		Name:              ptr.To(fakeAzureFleetsMemberSpec.Name),
 		ProvisioningState: ptr.To(asocontainerservicev1.FleetMemberProvisioningState_STATUS_Succeeded),
 	}
@@ -115,12 +115,11 @@ func TestAzureFleetsMemberSpec_Parameters(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

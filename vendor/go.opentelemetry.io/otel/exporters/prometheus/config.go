@@ -1,25 +1,15 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package prometheus // import "go.opentelemetry.io/otel/exporters/prometheus"
 
 import (
-	"strings"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/internal/global"
 	"go.opentelemetry.io/otel/sdk/metric"
 )
 
@@ -34,6 +24,12 @@ type config struct {
 	namespace                string
 	resourceAttributesFilter attribute.Filter
 }
+
+var logDeprecatedLegacyScheme = sync.OnceFunc(func() {
+	global.Warn(
+		"prometheus exporter legacy scheme deprecated: support for the legacy NameValidationScheme will be removed in a future release",
+	)
+})
 
 // newConfig creates a validated config configured with options.
 func newConfig(opts ...Option) config {
@@ -127,9 +123,8 @@ func WithoutCounterSuffixes() Option {
 	})
 }
 
-// WithoutScopeInfo configures the Exporter to not export the otel_scope_info metric.
-// If not specified, the Exporter will create a otel_scope_info metric containing
-// the metrics' Instrumentation Scope, and also add labels about Instrumentation Scope to all metric points.
+// WithoutScopeInfo configures the Exporter to not export
+// labels about Instrumentation Scope to all metric points.
 func WithoutScopeInfo() Option {
 	return optionFunc(func(cfg config) config {
 		cfg.disableScopeInfo = true
@@ -138,17 +133,10 @@ func WithoutScopeInfo() Option {
 }
 
 // WithNamespace configures the Exporter to prefix metric with the given namespace.
-// Metadata metrics such as target_info and otel_scope_info are not prefixed since these
+// Metadata metrics such as target_info are not prefixed since these
 // have special behavior based on their name.
 func WithNamespace(ns string) Option {
 	return optionFunc(func(cfg config) config {
-		ns = sanitizeName(ns)
-		if !strings.HasSuffix(ns, "_") {
-			// namespace and metric names should be separated with an underscore,
-			// adds a trailing underscore if there is not one already.
-			ns = ns + "_"
-		}
-
 		cfg.namespace = ns
 		return cfg
 	})

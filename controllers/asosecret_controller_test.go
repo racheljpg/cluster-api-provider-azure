@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -29,18 +28,20 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
 func TestASOSecretReconcile(t *testing.T) {
-	os.Setenv("AZURE_CLIENT_ID", "fooClient")
-	os.Setenv("AZURE_CLIENT_SECRET", "fooSecret")
-	os.Setenv("AZURE_TENANT_ID", "fooTenant")
-	os.Setenv("AZURE_SUBSCRIPTION_ID", "fooSubscription")
+	os.Setenv("AZURE_CLIENT_ID", "fooClient")             //nolint:gosec,usetesting // we want to use os.Setenv here instead of t.Setenv
+	os.Setenv("AZURE_CLIENT_SECRET", "fooSecret")         //nolint:gosec,usetesting // we want to use os.Setenv here instead of t.Setenv
+	os.Setenv("AZURE_TENANT_ID", "fooTenant")             //nolint:gosec,usetesting // we want to use os.Setenv here instead of t.Setenv
+	os.Setenv("AZURE_SUBSCRIPTION_ID", "fooSubscription") //nolint:gosec,usetesting // we want to use os.Setenv here instead of t.Setenv
 
 	scheme := runtime.NewScheme()
 	_ = clusterv1.AddToScheme(scheme)
@@ -131,6 +132,31 @@ func TestASOSecretReconcile(t *testing.T) {
 					"AZURE_TENANT_ID":       []byte("fooTenant"),
 					"AZURE_CLIENT_ID":       []byte("fooClient"),
 					"AZURE_CLIENT_SECRET":   []byte("fooSecret"),
+				}
+			}),
+		},
+		"should reconcile normally for AzureManagedControlPlane with IdentityRef configured of type Service Principal with Certificate": {
+			clusterName: defaultAzureManagedControlPlane.Name,
+			objects: []runtime.Object{
+				getASOAzureManagedControlPlane(func(c *infrav1.AzureManagedControlPlane) {
+					c.Spec.IdentityRef = &corev1.ObjectReference{
+						Name:      "my-azure-cluster-identity",
+						Namespace: "default",
+					}
+				}),
+				getASOAzureClusterIdentity(func(identity *infrav1.AzureClusterIdentity) {
+					identity.Spec.Type = infrav1.ServicePrincipalCertificate
+					identity.Spec.CertPath = "../test/setup/certificate"
+				}),
+				defaultCluster,
+			},
+			asoSecret: getASOSecret(defaultAzureManagedControlPlane, func(s *corev1.Secret) {
+				s.Data = map[string][]byte{
+					"AZURE_SUBSCRIPTION_ID":             []byte("fooSubscription"),
+					"AZURE_TENANT_ID":                   []byte("fooTenant"),
+					"AZURE_CLIENT_ID":                   []byte("fooClient"),
+					"AZURE_CLIENT_CERTIFICATE_PASSWORD": []byte(""),
+					"AZURE_CLIENT_CERTIFICATE":          []byte("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDjrdEr9P0TaUES\ndspE6cyo22NU8yhRrbYlV9VH2vWvnPsThXcxhnd+cUqdNEBswhwgFlUQcg/eSVxw\nrr+3nh+bFTZWPcY+1LQYxfpKGsrCXQfB82LDJIZDX4gHYrWf3Z272jXN1XeFAKti\nwDKgDXXuPH7r5lH7vC3RXeAffqLwQJhZf+NoHNtv9MH9IdUkQfmDFZtI/CQzCrb6\n+vOS6EmUD/Q2FNHBzgxCguGqgNyBcQbxJ9Qng+ZjIFuhGYXJlsyRUtexyzTR5/v0\nVNK8UsZgRBFhXqrBv/RoCCG+xVJYtmd0QsrvNzDqG6QnjUB21zVXqzKEkW2gRtjX\ncw4vYQehAgMBAAECggEAS6xtjg0nAokk0jS+ZOpKlkMZAFaza3ZvyHipkHDz4PMt\ntl7Rb5oQZGvWT2rbEOrxey7BBi7LHGhIu8ExQp/hRGPoBAETP7XlyCghWPkPtEtE\ndU/mXxLoN0NszHuf/2si7pmH8YqGZ6QB0tgr22ut60mbK+AJFsEEf4aSpBUspepJ\n2800sQHsqPE6L6kYkfZ2GRRY1V9vUrYEODKZpWzMhN3UA9nAKH9PB6xvP2OdyMNh\nhKgmUUMNIFtwr8pZlJn60cf0UrWrc5CvqQLuaGYlzDgUQGV4JEVjqm9F6lMfEPUw\neN70MVe1pcLeLq2rGCVWU3gakh/HvJqlR/sa546HgwKBgQDyf1vkyX4w5sboi6DJ\ncl5dMULtMMRpB1OaMFVOJjI9gZJ8mCdRjqXdYo5aS2KIqxie8tGG9+SohxDAWl4t\nlSUtDsE44fSmILqC5zIawNRQnnkv0X8LwmYu0Qd7YAjJMlLTWyDRsjD9XRq4nsR+\nmJVwrt85iSpS5UFyryEzPbFj0wKBgQDwWzraeN0Eccf1iIYmQsYy+yMEAlHNR5yi\ngPXuAhSybv2JReRhdUb39hLr/LvKw0ZeXiLWXmYUGpbyzPyXIm0s+PL3LWl65GTF\nl+cfV5wfAdDkk6rAdEPEE2pxN85ChyaPYPoYr0ohmV97VQcYc5FqY+j1tM6R1RDt\n/fWBSa8iOwKBgQCpa1dtWWTDj4gqUdrswu2wmEkU47xlUIwVLm164u64z/zi9X6K\n2WmCaWfhJ8fYigjyi9zdOfXT1EFc0gX4PLozZ5qRPjQpmLYV3KbB0DTFemJaiTgE\npDW1wa5DgQ3CW1lIduNP/fmCGfkgQTQw6jOF/XbRgMZEEg2OrVI5tYFopwKBgER9\niqjEth5VGejCjY+LiZTvcUvsKUk4tc6stueqmiE6dW7PhsOqup1f9oZej1i5Cm1L\nn9u8LJRf+1GWzgd3HOsqyXlb7GnDeV/A6HBK88b2KoNn/Mk4mDLgYX1/rHvSrU9A\nECRGlvY6ETZAxXPXQsGxVKnnatGtiFR5AKNlzs0PAoGAa5+X+DUqGh9aE5ID3wrv\njkjxQ2KLFJCNSq8f9GSuvpvgXstHh6wKoM6vMwIShjgXuURH8Ub4uhRsWnxMildF\n7EE+QaWU9jnCm2HQYArfXrAWw6DBudiSkBqgKc6HjDHun5fXlYUo8UesNMQOrg7b\nbydQZ5/4V/1oSWPETk7jSr0=\n-----END PRIVATE KEY-----\n-----BEGIN CERTIFICATE-----\nMIIDCTCCAfGgAwIBAgIUFSntEn+Tv6HM2xJReECJpJcC7iUwDQYJKoZIhvcNAQEL\nBQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI0MDEwODE5NTQxNFoXDTM0MDEw\nNTE5NTQxNFowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF\nAAOCAQ8AMIIBCgKCAQEA463RK/T9E2lBEnbKROnMqNtjVPMoUa22JVfVR9r1r5z7\nE4V3MYZ3fnFKnTRAbMIcIBZVEHIP3klccK6/t54fmxU2Vj3GPtS0GMX6ShrKwl0H\nwfNiwySGQ1+IB2K1n92du9o1zdV3hQCrYsAyoA117jx+6+ZR+7wt0V3gH36i8ECY\nWX/jaBzbb/TB/SHVJEH5gxWbSPwkMwq2+vrzkuhJlA/0NhTRwc4MQoLhqoDcgXEG\n8SfUJ4PmYyBboRmFyZbMkVLXscs00ef79FTSvFLGYEQRYV6qwb/0aAghvsVSWLZn\ndELK7zcw6hukJ41Adtc1V6syhJFtoEbY13MOL2EHoQIDAQABo1MwUTAdBgNVHQ4E\nFgQUfry/KDtamwMlRQsFPbBhzdv2U5cwHwYDVR0jBBgwFoAUfry/KDtamwMlRQsF\nPbBhzdv2U5cwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAyYst\nVvewKRRpuYRWc4XG6WnYphUdyZLMoIlq0syZ1aj6YbqoK9NMHAYEnCvSov6zIZOa\ntrhuUcf9GFz5e0iJ2zIlDc312Iwsv41xiC/bs16kEn8Yf/SujEXasj7vmA3HrFWf\nwZTH/yFL5azo/f+lA1Q28YwqFpHmle0y0O53Uth4p0tmwlnu+CrO9fHp3kTlb7fD\n6mqfk9Nrt8tOC4aHYDoqtYUgZhx58xsHMOTetKeRlp8HMF9oROtriz4nYm6IhTwo\n5k1A13S3BjaxkZCyPXCgXssuXagNLasrr5Qq+Vgdb/nDhVehV8+Z4J0Ynzy9MZsE\nH1N1NfMtsA+PEqtPXA==\n-----END CERTIFICATE-----\n"),
 				}
 			}),
 		},
@@ -251,13 +277,13 @@ func TestASOSecretReconcile(t *testing.T) {
 			objects: []runtime.Object{
 				defaultAzureCluster,
 			},
-			err: "failed to get Cluster/my-cluster: clusters.cluster.x-k8s.io \"my-cluster\" not found",
+			err: "failed to get Cluster default/my-cluster: clusters.cluster.x-k8s.io \"my-cluster\" not found",
 		},
 		"should return if cluster is paused": {
 			clusterName: defaultAzureCluster.Name,
 			objects: []runtime.Object{
 				getASOCluster(func(c *clusterv1.Cluster) {
-					c.Spec.Paused = true
+					c.Spec.Paused = ptr.To(true)
 				}),
 				getASOAzureCluster(func(c *infrav1.AzureCluster) {
 					c.Spec.IdentityRef = &corev1.ObjectReference{
@@ -291,11 +317,12 @@ func TestASOSecretReconcile(t *testing.T) {
 			clientBuilder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.objects...).Build()
 
 			reconciler := &ASOSecretReconciler{
-				Client:   clientBuilder,
-				Recorder: record.NewFakeRecorder(128),
+				Client:          clientBuilder,
+				Recorder:        record.NewFakeRecorder(128),
+				CredentialCache: azure.NewCredentialCache(),
 			}
 
-			_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: "default",
 					Name:      tc.clusterName,
@@ -303,7 +330,7 @@ func TestASOSecretReconcile(t *testing.T) {
 			})
 
 			existingASOSecret := &corev1.Secret{}
-			asoSecretErr := clientBuilder.Get(context.Background(), types.NamespacedName{
+			asoSecretErr := clientBuilder.Get(t.Context(), types.NamespacedName{
 				Namespace: defaultASOSecret.Namespace,
 				Name:      defaultASOSecret.Name,
 			}, existingASOSecret)
@@ -334,12 +361,14 @@ func getASOCluster(changes ...func(*clusterv1.Cluster)) *clusterv1.Cluster {
 			Namespace: "default",
 		},
 		Spec: clusterv1.ClusterSpec{
-			InfrastructureRef: &corev1.ObjectReference{
-				APIVersion: infrav1.GroupVersion.String(),
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: infrav1.GroupVersion.Group,
 			},
 		},
 		Status: clusterv1.ClusterStatus{
-			InfrastructureReady: true,
+			Initialization: clusterv1.ClusterInitializationStatus{
+				InfrastructureProvisioned: ptr.To(true),
+			},
 		},
 	}
 

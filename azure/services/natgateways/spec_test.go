@@ -17,7 +17,6 @@ limitations under the License.
 package natgateways
 
 import (
-	"context"
 	"testing"
 
 	asonetworkv1 "github.com/Azure/azure-service-operator/v2/api/network/v1api20220701"
@@ -26,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -35,6 +35,7 @@ var (
 		ResourceGroup:  "my-rg",
 		SubscriptionID: "123",
 		Location:       "eastus",
+		Zones:          []string{"eastus-1"},
 		NatGatewayIP: infrav1.PublicIPSpec{
 			Name:    "my-natgateway-ip",
 			DNSName: "Standard",
@@ -58,10 +59,11 @@ var (
 			AzureName:            "my-natgateway",
 			IdleTimeoutInMinutes: ptr.To(6),
 			Location:             locationPtr,
+			Zones:                []string{"eastus-1"},
 			Owner: &genruntime.KnownResourceReference{
 				Name: "my-rg",
 			},
-			PublicIpAddresses: []asonetworkv1.ApplicationGatewaySubResource{
+			PublicIpAddresses: []asonetworkv1.SubResource{
 				{
 					Reference: &genruntime.ResourceReference{
 						ARMID: "/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/publicIPAddresses/my-natgateway-ip",
@@ -82,7 +84,7 @@ var (
 			Location:             locationPtr,
 			Name:                 ptr.To("my-natgateway"),
 			ProvisioningState:    ptr.To(asonetworkv1.ApplicationGatewayProvisioningState_STATUS_Succeeded),
-			PublicIpAddresses: []asonetworkv1.ApplicationGatewaySubResource_STATUS{
+			PublicIpAddresses: []asonetworkv1.SubResource_STATUS{
 				{
 					Id: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/publicIPAddresses/my-natgateway-ip"),
 				},
@@ -113,6 +115,8 @@ func TestParameters(t *testing.T) {
 				g.Expect(parameters.Spec.Owner.Name).To(Equal("my-rg"))
 				g.Expect(parameters.Spec.Location).NotTo(BeNil())
 				g.Expect(parameters.Spec.Location).To(Equal(locationPtr))
+				g.Expect(parameters.Spec.Zones).To(HaveLen(1))
+				g.Expect(parameters.Spec.Zones[0]).To(Equal("eastus-1"))
 				g.Expect(parameters.Spec.Sku.Name).NotTo(BeNil())
 				g.Expect(parameters.Spec.Sku.Name).To(Equal(standardSKUPtr))
 				g.Expect(parameters.Spec.PublicIpAddresses).To(HaveLen(1))
@@ -133,12 +137,11 @@ func TestParameters(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, _ := tc.spec.Parameters(context.TODO(), tc.existingSpec.DeepCopy())
+			result, _ := tc.spec.Parameters(t.Context(), tc.existingSpec.DeepCopy())
 			tc.expect(g, tc.existingSpec, result)
 		})
 	}

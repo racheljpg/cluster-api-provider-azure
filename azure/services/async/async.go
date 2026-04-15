@@ -24,6 +24,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/pkg/errors"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -53,13 +54,14 @@ func New[C, D any](scope FutureScope, createClient Creator[C], deleteClient Dele
 }
 
 // CreateOrUpdateResource creates a new resource or updates an existing one asynchronously.
-func (s *Service[C, D]) CreateOrUpdateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result interface{}, err error) {
+func (s *Service[C, D]) CreateOrUpdateResource(ctx context.Context, spec azure.ResourceSpecGetter, serviceName string) (result any, err error) {
 	ctx, log, done := tele.StartSpanWithLogger(ctx, "async.Service.CreateOrUpdateResource")
 	defer done()
 
 	resourceName := spec.ResourceName()
 	rgName := spec.ResourceGroupName()
 	futureType := infrav1.PutFuture
+	log.V(4).Info("CreateOrUpdateResource", "resourceName", resourceName, "rgName", rgName, "futureType", futureType)
 
 	// Check if there is an ongoing long-running operation.
 	resumeToken := ""
@@ -70,14 +72,15 @@ func (s *Service[C, D]) CreateOrUpdateResource(ctx context.Context, spec azure.R
 			return "", errors.Wrap(err, "could not decode future data, resetting long-running operation state")
 		}
 		resumeToken = t
+		log.V(4).Info("Found a resume token for this long running operation", "resumeToken", resumeToken)
 	}
 
 	// Only when no long running operation is currently in progress do we need to get the parameters.
 	// The polling implemented by the SDK does not use parameters when a resume token exists.
-	var parameters interface{}
+	var parameters any
 	if resumeToken == "" {
 		// Get the resource if it already exists, and use it to construct the desired resource parameters.
-		var existingResource interface{}
+		var existingResource any
 		if existing, err := s.Creator.Get(ctx, spec); err != nil && !azure.ResourceNotFound(err) {
 			errWrapped := errors.Wrapf(err, "failed to get existing resource %s/%s (service: %s)", rgName, resourceName, serviceName)
 			return nil, azure.WithTransientError(errWrapped, getRetryAfterFromError(err))

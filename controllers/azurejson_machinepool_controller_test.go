@@ -17,7 +17,6 @@ limitations under the License.
 package controllers
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -31,16 +30,16 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/identities/mock_identities"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestAzureJSONPoolReconciler(t *testing.T) {
@@ -54,10 +53,10 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 			Name: "my-cluster",
 		},
 		Spec: clusterv1.ClusterSpec{
-			InfrastructureRef: &corev1.ObjectReference{
-				APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
-				Kind:       infrav1.AzureClusterKind,
-				Name:       "my-azure-cluster",
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: "infrastructure.cluster.x-k8s.io",
+				Kind:     infrav1.AzureClusterKind,
+				Name:     "my-azure-cluster",
 			},
 		},
 	}
@@ -95,7 +94,7 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 		},
 	}
 
-	machinePool := &expv1.MachinePool{
+	machinePool := &clusterv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "my-machine-pool",
 			Labels: map[string]string{
@@ -174,7 +173,7 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 						Name: "my-cluster",
 					},
 					Spec: clusterv1.ClusterSpec{
-						InfrastructureRef: nil,
+						InfrastructureRef: clusterv1.ContractVersionedObjectReference{},
 					},
 				},
 				azureCluster,
@@ -192,10 +191,10 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 						Name: "my-cluster",
 					},
 					Spec: clusterv1.ClusterSpec{
-						InfrastructureRef: &corev1.ObjectReference{
-							APIVersion: "infrastructure.cluster.x-k8s.io/v1beta1",
-							Kind:       "FooCluster",
-							Name:       "my-foo-cluster",
+						InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+							APIGroup: "infrastructure.cluster.x-k8s.io",
+							Kind:     "FooCluster",
+							Name:     "my-foo-cluster",
 						},
 					},
 				},
@@ -219,11 +218,12 @@ func TestAzureJSONPoolReconciler(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(tc.objects...).Build()
 
 			reconciler := &AzureJSONMachinePoolReconciler{
-				Client:   client,
-				Recorder: record.NewFakeRecorder(128),
+				Client:          client,
+				Recorder:        record.NewFakeRecorder(128),
+				CredentialCache: azure.NewCredentialCache(),
 			}
 
-			_, err := reconciler.Reconcile(context.Background(), ctrl.Request{
+			_, err := reconciler.Reconcile(t.Context(), ctrl.Request{
 				NamespacedName: types.NamespacedName{
 					Namespace: "",
 					Name:      "my-azure-machine-pool",
@@ -248,7 +248,7 @@ func TestAzureJSONPoolReconcilerUserAssignedIdentities(t *testing.T) {
 	ctrlr := gomock.NewController(t)
 	defer ctrlr.Finish()
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "fake-machine-pool", Namespace: "fake-ns"}}
-	ctx := context.Background()
+	ctx := t.Context()
 	scheme, err := newScheme()
 	g.Expect(err).NotTo(HaveOccurred())
 
@@ -261,7 +261,7 @@ func TestAzureJSONPoolReconcilerUserAssignedIdentities(t *testing.T) {
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: fmt.Sprintf("%s/%s", expv1.GroupVersion.Group, expv1.GroupVersion.Version),
+					APIVersion: fmt.Sprintf("%s/%s", clusterv1.GroupVersion.Group, clusterv1.GroupVersion.Version),
 					Kind:       "MachinePool",
 					Name:       "fake-other-machine-pool",
 					Controller: to.Ptr(true),
@@ -283,15 +283,14 @@ func TestAzureJSONPoolReconcilerUserAssignedIdentities(t *testing.T) {
 			Namespace: "fake-ns",
 		},
 		Spec: clusterv1.ClusterSpec{
-			InfrastructureRef: &corev1.ObjectReference{
-				Kind:      "AzureCluster",
-				Name:      "fake-azure-cluster",
-				Namespace: "fake-ns",
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				Kind: "AzureCluster",
+				Name: "fake-azure-cluster",
 			},
 		},
 	}
 
-	ownerMP := &expv1.MachinePool{
+	ownerMP := &clusterv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "fake-other-machine-pool",
 			Namespace: "fake-ns",
@@ -374,12 +373,13 @@ func TestAzureJSONPoolReconcilerUserAssignedIdentities(t *testing.T) {
 
 	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(azureMP, ownerMP, cluster, azureCluster, sec, fakeIdentity).Build()
 	rec := AzureJSONMachinePoolReconciler{
-		Client:   client,
-		Recorder: record.NewFakeRecorder(42),
-		Timeouts: reconciler.Timeouts{},
+		Client:          client,
+		Recorder:        record.NewFakeRecorder(42),
+		Timeouts:        reconciler.Timeouts{},
+		CredentialCache: azure.NewCredentialCache(),
 	}
 	id := "azure:///subscriptions/123/resourceGroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/fake-provider-id"
-	getClient = func(auth azure.Authorizer) (identities.Client, error) {
+	getClient = func(_ azure.Authorizer) (identities.Client, error) {
 		mockClient := mock_identities.NewMockClient(ctrlr)
 		mockClient.EXPECT().GetClientID(gomock.Any(), gomock.Any()).Return(id, nil)
 		return mockClient, nil

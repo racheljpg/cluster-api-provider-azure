@@ -24,10 +24,12 @@ import (
 	"golang.org/x/crypto/ssh"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	apiinternal "sigs.k8s.io/cluster-api-provider-azure/internal/api/v1beta1"
 	azureutil "sigs.k8s.io/cluster-api-provider-azure/util/azure"
 	utilSSH "sigs.k8s.io/cluster-api-provider-azure/util/ssh"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // SetDefaults sets the default values for an AzureMachinePool.
@@ -42,6 +44,7 @@ func (amp *AzureMachinePool) SetDefaults(client client.Client) error {
 	}
 	amp.SetDiagnosticsDefaults()
 	amp.SetNetworkInterfacesDefaults()
+	amp.SetOSDiskDefaults()
 
 	return kerrors.NewAggregate(errs)
 }
@@ -68,17 +71,17 @@ func (amp *AzureMachinePool) SetIdentityDefaults(client client.Client) error {
 		return nil
 	}
 	if amp.Spec.Identity == infrav1.VMIdentitySystemAssigned {
-		machinePool, err := azureutil.FindParentMachinePoolWithRetry(amp.Name, client, 5)
+		machinePool, err := azureutil.FindParentMachinePoolWithRetryV1Beta1(amp.Name, client, 5)
 		if err != nil {
 			return errors.Wrap(err, "failed to find parent machine pool")
 		}
 
-		ownerAzureClusterName, ownerAzureClusterNamespace, err := infrav1.GetOwnerAzureClusterNameAndNamespace(client, machinePool.Spec.ClusterName, machinePool.Namespace, 5)
+		ownerAzureClusterName, ownerAzureClusterNamespace, err := apiinternal.GetOwnerAzureClusterNameAndNamespace(client, machinePool.Spec.ClusterName, machinePool.Namespace, 5)
 		if err != nil {
 			return errors.Wrap(err, "failed to get owner cluster")
 		}
 
-		subscriptionID, err := infrav1.GetSubscriptionID(client, ownerAzureClusterName, ownerAzureClusterNamespace, 5)
+		subscriptionID, err := apiinternal.GetSubscriptionID(client, ownerAzureClusterName, ownerAzureClusterNamespace, 5)
 		if err != nil {
 			return errors.Wrap(err, "failed to get subscription ID")
 		}
@@ -98,7 +101,7 @@ func (amp *AzureMachinePool) SetIdentityDefaults(client client.Client) error {
 		}
 		if amp.Spec.SystemAssignedIdentityRole.DefinitionID == "" {
 			// Default role definition ID to Contributor role.
-			amp.Spec.SystemAssignedIdentityRole.DefinitionID = fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, infrav1.ContributorRoleID)
+			amp.Spec.SystemAssignedIdentityRole.DefinitionID = fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", subscriptionID, apiinternal.ContributorRoleID)
 		}
 	}
 	return nil
@@ -157,5 +160,15 @@ func (amp *AzureMachinePool) SetNetworkInterfacesDefaults() {
 		if amp.Spec.Template.NetworkInterfaces[i].PrivateIPConfigs == 0 {
 			amp.Spec.Template.NetworkInterfaces[i].PrivateIPConfigs = 1
 		}
+	}
+}
+
+// SetOSDiskDefaults sets the defaults for the OSDisk.
+func (amp *AzureMachinePool) SetOSDiskDefaults() {
+	if amp.Spec.Template.OSDisk.OSType == "" {
+		amp.Spec.Template.OSDisk.OSType = "Linux"
+	}
+	if amp.Spec.Template.OSDisk.CachingType == "" {
+		amp.Spec.Template.OSDisk.CachingType = "None"
 	}
 }

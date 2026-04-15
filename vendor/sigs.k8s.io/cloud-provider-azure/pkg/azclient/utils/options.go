@@ -55,8 +55,10 @@ func GetDefaultAzCoreClientOption() policy.ClientOptions {
 		},
 		Transport: &http.Client{
 			Transport: DefaultTransport,
+			Timeout:   time.Minute,
 		},
-		TracingProvider: TracingProvider,
-		Cloud:           cloud.AzurePublic,
+		TracingProvider:                 TracingProvider,
+		Cloud:                           cloud.AzurePublic,
+		InsecureAllowCredentialWithHTTP: true,
 	}
 }

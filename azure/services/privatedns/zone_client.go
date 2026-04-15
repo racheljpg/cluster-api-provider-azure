@@ -23,6 +23,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
 	"github.com/pkg/errors"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -48,7 +49,7 @@ func newPrivateZonesClient(auth azure.Authorizer, apiCallTimeout time.Duration) 
 }
 
 // Get gets the specified private dns zone.
-func (azc *azureZonesClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result interface{}, err error) {
+func (azc *azureZonesClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result any, err error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "privatedns.azureZonesClient.Get")
 	defer done()
 
@@ -62,7 +63,7 @@ func (azc *azureZonesClient) Get(ctx context.Context, spec azure.ResourceSpecGet
 // CreateOrUpdateAsync creates or updates a private dns zone asynchronously.
 // It sends a PUT request to Azure and if accepted without error, the func will return a poller which can be used to track the ongoing
 // progress of the operation.
-func (azc *azureZonesClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters interface{}) (result interface{}, poller *runtime.Poller[armprivatedns.PrivateZonesClientCreateOrUpdateResponse], err error) {
+func (azc *azureZonesClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters any) (result any, poller *runtime.Poller[armprivatedns.PrivateZonesClientCreateOrUpdateResponse], err error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "privatedns.azureZonesClient.CreateOrUpdateAsync")
 	defer done()
 

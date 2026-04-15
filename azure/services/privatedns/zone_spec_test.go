@@ -17,12 +17,12 @@ limitations under the License.
 package privatedns
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/privatedns/armprivatedns"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 )
 
@@ -54,15 +54,15 @@ func TestZoneSpec_Parameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          ZoneSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:          "new private dns zone",
 			expectedError: "",
 			spec:          zoneSpec,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(Equal(armprivatedns.PrivateZone{
 					Location: ptr.To(azure.Global),
 					Tags: map[string]*string{
@@ -78,7 +78,7 @@ func TestZoneSpec_Parameters(t *testing.T) {
 			existing: armprivatedns.PrivateZone{Tags: map[string]*string{
 				"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			}},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -87,7 +87,7 @@ func TestZoneSpec_Parameters(t *testing.T) {
 			expectedError: "",
 			spec:          zoneSpec,
 			existing:      armprivatedns.PrivateZone{},
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 		},
@@ -100,12 +100,11 @@ func TestZoneSpec_Parameters(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

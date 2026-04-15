@@ -16,7 +16,7 @@
 
 ###############################################################################
 
-# To run locally, set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
+# To run locally, set AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID
 
 set -o errexit
 set -o nounset
@@ -30,6 +30,7 @@ KIND="${REPO_ROOT}/hack/tools/bin/kind"
 KUSTOMIZE="${REPO_ROOT}/hack/tools/bin/kustomize"
 make --directory="${REPO_ROOT}" "${KUBECTL##*/}" "${HELM##*/}" "${KIND##*/}" "${KUSTOMIZE##*/}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-capz}"
+WORKER_MACHINE_COUNT="${WORKER_MACHINE_COUNT:-2}"
 export KIND_CLUSTER_NAME
 # export the variables so they are available in bash -c wait_for_nodes below
 export KUBECTL
@@ -39,8 +40,6 @@ export HELM
 source "${REPO_ROOT}/hack/ensure-go.sh"
 # shellcheck source=hack/ensure-tags.sh
 source "${REPO_ROOT}/hack/ensure-tags.sh"
-# shellcheck source=hack/parse-prow-creds.sh
-source "${REPO_ROOT}/hack/parse-prow-creds.sh"
 # shellcheck source=hack/util.sh
 source "${REPO_ROOT}/hack/util.sh"
 
@@ -77,8 +76,14 @@ setup() {
     fi
 
     if [[ "${KUBERNETES_VERSION:-}" =~ "latest" ]]; then
-        CI_VERSION_URL="https://dl.k8s.io/ci/${KUBERNETES_VERSION}.txt"
-        export CI_VERSION="${CI_VERSION:-$(curl --retry 3 -sSL "${CI_VERSION_URL}")}"
+        EOL_VERSION="$(capz::util::get_eol_k8s_version "${KUBERNETES_VERSION}" || true)"
+        if [[ -n "${EOL_VERSION}" ]]; then
+            echo "EOL Kubernetes version detected, using release ${EOL_VERSION}"
+            export CI_VERSION="${EOL_VERSION}"
+        else
+            CI_VERSION_URL="https://dl.k8s.io/ci/${KUBERNETES_VERSION}.txt"
+            export CI_VERSION="${CI_VERSION:-$(curl --retry 3 -sSL "${CI_VERSION_URL}")}"
+        fi
     fi
     if [[ -n "${CI_VERSION:-}" ]]; then
         echo "Using CI_VERSION ${CI_VERSION}"
@@ -96,8 +101,16 @@ setup() {
         echo ''
     )}"
     export AZURE_RESOURCE_GROUP="${CLUSTER_NAME}"
-    export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region)}"
-    echo "Using AZURE_LOCATION: ${AZURE_LOCATION}"
+    if [ "${WORKER_MACHINE_COUNT}" -gt "10" ]; then
+        export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region_load)}"
+        echo "Using AZURE_LOCATION: ${AZURE_LOCATION}"
+    else
+        export AZURE_LOCATION="${AZURE_LOCATION:-$(capz::util::get_random_region)}"
+        echo "Using AZURE_LOCATION: ${AZURE_LOCATION}"
+    fi
+    # TODO these AZURE_LOCATION_* overrides may have the effect of
+    # disassociating VM regions from disks, leading to attachment failures.
+    # Less likely with GPU scenarios but FYI.
     export AZURE_LOCATION_GPU="${AZURE_LOCATION_GPU:-$(capz::util::get_random_region_gpu)}"
     echo "Using AZURE_LOCATION_GPU: ${AZURE_LOCATION_GPU}"
     export AZURE_LOCATION_EDGEZONE="${AZURE_LOCATION_EDGEZONE:-$(capz::util::get_random_region_edgezone)}"
@@ -106,11 +119,13 @@ setup() {
     export CONTROL_PLANE_MACHINE_COUNT="${CONTROL_PLANE_MACHINE_COUNT:-1}"
     export CCM_COUNT="${CCM_COUNT:-1}"
     export WORKER_MACHINE_COUNT="${WORKER_MACHINE_COUNT:-2}"
+    export MONITORING_MACHINE_COUNT="${MONITORING_MACHINE_COUNT:-0}"
     export EXP_CLUSTER_RESOURCE_SET="true"
 
     # TODO figure out a better way to account for expected Windows node count
-    if [[ -n "${TEST_WINDOWS:-}" ]]; then
+    if [[ "${TEST_WINDOWS:-}" == "true" ]]; then
         export WINDOWS_WORKER_MACHINE_COUNT="${WINDOWS_WORKER_MACHINE_COUNT:-2}"
+        export WINDOWS_SERVER_VERSION="${WINDOWS_SERVER_VERSION:-windows-2022}"
     fi
 }
 
@@ -131,6 +146,10 @@ select_cluster_template() {
             export CLUSTER_TEMPLATE="${CLUSTER_TEMPLATE/custom-builds/custom-builds-machine-pool}"
         fi
     fi
+
+    if [[ "${TEST_WINDOWS:-}" == "true" ]]; then
+        export CLUSTER_TEMPLATE="${CLUSTER_TEMPLATE/.yaml/-windows.yaml}"
+    fi
 }
 
 create_cluster() {
@@ -139,6 +158,7 @@ create_cluster() {
         echo "Unable to find kubeconfig for kind mgmt cluster ${KIND_CLUSTER_NAME}"
         exit 1
     fi
+    "${KUBECTL}" --kubeconfig "${REPO_ROOT}/${KIND_CLUSTER_NAME}.kubeconfig" get clusters -A
 
     # set the SSH bastion and user that can be used to SSH into nodes
     KUBE_SSH_BASTION=$(${KUBECTL} get azurecluster -o json | jq '.items[0].spec.networkSpec.apiServerLB.frontendIPs[0].publicIP.dnsName' | tr -d \"):22
@@ -147,28 +167,12 @@ create_cluster() {
     export KUBE_SSH_USER
 }
 
-# copy_kubeadm_config_map copies the kubeadm configmap into the calico-system namespace.
-# any retryable operation in this function must return a non-zero exit code on failure so that we can
-# retry it using a `until copy_kubeadm_config_map; do sleep 5; done` pattern;
-# and any statement must be idempotent so that subsequent retry attempts can make forward progress.
-copy_kubeadm_config_map() {
-    # Copy the kubeadm configmap to the calico-system namespace.
-    # This is a workaround needed for the calico-node-windows daemonset
-    # to be able to run in the calico-system namespace.
-    # First, validate that the kubeadm-config configmap has been created.
-    "${KUBECTL}" get configmap kubeadm-config --namespace=kube-system -o yaml || return 1
-    "${KUBECTL}" create namespace calico-system --dry-run=client -o yaml | kubectl apply -f - || return 1
-    if ! "${KUBECTL}" get configmap kubeadm-config --namespace=calico-system; then
-        "${KUBECTL}" get configmap kubeadm-config --namespace=kube-system -o yaml | sed 's/namespace: kube-system/namespace: calico-system/' | "${KUBECTL}" apply -f - || return 1
-    fi
-}
-
 # wait_for_nodes returns when all nodes in the workload cluster are Ready.
 wait_for_nodes() {
-    echo "Waiting for ${CONTROL_PLANE_MACHINE_COUNT} control plane machine(s), ${WORKER_MACHINE_COUNT} worker machine(s), and ${WINDOWS_WORKER_MACHINE_COUNT:-0} windows machine(s) to become Ready"
+  echo "Waiting for ${CONTROL_PLANE_MACHINE_COUNT} control plane machine(s), ${WORKER_MACHINE_COUNT} worker machine(s), ${WINDOWS_WORKER_MACHINE_COUNT:-0} windows machine(s), and ${MONITORING_MACHINE_COUNT} monitoring machine(s) to become Ready"
 
     # Ensure that all nodes are registered with the API server before checking for readiness
-    local total_nodes="$((CONTROL_PLANE_MACHINE_COUNT + WORKER_MACHINE_COUNT + WINDOWS_WORKER_MACHINE_COUNT))"
+    local total_nodes="$((CONTROL_PLANE_MACHINE_COUNT + WORKER_MACHINE_COUNT + WINDOWS_WORKER_MACHINE_COUNT + MONITORING_MACHINE_COUNT))"
     while [[ $("${KUBECTL}" get nodes -ojson | jq '.items | length') -ne "${total_nodes}" ]]; do
         sleep 10
     done
@@ -200,11 +204,6 @@ wait_for_pods() {
 }
 
 install_addons() {
-    # export the target cluster KUBECONFIG if not already set
-    export KUBECONFIG="${KUBECONFIG:-${PWD}/kubeconfig}"
-    until copy_kubeadm_config_map; do
-        sleep 5
-    done
     # In order to determine the successful outcome of CNI and cloud-provider-azure,
     # we need to wait a little bit for nodes and pods terminal state,
     # so we block successful return upon the cluster being fully operational.
@@ -236,7 +235,7 @@ capz::ci-entrypoint::on_exit() {
     "${REPO_ROOT}/hack/log/redact.sh" || true
     # cleanup all resources we use
     if [[ ! "${SKIP_CLEANUP:-}" == "true" ]]; then
-        timeout 1800 "${KUBECTL}" --kubeconfig "${REPO_ROOT}/${KIND_CLUSTER_NAME}.kubeconfig" delete cluster "${CLUSTER_NAME}" || echo "Unable to delete cluster ${CLUSTER_NAME}"
+        timeout 1800 "${KUBECTL}" --kubeconfig "${REPO_ROOT}/${KIND_CLUSTER_NAME}.kubeconfig" delete cluster "${CLUSTER_NAME}" -n default || echo "Unable to delete cluster ${CLUSTER_NAME}"
         make --directory="${REPO_ROOT}" kind-reset || true
     fi
 }
@@ -250,8 +249,16 @@ export ARTIFACTS="${ARTIFACTS:-${PWD}/_artifacts}"
 # create cluster
 create_cluster
 
-# install CNI and CCM
-install_addons
+# export the target cluster KUBECONFIG if not already set
+export KUBECONFIG="${KUBECONFIG:-${PWD}/kubeconfig}"
+
+if [[ ! "${CLUSTER_TEMPLATE}" =~ "aks" ]]; then
+  # install CNI and CCM
+  install_addons
+fi
+
+"${KUBECTL}" --kubeconfig "${REPO_ROOT}/${KIND_CLUSTER_NAME}.kubeconfig" wait -A --for=condition=Ready --timeout=10m -l "cluster.x-k8s.io/cluster-name=${CLUSTER_NAME}" machinepools.v1beta1.cluster.x-k8s.io,machinedeployments.v1beta1.cluster.x-k8s.io
+
 echo "Cluster ${CLUSTER_NAME} created and fully operational"
 
 if [[ "${#}" -gt 0 ]]; then

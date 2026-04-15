@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -33,32 +34,33 @@ import (
 
 // VMSpec defines the specification for a Virtual Machine.
 type VMSpec struct {
-	Name                       string
-	ResourceGroup              string
-	Location                   string
-	ExtendedLocation           *infrav1.ExtendedLocationSpec
-	ClusterName                string
-	Role                       string
-	NICIDs                     []string
-	SSHKeyData                 string
-	Size                       string
-	AvailabilitySetID          string
-	Zone                       string
-	Identity                   infrav1.VMIdentity
-	OSDisk                     infrav1.OSDisk
-	DataDisks                  []infrav1.DataDisk
-	UserAssignedIdentities     []infrav1.UserAssignedIdentity
-	SpotVMOptions              *infrav1.SpotVMOptions
-	SecurityProfile            *infrav1.SecurityProfile
-	AdditionalTags             infrav1.Tags
-	AdditionalCapabilities     *infrav1.AdditionalCapabilities
-	DiagnosticsProfile         *infrav1.Diagnostics
-	DisableExtensionOperations bool
-	CapacityReservationGroupID string
-	SKU                        resourceskus.SKU
-	Image                      *infrav1.Image
-	BootstrapData              string
-	ProviderID                 string
+	Name                        string
+	ResourceGroup               string
+	Location                    string
+	ExtendedLocation            *infrav1.ExtendedLocationSpec
+	ClusterName                 string
+	Role                        string
+	NICIDs                      []string
+	SSHKeyData                  string
+	Size                        string
+	AvailabilitySetID           string
+	Zone                        string
+	Identity                    infrav1.VMIdentity
+	OSDisk                      infrav1.OSDisk
+	DataDisks                   []infrav1.DataDisk
+	UserAssignedIdentities      []infrav1.UserAssignedIdentity
+	SpotVMOptions               *infrav1.SpotVMOptions
+	SecurityProfile             *infrav1.SecurityProfile
+	AdditionalTags              infrav1.Tags
+	AdditionalCapabilities      *infrav1.AdditionalCapabilities
+	DiagnosticsProfile          *infrav1.Diagnostics
+	DisableExtensionOperations  bool
+	DisableVMBootstrapExtension bool
+	CapacityReservationGroupID  string
+	SKU                         resourceskus.SKU
+	Image                       *infrav1.Image
+	BootstrapData               string
+	ProviderID                  string
 }
 
 // ResourceName returns the name of the virtual machine.
@@ -77,7 +79,7 @@ func (s *VMSpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the virtual machine.
-func (s *VMSpec) Parameters(ctx context.Context, existing interface{}) (params interface{}, err error) {
+func (s *VMSpec) Parameters(_ context.Context, existing any) (params any, err error) {
 	if existing != nil {
 		if _, ok := existing.(armcompute.VirtualMachine); !ok {
 			return nil, errors.Errorf("%T is not an armcompute.VirtualMachine", existing)
@@ -183,6 +185,7 @@ func (s *VMSpec) generateStorageProfile() (*armcompute.StorageProfile, error) {
 	if !MemoryCapability {
 		return nil, azure.WithTerminalError(errors.New("VM memory should be bigger or equal to at least 2Gi"))
 	}
+
 	// enable ephemeral OS
 	if s.OSDisk.DiffDiskSettings != nil {
 		if !s.SKU.HasCapability(resourceskus.EphemeralOSDisk) {
@@ -191,6 +194,10 @@ func (s *VMSpec) generateStorageProfile() (*armcompute.StorageProfile, error) {
 
 		storageProfile.OSDisk.DiffDiskSettings = &armcompute.DiffDiskSettings{
 			Option: ptr.To(armcompute.DiffDiskOptions(s.OSDisk.DiffDiskSettings.Option)),
+		}
+
+		if s.OSDisk.DiffDiskSettings.Placement != nil {
+			storageProfile.OSDisk.DiffDiskSettings.Placement = ptr.To(armcompute.DiffDiskPlacement(*s.OSDisk.DiffDiskSettings.Placement))
 		}
 	}
 

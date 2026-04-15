@@ -142,7 +142,7 @@ to give the identity Contributor access to the Azure subscription where the work
   ```yaml
   identity: UserAssigned
   userAssignedIdentities:
-  - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_ASSIGNED_IDENTITY_NAME}
+  - providerID: azure:///subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_ASSIGNED_IDENTITY_NAME}
   ```
 
   A sample `AzureMachineTemplate` after the edit should look like the below:
@@ -162,14 +162,14 @@ to give the identity Contributor access to the Azure subscription where the work
         sshPublicKey: ${AZURE_SSH_PUBLIC_KEY_B64:=""}
         identity: UserAssigned
         userAssignedIdentities:
-        - providerID: /subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_ASSIGNED_IDENTITY_NAME}
+        - providerID: azure:///subscriptions/${AZURE_SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${USER_ASSIGNED_IDENTITY_NAME}
         vmSize: ${AZURE_NODE_MACHINE_TYPE}
   ```
 
 - At this stage, you can apply this yaml to create a workload cluster.
 
 Notes:
-- Please follow this [link](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/templates/test/ci/cluster-template-prow-workload-identity.yaml)
+- Please follow this [link](https://github.com/kubernetes-sigs/cluster-api-provider-azure/blob/main/templates/test/ci/cluster-template-prow.yaml)
 to see a workload cluster yaml configuration that uses workload identity.
 - Creating a workload cluster via workload identity will be
   simplified after [this](https://github.com/kubernetes-sigs/cluster-api-provider-azure/issues/3589) issue is resolved.

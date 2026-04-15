@@ -27,6 +27,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/cache/ttllru"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -50,8 +51,8 @@ type Cache struct {
 
 // Cacher describes the ability to get and to add items to cache.
 type Cacher interface {
-	Get(key interface{}) (value interface{}, ok bool)
-	Add(key interface{}, value interface{}) bool
+	Get(key any) (value any, ok bool)
+	Add(key any, value any) bool
 }
 
 // NewCacheFunc allows for mocking out the underlying client.

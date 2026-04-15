@@ -17,7 +17,6 @@ limitations under the License.
 package scope
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -28,33 +27,59 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/agentpools"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
+func TestNewManagedMachinePoolScope(t *testing.T) {
 	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
+	_ = clusterv1.AddToScheme(scheme)
 	_ = infrav1.AddToScheme(scheme)
 
+	input := ManagedMachinePoolScopeParams{
+		Cluster: &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cluster1",
+				Namespace: "default",
+			},
+		},
+		ControlPlane: &infrav1.AzureManagedControlPlane{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "cluster1",
+				Namespace: "default",
+			},
+			Spec: infrav1.AzureManagedControlPlaneSpec{
+				AzureManagedControlPlaneClassSpec: infrav1.AzureManagedControlPlaneClassSpec{
+					SubscriptionID: "00000000-0000-0000-0000-000000000000",
+				},
+			},
+		},
+		ManagedMachinePool: ManagedMachinePool{
+			MachinePool:      getMachinePool("pool0"),
+			InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
+		},
+	}
+
+	g := NewWithT(t)
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(input.MachinePool, input.InfraMachinePool, input.ControlPlane).Build()
+	input.Client = fakeClient
+	_, err := NewManagedMachinePoolScope(t.Context(), input)
+	g.Expect(err).To(Succeed())
+}
+
+func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without Autoscaling",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -66,10 +91,8 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 
@@ -84,13 +107,7 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 		},
 		{
 			Name: "With Autoscaling",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -102,10 +119,8 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithScaling("pool1", 2, 10),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithScaling("pool1", 2, 10),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:              "pool1",
@@ -123,14 +138,8 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -139,24 +148,14 @@ func TestManagedMachinePoolScope_Autoscaling(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without node labels",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -168,10 +167,8 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -185,13 +182,7 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 		},
 		{
 			Name: "With node labels",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -203,12 +194,10 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool: getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithLabels("pool1", map[string]string{
-						"custom": "default",
-					}),
-				},
+				MachinePool: getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithLabels("pool1", map[string]string{
+					"custom": "default",
+				}),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:      "pool1",
@@ -226,14 +215,8 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -242,24 +225,14 @@ func TestManagedMachinePoolScope_NodeLabels(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without additional tags",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -271,10 +244,8 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -288,13 +259,7 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 		},
 		{
 			Name: "With additional tags",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -306,12 +271,10 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool: getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithAdditionalTags("pool1", map[string]string{
-						"environment": "production",
-					}),
-				},
+				MachinePool: getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithAdditionalTags("pool1", map[string]string{
+					"environment": "production",
+				}),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:      "pool1",
@@ -329,14 +292,8 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -345,24 +302,14 @@ func TestManagedMachinePoolScope_AdditionalTags(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without MaxPods",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -374,10 +321,8 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -391,13 +336,7 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 		},
 		{
 			Name: "With MaxPods",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -409,10 +348,8 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithMaxPods("pool1", 12),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithMaxPods("pool1", 12),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
@@ -428,14 +365,8 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -444,24 +375,14 @@ func TestManagedMachinePoolScope_MaxPods(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_Taints(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without taints",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -473,10 +394,8 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 
@@ -491,13 +410,7 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 		},
 		{
 			Name: "With taints",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -509,16 +422,14 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool: getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithTaints("pool1", infrav1.Taints{
-						infrav1.Taint{
-							Key:    "key1",
-							Value:  "value1",
-							Effect: "NoSchedule",
-						},
-					}),
-				},
+				MachinePool: getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithTaints("pool1", infrav1.Taints{
+					infrav1.Taint{
+						Key:    "key1",
+						Value:  "value1",
+						Effect: "NoSchedule",
+					},
+				}),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
@@ -534,14 +445,8 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -550,24 +455,14 @@ func TestManagedMachinePoolScope_Taints(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without OsDiskType",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -579,10 +474,8 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -596,13 +489,7 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 		},
 		{
 			Name: "With OsDiskType",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -614,10 +501,8 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithOsDiskType("pool1", string(asocontainerservicev1.OSDiskType_Ephemeral)),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithOsDiskType("pool1", string(asocontainerservicev1.OSDiskType_Ephemeral)),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
@@ -633,14 +518,8 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -649,24 +528,14 @@ func TestManagedMachinePoolScope_OSDiskType(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without Vnet and SubnetName",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -678,10 +547,8 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -695,13 +562,7 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 		},
 		{
 			Name: "With Vnet and Without SubnetName",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -722,10 +583,8 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePool("pool1", infrav1.NodePoolModeUser),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePool("pool1", infrav1.NodePoolModeUser),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
@@ -739,13 +598,7 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 		},
 		{
 			Name: "With Vnet and With SubnetName",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -766,10 +619,8 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithSubnetName("pool1", ptr.To("my-subnet")),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithSubnetName("pool1", ptr.To("my-subnet")),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool1",
@@ -784,15 +635,9 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			s.SetSubnetName()
-			agentPool := s.AgentPoolSpec()
+			c.Scope.SetSubnetName()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -801,24 +646,14 @@ func TestManagedMachinePoolScope_SubnetName(t *testing.T) {
 }
 
 func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = expv1.AddToScheme(scheme)
-	_ = infrav1.AddToScheme(scheme)
-
 	cases := []struct {
 		Name     string
-		Input    ManagedMachinePoolScopeParams
+		Scope    *ManagedMachinePoolScope
 		Expected azure.ASOResourceSpecGetter[genruntime.MetaObject]
 	}{
 		{
 			Name: "Without KubeletDiskType",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -830,10 +665,8 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool0"),
-					InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
-				},
+				MachinePool:      getMachinePool("pool0"),
+				InfraMachinePool: getAzureMachinePool("pool0", infrav1.NodePoolModeSystem),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:         "pool0",
@@ -847,13 +680,7 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 		},
 		{
 			Name: "With KubeletDiskType",
-			Input: ManagedMachinePoolScopeParams{
-				Cluster: &clusterv1.Cluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "cluster1",
-						Namespace: "default",
-					},
-				},
+			Scope: &ManagedMachinePoolScope{
 				ControlPlane: &infrav1.AzureManagedControlPlane{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "cluster1",
@@ -865,10 +692,8 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 						},
 					},
 				},
-				ManagedMachinePool: ManagedMachinePool{
-					MachinePool:      getMachinePool("pool1"),
-					InfraMachinePool: getAzureMachinePoolWithKubeletDiskType("pool1", (*infrav1.KubeletDiskType)(ptr.To("Temporary"))),
-				},
+				MachinePool:      getMachinePool("pool1"),
+				InfraMachinePool: getAzureMachinePoolWithKubeletDiskType("pool1", (*infrav1.KubeletDiskType)(ptr.To("Temporary"))),
 			},
 			Expected: &agentpools.AgentPoolSpec{
 				Name:            "pool1",
@@ -884,14 +709,8 @@ func TestManagedMachinePoolScope_KubeletDiskType(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
-			g := NewWithT(t)
-			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(c.Input.MachinePool, c.Input.InfraMachinePool, c.Input.ControlPlane).Build()
-			c.Input.Client = fakeClient
-			s, err := NewManagedMachinePoolScope(context.TODO(), c.Input)
-			g.Expect(err).To(Succeed())
-			agentPool := s.AgentPoolSpec()
+			agentPool := c.Scope.AgentPoolSpec()
 			if !reflect.DeepEqual(c.Expected, agentPool) {
 				t.Errorf("Got difference between expected result and result:\n%s", cmp.Diff(c.Expected, agentPool))
 			}
@@ -922,7 +741,6 @@ func TestManagedMachinePoolScope_EnablePreviewFeatures(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			g := NewWithT(t)
 			s := &ManagedMachinePoolScope{
@@ -933,7 +751,7 @@ func TestManagedMachinePoolScope_EnablePreviewFeatures(t *testing.T) {
 						},
 					},
 				},
-				MachinePool:      &expv1.MachinePool{},
+				MachinePool:      &clusterv1.MachinePool{},
 				InfraMachinePool: &infrav1.AzureManagedMachinePool{},
 			}
 			agentPoolGetter := s.AgentPoolSpec()
@@ -949,7 +767,7 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 	cases := []struct {
 		name                string
 		managedControlPlane *infrav1.AzureManagedControlPlane
-		machinePool         *expv1.MachinePool
+		machinePool         *clusterv1.MachinePool
 		expected            *string
 	}{
 		{
@@ -967,11 +785,11 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 		{
 			name:                "Only machine pool is available",
 			managedControlPlane: nil,
-			machinePool: &expv1.MachinePool{
-				Spec: expv1.MachinePoolSpec{
+			machinePool: &clusterv1.MachinePool{
+				Spec: clusterv1.MachinePoolSpec{
 					Template: clusterv1.MachineTemplateSpec{
 						Spec: clusterv1.MachineSpec{
-							Version: ptr.To("v1.15.0"),
+							Version: "v1.15.0",
 						},
 					},
 				},
@@ -981,11 +799,11 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 		{
 			name:                "Only machine pool is available and cp is nil",
 			managedControlPlane: nil,
-			machinePool: &expv1.MachinePool{
-				Spec: expv1.MachinePoolSpec{
+			machinePool: &clusterv1.MachinePool{
+				Spec: clusterv1.MachinePoolSpec{
 					Template: clusterv1.MachineTemplateSpec{
 						Spec: clusterv1.MachineSpec{
-							Version: ptr.To("v1.15.0"),
+							Version: "v1.15.0",
 						},
 					},
 				},
@@ -999,11 +817,11 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 					AutoUpgradeVersion: "1.20.3",
 				},
 			},
-			machinePool: &expv1.MachinePool{
-				Spec: expv1.MachinePoolSpec{
+			machinePool: &clusterv1.MachinePool{
+				Spec: clusterv1.MachinePoolSpec{
 					Template: clusterv1.MachineTemplateSpec{
 						Spec: clusterv1.MachineSpec{
-							Version: ptr.To("v1.15.0"),
+							Version: "v1.15.0",
 						},
 					},
 				},
@@ -1017,11 +835,11 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 					AutoUpgradeVersion: "v1.20.3",
 				},
 			},
-			machinePool: &expv1.MachinePool{
-				Spec: expv1.MachinePoolSpec{
+			machinePool: &clusterv1.MachinePool{
+				Spec: clusterv1.MachinePoolSpec{
 					Template: clusterv1.MachineTemplateSpec{
 						Spec: clusterv1.MachineSpec{
-							Version: ptr.To("v1.15.0"),
+							Version: "v1.15.0",
 						},
 					},
 				},
@@ -1035,11 +853,11 @@ func Test_getManagedMachinePoolVersion(t *testing.T) {
 					AutoUpgradeVersion: "v1.20.3",
 				},
 			},
-			machinePool: &expv1.MachinePool{
-				Spec: expv1.MachinePoolSpec{
+			machinePool: &clusterv1.MachinePool{
+				Spec: clusterv1.MachinePoolSpec{
 					Template: clusterv1.MachineTemplateSpec{
 						Spec: clusterv1.MachineSpec{
-							Version: ptr.To("v1.21.0"),
+							Version: "v1.21.0",
 						},
 					},
 				},
@@ -1087,11 +905,11 @@ func getAzureMachinePool(name string, mode infrav1.NodePoolMode) *infrav1.AzureM
 	}
 }
 
-func getAzureMachinePoolWithScaling(name string, min, max int) *infrav1.AzureManagedMachinePool {
+func getAzureMachinePoolWithScaling(name string, minVal, maxVal int) *infrav1.AzureManagedMachinePool {
 	managedPool := getAzureMachinePool(name, infrav1.NodePoolModeUser)
 	managedPool.Spec.Scaling = &infrav1.ManagedMachinePoolScaling{
-		MinSize: ptr.To(min),
-		MaxSize: ptr.To(max),
+		MinSize: ptr.To(minVal),
+		MaxSize: ptr.To(maxVal),
 	}
 	return managedPool
 }
@@ -1138,8 +956,8 @@ func getAzureMachinePoolWithAdditionalTags(name string, additionalTags infrav1.T
 	return managedPool
 }
 
-func getMachinePool(name string) *expv1.MachinePool {
-	return &expv1.MachinePool{
+func getMachinePool(name string) *clusterv1.MachinePool {
+	return &clusterv1.MachinePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
@@ -1147,7 +965,7 @@ func getMachinePool(name string) *expv1.MachinePool {
 				clusterv1.ClusterNameLabel: "cluster1",
 			},
 		},
-		Spec: expv1.MachinePoolSpec{
+		Spec: clusterv1.MachinePoolSpec{
 			ClusterName: "cluster1",
 		},
 	}
@@ -1165,8 +983,8 @@ func getWindowsAzureMachinePool(name string) *infrav1.AzureManagedMachinePool {
 	return managedPool
 }
 
-func getMachinePoolWithVersion(name, version string) *expv1.MachinePool {
+func getMachinePoolWithVersion(name, version string) *clusterv1.MachinePool {
 	machine := getMachinePool(name)
-	machine.Spec.Template.Spec.Version = ptr.To(version)
+	machine.Spec.Template.Spec.Version = version
 	return machine
 }

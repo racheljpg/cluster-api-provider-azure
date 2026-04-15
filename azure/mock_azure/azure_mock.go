@@ -31,11 +31,13 @@ import (
 	time "time"
 
 	azcore "github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	azidentity "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	genruntime "github.com/Azure/azure-service-operator/v2/pkg/genruntime"
+	logr "github.com/go-logr/logr"
 	gomock "go.uber.org/mock/gomock"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1beta1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	v1beta10 "sigs.k8s.io/cluster-api/api/v1beta1"
+	v1beta10 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	client "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -43,6 +45,7 @@ import (
 type MockReconciler struct {
 	ctrl     *gomock.Controller
 	recorder *MockReconcilerMockRecorder
+	isgomock struct{}
 }
 
 // MockReconcilerMockRecorder is the mock recorder for MockReconciler.
@@ -94,6 +97,7 @@ func (mr *MockReconcilerMockRecorder) Reconcile(ctx any) *gomock.Call {
 type MockPauser struct {
 	ctrl     *gomock.Controller
 	recorder *MockPauserMockRecorder
+	isgomock struct{}
 }
 
 // MockPauserMockRecorder is the mock recorder for MockPauser.
@@ -131,6 +135,7 @@ func (mr *MockPauserMockRecorder) Pause(arg0 any) *gomock.Call {
 type MockServiceReconciler struct {
 	ctrl     *gomock.Controller
 	recorder *MockServiceReconcilerMockRecorder
+	isgomock struct{}
 }
 
 // MockServiceReconcilerMockRecorder is the mock recorder for MockServiceReconciler.
@@ -196,6 +201,7 @@ func (mr *MockServiceReconcilerMockRecorder) Reconcile(ctx any) *gomock.Call {
 type MockAuthorizer struct {
 	ctrl     *gomock.Controller
 	recorder *MockAuthorizerMockRecorder
+	isgomock struct{}
 }
 
 // MockAuthorizerMockRecorder is the mock recorder for MockAuthorizer.
@@ -331,6 +337,7 @@ func (mr *MockAuthorizerMockRecorder) Token() *gomock.Call {
 type MockNetworkDescriber struct {
 	ctrl     *gomock.Controller
 	recorder *MockNetworkDescriberMockRecorder
+	isgomock struct{}
 }
 
 // MockNetworkDescriberMockRecorder is the mock recorder for MockNetworkDescriber.
@@ -576,6 +583,7 @@ func (mr *MockNetworkDescriberMockRecorder) Vnet() *gomock.Call {
 type MockClusterDescriber struct {
 	ctrl     *gomock.Controller
 	recorder *MockClusterDescriberMockRecorder
+	isgomock struct{}
 }
 
 // MockClusterDescriberMockRecorder is the mock recorder for MockClusterDescriber.
@@ -865,6 +873,7 @@ func (mr *MockClusterDescriberMockRecorder) Token() *gomock.Call {
 type MockAsyncStatusUpdater struct {
 	ctrl     *gomock.Controller
 	recorder *MockAsyncStatusUpdaterMockRecorder
+	isgomock struct{}
 }
 
 // MockAsyncStatusUpdaterMockRecorder is the mock recorder for MockAsyncStatusUpdater.
@@ -1004,6 +1013,7 @@ func (mr *MockAsyncStatusUpdaterMockRecorder) UpdatePutStatus(arg0, arg1, arg2 a
 type MockAsyncReconciler struct {
 	ctrl     *gomock.Controller
 	recorder *MockAsyncReconcilerMockRecorder
+	isgomock struct{}
 }
 
 // MockAsyncReconcilerMockRecorder is the mock recorder for MockAsyncReconciler.
@@ -1069,6 +1079,7 @@ func (mr *MockAsyncReconcilerMockRecorder) DefaultedReconcilerRequeue() *gomock.
 type MockClusterScoper struct {
 	ctrl     *gomock.Controller
 	recorder *MockClusterScoperMockRecorder
+	isgomock struct{}
 }
 
 // MockClusterScoperMockRecorder is the mock recorder for MockClusterScoper.
@@ -1724,6 +1735,7 @@ func (mr *MockClusterScoperMockRecorder) Vnet() *gomock.Call {
 type MockManagedClusterScoper struct {
 	ctrl     *gomock.Controller
 	recorder *MockManagedClusterScoperMockRecorder
+	isgomock struct{}
 }
 
 // MockManagedClusterScoperMockRecorder is the mock recorder for MockManagedClusterScoper.
@@ -2055,6 +2067,7 @@ func (mr *MockManagedClusterScoperMockRecorder) Token() *gomock.Call {
 type MockResourceSpecGetter struct {
 	ctrl     *gomock.Controller
 	recorder *MockResourceSpecGetterMockRecorder
+	isgomock struct{}
 }
 
 // MockResourceSpecGetterMockRecorder is the mock recorder for MockResourceSpecGetter.
@@ -2135,6 +2148,7 @@ func (mr *MockResourceSpecGetterMockRecorder) ResourceName() *gomock.Call {
 type MockResourceSpecGetterWithHeaders struct {
 	ctrl     *gomock.Controller
 	recorder *MockResourceSpecGetterWithHeadersMockRecorder
+	isgomock struct{}
 }
 
 // MockResourceSpecGetterWithHeadersMockRecorder is the mock recorder for MockResourceSpecGetterWithHeaders.
@@ -2229,6 +2243,7 @@ func (mr *MockResourceSpecGetterWithHeadersMockRecorder) ResourceName() *gomock.
 type MockASOResourceSpecGetter[T genruntime.MetaObject] struct {
 	ctrl     *gomock.Controller
 	recorder *MockASOResourceSpecGetterMockRecorder[T]
+	isgomock struct{}
 }
 
 // MockASOResourceSpecGetterMockRecorder is the mock recorder for MockASOResourceSpecGetter.
@@ -2289,4 +2304,103 @@ func (m *MockASOResourceSpecGetter[T]) WasManaged(arg0 T) bool {
 func (mr *MockASOResourceSpecGetterMockRecorder[T]) WasManaged(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WasManaged", reflect.TypeOf((*MockASOResourceSpecGetter[T])(nil).WasManaged), arg0)
+}
+
+// MockCredentialCache is a mock of CredentialCache interface.
+type MockCredentialCache struct {
+	ctrl     *gomock.Controller
+	recorder *MockCredentialCacheMockRecorder
+	isgomock struct{}
+}
+
+// MockCredentialCacheMockRecorder is the mock recorder for MockCredentialCache.
+type MockCredentialCacheMockRecorder struct {
+	mock *MockCredentialCache
+}
+
+// NewMockCredentialCache creates a new mock instance.
+func NewMockCredentialCache(ctrl *gomock.Controller) *MockCredentialCache {
+	mock := &MockCredentialCache{ctrl: ctrl}
+	mock.recorder = &MockCredentialCacheMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockCredentialCache) EXPECT() *MockCredentialCacheMockRecorder {
+	return m.recorder
+}
+
+// GetOrStoreClientCert mocks base method.
+func (m *MockCredentialCache) GetOrStoreClientCert(tenantID, clientID string, cert, certPassword []byte, opts *azidentity.ClientCertificateCredentialOptions) (azcore.TokenCredential, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrStoreClientCert", tenantID, clientID, cert, certPassword, opts)
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrStoreClientCert indicates an expected call of GetOrStoreClientCert.
+func (mr *MockCredentialCacheMockRecorder) GetOrStoreClientCert(tenantID, clientID, cert, certPassword, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrStoreClientCert", reflect.TypeOf((*MockCredentialCache)(nil).GetOrStoreClientCert), tenantID, clientID, cert, certPassword, opts)
+}
+
+// GetOrStoreClientSecret mocks base method.
+func (m *MockCredentialCache) GetOrStoreClientSecret(tenantID, clientID, clientSecret string, opts *azidentity.ClientSecretCredentialOptions) (azcore.TokenCredential, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrStoreClientSecret", tenantID, clientID, clientSecret, opts)
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrStoreClientSecret indicates an expected call of GetOrStoreClientSecret.
+func (mr *MockCredentialCacheMockRecorder) GetOrStoreClientSecret(tenantID, clientID, clientSecret, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrStoreClientSecret", reflect.TypeOf((*MockCredentialCache)(nil).GetOrStoreClientSecret), tenantID, clientID, clientSecret, opts)
+}
+
+// GetOrStoreManagedIdentity mocks base method.
+func (m *MockCredentialCache) GetOrStoreManagedIdentity(opts *azidentity.ManagedIdentityCredentialOptions) (azcore.TokenCredential, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrStoreManagedIdentity", opts)
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrStoreManagedIdentity indicates an expected call of GetOrStoreManagedIdentity.
+func (mr *MockCredentialCacheMockRecorder) GetOrStoreManagedIdentity(opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrStoreManagedIdentity", reflect.TypeOf((*MockCredentialCache)(nil).GetOrStoreManagedIdentity), opts)
+}
+
+// GetOrStoreUserAssignedManagedIdentityCredentials mocks base method.
+func (m *MockCredentialCache) GetOrStoreUserAssignedManagedIdentityCredentials(ctx context.Context, credsPath string, opts azcore.ClientOptions, logger *logr.Logger) (azcore.TokenCredential, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrStoreUserAssignedManagedIdentityCredentials", ctx, credsPath, opts, logger)
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrStoreUserAssignedManagedIdentityCredentials indicates an expected call of GetOrStoreUserAssignedManagedIdentityCredentials.
+func (mr *MockCredentialCacheMockRecorder) GetOrStoreUserAssignedManagedIdentityCredentials(ctx, credsPath, opts, logger any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrStoreUserAssignedManagedIdentityCredentials", reflect.TypeOf((*MockCredentialCache)(nil).GetOrStoreUserAssignedManagedIdentityCredentials), ctx, credsPath, opts, logger)
+}
+
+// GetOrStoreWorkloadIdentity mocks base method.
+func (m *MockCredentialCache) GetOrStoreWorkloadIdentity(opts *azidentity.WorkloadIdentityCredentialOptions) (azcore.TokenCredential, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetOrStoreWorkloadIdentity", opts)
+	ret0, _ := ret[0].(azcore.TokenCredential)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetOrStoreWorkloadIdentity indicates an expected call of GetOrStoreWorkloadIdentity.
+func (mr *MockCredentialCacheMockRecorder) GetOrStoreWorkloadIdentity(opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetOrStoreWorkloadIdentity", reflect.TypeOf((*MockCredentialCache)(nil).GetOrStoreWorkloadIdentity), opts)
 }

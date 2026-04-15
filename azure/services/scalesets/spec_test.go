@@ -17,7 +17,6 @@ limitations under the License.
 package scalesets
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -26,31 +25,36 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 )
 
 var (
-	defaultSpec, defaultVMSS                                                           = getDefaultVMSS()
-	windowsSpec, windowsVMSS                                                           = getDefaultWindowsVMSS()
-	acceleratedNetworkingSpec, acceleratedNetworkingVMSS                               = getAcceleratedNetworkingVMSS()
-	customSubnetSpec, customSubnetVMSS                                                 = getCustomSubnetVMSS()
-	customNetworkingSpec, customNetworkingVMSS                                         = getCustomNetworkingVMSS()
-	spotVMSpec, spotVMVMSS                                                             = getSpotVMVMSS()
-	ephemeralSpec, ephemeralVMSS                                                       = getEPHVMSSS()
-	evictionSpec, evictionVMSS                                                         = getEvictionPolicyVMSS()
-	maxPriceSpec, maxPriceVMSS                                                         = getMaxPriceVMSS()
-	encryptionSpec, encryptionVMSS                                                     = getEncryptionVMSS()
-	userIdentitySpec, userIdentityVMSS                                                 = getUserIdentityVMSS()
-	hostEncryptionSpec, hostEncryptionVMSS                                             = getHostEncryptionVMSS()
-	hostEncryptionUnsupportedSpec                                                      = getHostEncryptionUnsupportedSpec()
-	ephemeralReadSpec, ephemeralReadVMSS                                               = getEphemeralReadOnlyVMSS()
-	defaultExistingSpec, defaultExistingVMSS, defaultExistingVMSSClone                 = getExistingDefaultVMSS()
-	userManagedStorageAccountDiagnosticsSpec, userManagedStorageAccountDiagnosticsVMSS = getUserManagedAndStorageAcccountDiagnosticsVMSS()
-	managedDiagnosticsSpec, managedDiagnoisticsVMSS                                    = getManagedDiagnosticsVMSS()
-	disabledDiagnosticsSpec, disabledDiagnosticsVMSS                                   = getDisabledDiagnosticsVMSS()
-	nilDiagnosticsProfileSpec, nilDiagnosticsProfileVMSS                               = getNilDiagnosticsProfileVMSS()
+	defaultSpec, defaultVMSS                                                                                                                                                              = getDefaultVMSS()
+	windowsSpec, windowsVMSS                                                                                                                                                              = getDefaultWindowsVMSS()
+	acceleratedNetworkingSpec, acceleratedNetworkingVMSS                                                                                                                                  = getAcceleratedNetworkingVMSS()
+	customSubnetSpec, customSubnetVMSS                                                                                                                                                    = getCustomSubnetVMSS()
+	customNetworkingSpec, customNetworkingVMSS                                                                                                                                            = getCustomNetworkingVMSS()
+	spotVMSpec, spotVMVMSS                                                                                                                                                                = getSpotVMVMSS()
+	ephemeralSpec, ephemeralVMSS                                                                                                                                                          = getEPHVMSSS()
+	resourceDiskSpec, resourceDiskVMSS                                                                                                                                                    = getResourceDiskVMSS()
+	evictionSpec, evictionVMSS                                                                                                                                                            = getEvictionPolicyVMSS()
+	maxPriceSpec, maxPriceVMSS                                                                                                                                                            = getMaxPriceVMSS()
+	encryptionSpec, encryptionVMSS                                                                                                                                                        = getEncryptionVMSS()
+	userIdentitySpec, userIdentityVMSS                                                                                                                                                    = getUserIdentityVMSS()
+	hostEncryptionSpec, hostEncryptionVMSS                                                                                                                                                = getHostEncryptionVMSS()
+	hostEncryptionUnsupportedSpec                                                                                                                                                         = getHostEncryptionUnsupportedSpec()
+	ephemeralReadSpec, ephemeralReadVMSS                                                                                                                                                  = getEphemeralReadOnlyVMSS()
+	defaultExistingSpec, defaultExistingVMSS, defaultExistingVMSSClone                                                                                                                    = getExistingDefaultVMSS()
+	defaultExistingSpecOnlyCapacityChange, defaultExistingVMSSOnlyCapacityChange, defaultExistingVMSSResultOnlyCapacityChange                                                             = getExistingDefaultVMSSOnlyCapacityChange()
+	defaultExistingSpecOnlyCustomDataChange, defaultExistingVMSSOnlyCustomDataChange                                                                                                      = getExistingDefaultVMSSOnlyCustomDataChange()
+	defaultExistingSpecOnlyCapacityChangeWithCustomDataChange, defaultExistingVMSSOnlyCapacityChangeWithCustomDataChange, defaultExistingVMSSResultOnlyCapacityChangeWithCustomDataChange = getExistingDefaultVMSSOnlyCapacityChangeWithCustomDataChange()
+	userManagedStorageAccountDiagnosticsSpec, userManagedStorageAccountDiagnosticsVMSS                                                                                                    = getUserManagedAndStorageAcccountDiagnosticsVMSS()
+	managedDiagnosticsSpec, managedDiagnoisticsVMSS                                                                                                                                       = getManagedDiagnosticsVMSS()
+	disabledDiagnosticsSpec, disabledDiagnosticsVMSS                                                                                                                                      = getDisabledDiagnosticsVMSS()
+	nilDiagnosticsProfileSpec, nilDiagnosticsProfileVMSS                                                                                                                                  = getNilDiagnosticsProfileVMSS()
 )
 
 func getDefaultVMSS() (ScaleSetSpec, armcompute.VirtualMachineScaleSet) {
@@ -233,6 +237,32 @@ func getEPHVMSSS() (ScaleSetSpec, armcompute.VirtualMachineScaleSet) {
 	return spec, vmss
 }
 
+func getResourceDiskVMSS() (ScaleSetSpec, armcompute.VirtualMachineScaleSet) {
+	spec := newDefaultVMSSSpec()
+	spec.Size = vmSizeEPH
+	spec.SKU = resourceskus.SKU{
+		Capabilities: []*armcompute.ResourceSKUCapabilities{
+			{
+				Name:  ptr.To(resourceskus.EphemeralOSDisk),
+				Value: ptr.To("True"),
+			},
+		},
+	}
+	spec.SpotVMOptions = &infrav1.SpotVMOptions{}
+	spec.OSDisk.DiffDiskSettings = &infrav1.DiffDiskSettings{
+		Option:    string(armcompute.DiffDiskOptionsLocal),
+		Placement: ptr.To(infrav1.DiffDiskPlacementResourceDisk),
+	}
+	vmss := newDefaultVMSS(vmSizeEPH)
+	vmss.Properties.VirtualMachineProfile.StorageProfile.OSDisk.DiffDiskSettings = &armcompute.DiffDiskSettings{
+		Option:    ptr.To(armcompute.DiffDiskOptionsLocal),
+		Placement: ptr.To(armcompute.DiffDiskPlacementResourceDisk),
+	}
+	vmss.Properties.VirtualMachineProfile.Priority = ptr.To(armcompute.VirtualMachinePriorityTypesSpot)
+
+	return spec, vmss
+}
+
 func getEvictionPolicyVMSS() (ScaleSetSpec, armcompute.VirtualMachineScaleSet) {
 	spec := newDefaultVMSSSpec()
 	spec.Size = vmSizeEPH
@@ -399,20 +429,66 @@ func getExistingDefaultVMSS() (s ScaleSetSpec, existing armcompute.VirtualMachin
 		},
 	}
 
-	existingVMSS := newDefaultExistingVMSS("VM_SIZE")
+	existingVMSS := newDefaultExistingVMSS()
 	existingVMSS.Properties.AdditionalCapabilities = &armcompute.AdditionalCapabilities{UltraSSDEnabled: ptr.To(true)}
 	existingVMSS.SKU.Capacity = ptr.To[int64](2)
-	existingVMSS.Properties.AdditionalCapabilities = &armcompute.AdditionalCapabilities{UltraSSDEnabled: ptr.To(true)}
 
-	clone := newDefaultExistingVMSS("VM_SIZE")
+	clone := newDefaultExistingVMSS()
 	clone.SKU.Capacity = ptr.To[int64](3)
 	clone.Properties.AdditionalCapabilities = &armcompute.AdditionalCapabilities{UltraSSDEnabled: ptr.To(true)}
 	clone.Properties.VirtualMachineProfile.NetworkProfile = nil
 
 	clone.Properties.VirtualMachineProfile.StorageProfile.ImageReference.Version = ptr.To("2.0")
-	clone.Properties.VirtualMachineProfile.NetworkProfile = nil
 
 	return spec, existingVMSS, clone
+}
+
+func getExistingDefaultVMSSOnlyCapacityChange() (s ScaleSetSpec, existing armcompute.VirtualMachineScaleSet, result armcompute.VirtualMachineScaleSet) {
+	spec := newDefaultVMSSSpec()
+	spec.Capacity = 3
+
+	existingVMSS := newDefaultExistingVMSS()
+
+	result = newDefaultExistingVMSS()
+	result.Properties.VirtualMachineProfile = nil
+	result.SKU.Capacity = ptr.To[int64](3)
+
+	return spec, existingVMSS, result
+}
+
+func getExistingDefaultVMSSOnlyCustomDataChange() (s ScaleSetSpec, existing armcompute.VirtualMachineScaleSet) {
+	spec := newDefaultVMSSSpec()
+	spec.BootstrapData += "-changed"
+
+	existingVMSS := newDefaultExistingVMSS()
+
+	return spec, existingVMSS
+}
+
+func getExistingDefaultVMSSOnlyCapacityChangeWithCustomDataChange() (s ScaleSetSpec, existing armcompute.VirtualMachineScaleSet, result armcompute.VirtualMachineScaleSet) {
+	spec := newDefaultVMSSSpec()
+	spec.Capacity = 3
+	spec.DataDisks = append(spec.DataDisks, infrav1.DataDisk{
+		NameSuffix: "my_disk_with_ultra_disks",
+		DiskSizeGB: 128,
+		Lun:        ptr.To[int32](3),
+		ManagedDisk: &infrav1.ManagedDiskParameters{
+			StorageAccountType: "UltraSSD_LRS",
+		},
+	})
+	spec.BootstrapData += "-changed"
+
+	existingVMSS := newDefaultExistingVMSS()
+	existingVMSS.Properties.AdditionalCapabilities = &armcompute.AdditionalCapabilities{UltraSSDEnabled: ptr.To(true)}
+
+	result = newDefaultExistingVMSS()
+	result.SKU.Capacity = ptr.To[int64](3)
+	result.Properties.AdditionalCapabilities = &armcompute.AdditionalCapabilities{UltraSSDEnabled: ptr.To(true)}
+	result.Properties.VirtualMachineProfile.NetworkProfile = nil
+	result.Properties.VirtualMachineProfile.OSProfile.CustomData = ptr.To(spec.BootstrapData)
+	result.Tags[customDataHashTagName] = ptr.To(mustCalculateBootstrapDataHash(spec.BootstrapData))
+
+	return spec, existingVMSS, result
 }
 
 func getUserManagedAndStorageAcccountDiagnosticsVMSS() (ScaleSetSpec, armcompute.VirtualMachineScaleSet) {
@@ -526,8 +602,8 @@ func TestScaleSetParameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          ScaleSetSpec
-		existing      interface{}
-		expected      interface{}
+		existing      any
+		expected      any
 		expectedError string
 	}{
 		{
@@ -584,6 +660,13 @@ func TestScaleSetParameters(t *testing.T) {
 			spec:          ephemeralSpec,
 			existing:      nil,
 			expected:      ephemeralVMSS,
+			expectedError: "",
+		},
+		{
+			name:          "spot vm and ephemeral disk with resourceDisk placement vmss",
+			spec:          resourceDiskSpec,
+			existing:      nil,
+			expected:      resourceDiskVMSS,
 			expectedError: "",
 		},
 		{
@@ -677,14 +760,34 @@ func TestScaleSetParameters(t *testing.T) {
 			expected:      nilDiagnosticsProfileVMSS,
 			expectedError: "",
 		},
+		{
+			name:          "update for existing vmss with only capacity change",
+			spec:          defaultExistingSpecOnlyCapacityChange,
+			existing:      defaultExistingVMSSOnlyCapacityChange,
+			expected:      defaultExistingVMSSResultOnlyCapacityChange,
+			expectedError: "",
+		},
+		{
+			name:          "update for existing vmss with only custom data change",
+			spec:          defaultExistingSpecOnlyCustomDataChange,
+			existing:      defaultExistingVMSSOnlyCustomDataChange,
+			expected:      nil,
+			expectedError: "",
+		},
+		{
+			name:          "update for existing vmss with only capacity change but should patch custom data",
+			spec:          defaultExistingSpecOnlyCapacityChangeWithCustomDataChange,
+			existing:      defaultExistingVMSSOnlyCapacityChangeWithCustomDataChange,
+			expected:      defaultExistingVMSSResultOnlyCapacityChangeWithCustomDataChange,
+			expectedError: "",
+		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			param, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			param, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -697,7 +800,9 @@ func TestScaleSetParameters(t *testing.T) {
 					if !ok {
 						t.Fatalf("expected type VirtualMachineScaleSet, got %T", param)
 					}
-					result.Properties.VirtualMachineProfile.OSProfile.AdminPassword = nil // Override this field as it's randomly generated. We can't set anything in tc.expected to match it.
+					if result.Properties.VirtualMachineProfile != nil {
+						result.Properties.VirtualMachineProfile.OSProfile.AdminPassword = nil // Override this field as it's randomly generated. We can't set anything in tc.expected to match it.
+					}
 
 					if !reflect.DeepEqual(tc.expected, result) {
 						t.Errorf("Diff between actual result and expected result:\n%s", cmp.Diff(result, tc.expected))
@@ -706,4 +811,12 @@ func TestScaleSetParameters(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustCalculateBootstrapDataHash(bootstrapData string) string {
+	hash, err := calculateBootstrapDataHash(bootstrapData)
+	if err != nil {
+		panic(err)
+	}
+	return hash
 }

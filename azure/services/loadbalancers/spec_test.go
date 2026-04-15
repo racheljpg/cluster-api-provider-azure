@@ -17,12 +17,12 @@ limitations under the License.
 package loadbalancers
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	. "github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -65,15 +65,15 @@ func TestParameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          *LBSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:     "public API load balancer exists with all expected values",
 			spec:     &fakePublicAPILBSpec,
 			existing: newSamplePublicAPIServerLB(false, false, false, false, false),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "",
@@ -82,7 +82,7 @@ func TestParameters(t *testing.T) {
 			name:     "internal API load balancer with all expected values",
 			spec:     &fakeInternalAPILBSpec,
 			existing: newDefaultInternalAPIServerLB(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "",
@@ -91,8 +91,40 @@ func TestParameters(t *testing.T) {
 			name:     "node outbound load balancer exists with all expected values",
 			spec:     &fakeNodeOutboundLBSpec,
 			existing: newDefaultNodeOutboundLB(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
+			},
+			expectedError: "",
+		},
+		{
+			name:     "load balancer exists with missing additional API server ports",
+			spec:     &fakePublicAPILBSpecWithAdditionalPorts,
+			existing: getExistingLBWithMissingFrontendIPConfigs(),
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
+				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(false, true, true, true, true, func(lb *armnetwork.LoadBalancer) {
+					lb.Properties.LoadBalancingRules = append(lb.Properties.LoadBalancingRules, &armnetwork.LoadBalancingRule{
+						Name: ptr.To("rke2-agent"),
+						Properties: &armnetwork.LoadBalancingRulePropertiesFormat{
+							DisableOutboundSnat:  ptr.To(true),
+							Protocol:             ptr.To(armnetwork.TransportProtocolTCP),
+							FrontendPort:         ptr.To[int32](9345),
+							BackendPort:          ptr.To[int32](9345),
+							IdleTimeoutInMinutes: ptr.To[int32](4),
+							EnableFloatingIP:     ptr.To(false),
+							LoadDistribution:     ptr.To(armnetwork.LoadDistributionDefault),
+							FrontendIPConfiguration: &armnetwork.SubResource{
+								ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/loadBalancers/my-publiclb/frontendIPConfigurations/my-publiclb-frontEnd"),
+							},
+							BackendAddressPool: &armnetwork.SubResource{
+								ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/loadBalancers/my-publiclb/backendAddressPools/my-publiclb-backendPool"),
+							},
+							Probe: &armnetwork.SubResource{
+								ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/loadBalancers/my-publiclb/probes/HTTPSProbe"),
+							},
+						},
+					})
+				})))
 			},
 			expectedError: "",
 		},
@@ -100,7 +132,7 @@ func TestParameters(t *testing.T) {
 			name:     "load balancer exists with missing frontend IP configs",
 			spec:     &fakePublicAPILBSpec,
 			existing: getExistingLBWithMissingFrontendIPConfigs(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
 				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(false, true, true, true, true)))
 			},
@@ -110,7 +142,7 @@ func TestParameters(t *testing.T) {
 			name:     "load balancer exists with missing backend pool",
 			spec:     &fakePublicAPILBSpec,
 			existing: getExistingLBWithMissingBackendPool(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
 				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(true, false, true, true, true)))
 			},
@@ -120,7 +152,7 @@ func TestParameters(t *testing.T) {
 			name:     "load balancer exists with missing load balancing rules",
 			spec:     &fakePublicAPILBSpec,
 			existing: getExistingLBWithMissingLBRules(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
 				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(true, true, false, true, true)))
 			},
@@ -130,7 +162,7 @@ func TestParameters(t *testing.T) {
 			name:     "load balancer exists with missing probes",
 			spec:     &fakePublicAPILBSpec,
 			existing: getExistingLBWithMissingProbes(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
 				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(true, true, true, false, true)))
 			},
@@ -140,7 +172,7 @@ func TestParameters(t *testing.T) {
 			name:     "load balancer exists with missing outbound rules",
 			spec:     &fakePublicAPILBSpec,
 			existing: getExistingLBWithMissingOutboundRules(),
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.LoadBalancer{}))
 				g.Expect(result.(armnetwork.LoadBalancer)).To(Equal(newSamplePublicAPIServerLB(true, true, true, true, false)))
 			},
@@ -148,12 +180,11 @@ func TestParameters(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))
@@ -208,11 +239,11 @@ func newDefaultNodeOutboundLB() armnetwork.LoadBalancer {
 	}
 }
 
-func newSamplePublicAPIServerLB(verifyFrontendIP bool, verifyBackendAddressPools bool, verifyLBRules bool, verifyProbes bool, verifyOutboundRules bool) armnetwork.LoadBalancer {
+func newSamplePublicAPIServerLB(verifyFrontendIP bool, verifyBackendAddressPools bool, verifyLBRules bool, verifyThreshold bool, verifyOutboundRules bool, modifications ...func(*armnetwork.LoadBalancer)) armnetwork.LoadBalancer {
 	var subnet *armnetwork.Subnet
 	var backendAddressPoolProps *armnetwork.BackendAddressPoolPropertiesFormat
 	enableFloatingIP := ptr.To(false)
-	numProbes := ptr.To[int32](4)
+	probeThreshold := ptr.To[int32](1)
 	idleTimeout := ptr.To[int32](4)
 
 	if verifyFrontendIP {
@@ -228,14 +259,14 @@ func newSamplePublicAPIServerLB(verifyFrontendIP bool, verifyBackendAddressPools
 	if verifyLBRules {
 		enableFloatingIP = ptr.To(true)
 	}
-	if verifyProbes {
-		numProbes = ptr.To[int32](999)
+	if verifyThreshold {
+		probeThreshold = ptr.To[int32](999)
 	}
 	if verifyOutboundRules {
 		idleTimeout = ptr.To[int32](1000)
 	}
 
-	return armnetwork.LoadBalancer{
+	lb := armnetwork.LoadBalancer{
 		Tags: map[string]*string{
 			"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
 			"sigs.k8s.io_cluster-api-provider-azure_role":               ptr.To(infrav1.APIServerRole),
@@ -289,7 +320,7 @@ func newSamplePublicAPIServerLB(verifyFrontendIP bool, verifyBackendAddressPools
 						Port:              ptr.To[int32](6443),
 						RequestPath:       ptr.To(httpsProbeRequestPath),
 						IntervalInSeconds: ptr.To[int32](15),
-						NumberOfProbes:    numProbes, // Add to verify that Probes aren't overwritten on update
+						ProbeThreshold:    probeThreshold, // Add to verify that Probes aren't overwritten on update
 					},
 				},
 			},
@@ -310,6 +341,12 @@ func newSamplePublicAPIServerLB(verifyFrontendIP bool, verifyBackendAddressPools
 			},
 		},
 	}
+
+	for _, modify := range modifications {
+		modify(&lb)
+	}
+
+	return lb
 }
 
 func newDefaultInternalAPIServerLB() armnetwork.LoadBalancer {
@@ -370,7 +407,7 @@ func newDefaultInternalAPIServerLB() armnetwork.LoadBalancer {
 						Port:              ptr.To[int32](6443),
 						RequestPath:       ptr.To(httpsProbeRequestPath),
 						IntervalInSeconds: ptr.To[int32](15),
-						NumberOfProbes:    ptr.To[int32](4),
+						ProbeThreshold:    ptr.To[int32](1),
 					},
 				},
 			},

@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v4"
 	"github.com/pkg/errors"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/converters"
@@ -46,6 +47,7 @@ type LBSpec struct {
 	APIServerPort        int32
 	IdleTimeoutInMinutes *int32
 	AdditionalTags       map[string]string
+	AdditionalPorts      []infrav1.LoadBalancerPort
 }
 
 // ResourceName returns the name of the load balancer.
@@ -64,7 +66,7 @@ func (s *LBSpec) OwnerResourceName() string {
 }
 
 // Parameters returns the parameters for the load balancer.
-func (s *LBSpec) Parameters(ctx context.Context, existing interface{}) (parameters interface{}, err error) {
+func (s *LBSpec) Parameters(_ context.Context, existing any) (parameters any, err error) {
 	var (
 		etag                *string
 		frontendIDs         []*armnetwork.SubResource
@@ -213,21 +215,21 @@ func getOutboundRules(lbSpec LBSpec, frontendIDs []*armnetwork.SubResource) []*a
 }
 
 func getLoadBalancingRules(lbSpec LBSpec, frontendIDs []*armnetwork.SubResource) []*armnetwork.LoadBalancingRule {
-	if lbSpec.Role == infrav1.APIServerRole {
+	if lbSpec.Role == infrav1.APIServerRole || lbSpec.Role == infrav1.APIServerRoleInternal {
 		// We disable outbound SNAT explicitly in the HTTPS LB rule and enable TCP and UDP outbound NAT with an outbound rule.
 		// For more information on Standard LB outbound connections see https://learn.microsoft.com/azure/load-balancer/load-balancer-outbound-connections.
 		var frontendIPConfig *armnetwork.SubResource
 		if len(frontendIDs) != 0 {
 			frontendIPConfig = frontendIDs[0]
 		}
-		return []*armnetwork.LoadBalancingRule{
+		rules := []*armnetwork.LoadBalancingRule{
 			{
 				Name: ptr.To(lbRuleHTTPS),
 				Properties: &armnetwork.LoadBalancingRulePropertiesFormat{
 					DisableOutboundSnat:     ptr.To(true),
 					Protocol:                ptr.To(armnetwork.TransportProtocolTCP),
-					FrontendPort:            ptr.To[int32](lbSpec.APIServerPort),
-					BackendPort:             ptr.To[int32](lbSpec.APIServerPort),
+					FrontendPort:            ptr.To(lbSpec.APIServerPort),
+					BackendPort:             ptr.To(lbSpec.APIServerPort),
 					IdleTimeoutInMinutes:    lbSpec.IdleTimeoutInMinutes,
 					EnableFloatingIP:        ptr.To(false),
 					LoadDistribution:        ptr.To(armnetwork.LoadDistributionDefault),
@@ -241,6 +243,30 @@ func getLoadBalancingRules(lbSpec LBSpec, frontendIDs []*armnetwork.SubResource)
 				},
 			},
 		}
+
+		for _, port := range lbSpec.AdditionalPorts {
+			rules = append(rules, &armnetwork.LoadBalancingRule{
+				Name: ptr.To(port.Name),
+				Properties: &armnetwork.LoadBalancingRulePropertiesFormat{
+					DisableOutboundSnat:     ptr.To(true),
+					Protocol:                ptr.To(armnetwork.TransportProtocolTCP),
+					FrontendPort:            ptr.To(port.Port),
+					BackendPort:             ptr.To(port.Port),
+					IdleTimeoutInMinutes:    lbSpec.IdleTimeoutInMinutes,
+					EnableFloatingIP:        ptr.To(false),
+					LoadDistribution:        ptr.To(armnetwork.LoadDistributionDefault),
+					FrontendIPConfiguration: frontendIPConfig,
+					BackendAddressPool: &armnetwork.SubResource{
+						ID: ptr.To(azure.AddressPoolID(lbSpec.SubscriptionID, lbSpec.ResourceGroup, lbSpec.Name, lbSpec.BackendPoolName)),
+					},
+					Probe: &armnetwork.SubResource{
+						ID: ptr.To(azure.ProbeID(lbSpec.SubscriptionID, lbSpec.ResourceGroup, lbSpec.Name, httpsProbe)),
+					},
+				},
+			})
+		}
+
+		return rules
 	}
 	return []*armnetwork.LoadBalancingRule{}
 }
@@ -254,7 +280,7 @@ func getBackendAddressPools(lbSpec LBSpec) []*armnetwork.BackendAddressPool {
 }
 
 func getProbes(lbSpec LBSpec) []*armnetwork.Probe {
-	if lbSpec.Role == infrav1.APIServerRole {
+	if lbSpec.Role == infrav1.APIServerRole || lbSpec.Role == infrav1.APIServerRoleInternal {
 		return []*armnetwork.Probe{
 			{
 				Name: ptr.To(httpsProbe),
@@ -263,7 +289,7 @@ func getProbes(lbSpec LBSpec) []*armnetwork.Probe {
 					Port:              ptr.To[int32](lbSpec.APIServerPort),
 					RequestPath:       ptr.To(httpsProbeRequestPath),
 					IntervalInSeconds: ptr.To[int32](15),
-					NumberOfProbes:    ptr.To[int32](4),
+					ProbeThreshold:    ptr.To[int32](1),
 				},
 			},
 		}

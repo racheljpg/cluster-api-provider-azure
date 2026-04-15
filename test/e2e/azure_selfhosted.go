@@ -25,17 +25,21 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/msi/armmsi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	capi_e2e "sigs.k8s.io/cluster-api/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/cluster-api/test/framework/clusterctl"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
 // SelfHostedSpecInput is the input for SelfHostedSpec.
@@ -78,26 +82,9 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 		Expect(err).NotTo(HaveOccurred())
 		clusterResources = new(clusterctl.ApplyClusterTemplateAndWaitResult)
 
-		spClientSecret := os.Getenv(AzureClientSecret)
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "cluster-identity-secret",
-				Namespace: namespace.Name,
-				Labels: map[string]string{
-					clusterctlv1.ClusterctlMoveHierarchyLabel: "true",
-				},
-			},
-			Type: corev1.SecretTypeOpaque,
-			Data: map[string][]byte{"clientSecret": []byte(spClientSecret)},
-		}
-		err = bootstrapClusterProxy.GetClient().Create(ctx, secret)
-		Expect(err).NotTo(HaveOccurred())
-
-		identityName := input.E2EConfig.GetVariable(ClusterIdentityName)
+		identityName := input.E2EConfig.MustGetVariable(ClusterIdentityName)
 		Expect(os.Setenv(ClusterIdentityName, identityName)).To(Succeed())
 		Expect(os.Setenv(ClusterIdentityNamespace, namespace.Name)).To(Succeed())
-		Expect(os.Setenv(ClusterIdentitySecretName, "cluster-identity-secret")).To(Succeed())
-		Expect(os.Setenv(ClusterIdentitySecretNamespace, namespace.Name)).To(Succeed())
 	})
 
 	// Management clusters do not support Windows nodes because of cert manager
@@ -145,11 +132,11 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 		Consistently(func() error {
 			ns := &corev1.Namespace{}
 			return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
-		}, "5s", "100ms").Should(BeNil(), "Failed to assert bootstrap API server stability")
+		}, "5s", "100ms").Should(Succeed(), "Failed to assert bootstrap API server stability")
 		Consistently(func() error {
 			ns := &corev1.Namespace{}
 			return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
-		}, "5s", "100ms").Should(BeNil(), "Failed to assert self-hosted API server stability")
+		}, "5s", "100ms").Should(Succeed(), "Failed to assert self-hosted API server stability")
 
 		By("Moving the cluster to self hosted")
 		clusterctl.Move(ctx, clusterctl.MoveInput{
@@ -159,6 +146,40 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 			ToKubeconfigPath:     selfHostedClusterProxy.GetKubeconfigPath(),
 			Namespace:            namespace.Name,
 		})
+
+		// The workload cluster is not set up for workload identity. Use UserAssignedMSI there instead.
+		err := selfHostedClusterProxy.GetClient().Delete(ctx, &infrav1.AzureClusterIdentity{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: cluster.Namespace,
+				Name:      e2eConfig.MustGetVariable(ClusterIdentityName),
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		cred, err := azidentity.NewDefaultAzureCredential(nil)
+		Expect(err).NotTo(HaveOccurred())
+		identityClient, err := armmsi.NewUserAssignedIdentitiesClient(getSubscriptionID(Default), cred, nil)
+		Expect(err).NotTo(HaveOccurred())
+		identityRG := e2eConfig.MustGetVariable(AzureIdentityResourceGroup)
+		identityName := e2eConfig.MustGetVariable(AzureUserIdentity)
+		identity, err := identityClient.Get(ctx, identityRG, identityName, nil)
+		Expect(err).NotTo(HaveOccurred())
+		err = selfHostedClusterProxy.GetClient().Create(ctx, &infrav1.AzureClusterIdentity{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: cluster.Namespace,
+				Name:      e2eConfig.MustGetVariable(ClusterIdentityName),
+				Labels: map[string]string{
+					clusterctlv1.ClusterctlMoveHierarchyLabel: "true",
+				},
+			},
+			Spec: infrav1.AzureClusterIdentitySpec{
+				AllowedNamespaces: &infrav1.AllowedNamespaces{},
+				ClientID:          *identity.Properties.ClientID,
+				ResourceID:        *identity.ID,
+				TenantID:          e2eConfig.MustGetVariable(AzureTenantID),
+				Type:              infrav1.UserAssignedMSI,
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
 
 		Log("Waiting for the cluster to be reconciled after moving to self hosted")
 		selfHostedCluster = framework.DiscoveryAndWaitForCluster(ctx, framework.DiscoveryAndWaitForClusterInput{
@@ -184,9 +205,11 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 		if selfHostedNamespace != nil {
 			// Dump all Cluster API related resources to artifacts before pivoting back.
 			framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
-				Lister:    selfHostedClusterProxy.GetClient(),
-				Namespace: namespace.Name,
-				LogPath:   filepath.Join(input.ArtifactFolder, "clusters", clusterResources.Cluster.Name, "resources"),
+				Lister:               selfHostedClusterProxy.GetClient(),
+				KubeConfigPath:       selfHostedClusterProxy.GetKubeconfigPath(),
+				ClusterctlConfigPath: clusterctlConfigPath,
+				Namespace:            namespace.Name,
+				LogPath:              filepath.Join(input.ArtifactFolder, "clusters", clusterResources.Cluster.Name, "resources"),
 			})
 		}
 		if selfHostedCluster != nil {
@@ -197,11 +220,11 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 			Consistently(func() error {
 				ns := &corev1.Namespace{}
 				return input.BootstrapClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
-			}, "5s", "100ms").Should(BeNil(), "Failed to assert bootstrap API server stability")
+			}, "5s", "100ms").Should(Succeed(), "Failed to assert bootstrap API server stability")
 			Consistently(func() error {
 				ns := &corev1.Namespace{}
 				return selfHostedClusterProxy.GetClient().Get(ctx, client.ObjectKey{Name: kubesystem}, ns)
-			}, "5s", "100ms").Should(BeNil(), "Failed to assert self-hosted API server stability")
+			}, "5s", "100ms").Should(Succeed(), "Failed to assert self-hosted API server stability")
 
 			By("Moving the cluster back to bootstrap")
 			clusterctl.Move(ctx, clusterctl.MoveInput{
@@ -211,6 +234,31 @@ func SelfHostedSpec(ctx context.Context, inputGetter func() SelfHostedSpecInput)
 				ToKubeconfigPath:     input.BootstrapClusterProxy.GetKubeconfigPath(),
 				Namespace:            selfHostedNamespace.Name,
 			})
+
+			// Restore the workload identity AzureClusterIdentity
+			err := input.BootstrapClusterProxy.GetClient().Delete(ctx, &infrav1.AzureClusterIdentity{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace.Name,
+					Name:      e2eConfig.MustGetVariable(ClusterIdentityName),
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			err = input.BootstrapClusterProxy.GetClient().Create(ctx, &infrav1.AzureClusterIdentity{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: namespace.Name,
+					Name:      e2eConfig.MustGetVariable(ClusterIdentityName),
+					Labels: map[string]string{
+						clusterctlv1.ClusterctlMoveHierarchyLabel: "true",
+					},
+				},
+				Spec: infrav1.AzureClusterIdentitySpec{
+					AllowedNamespaces: &infrav1.AllowedNamespaces{},
+					ClientID:          e2eConfig.MustGetVariable(AzureClientIDUserAssignedIdentity),
+					TenantID:          e2eConfig.MustGetVariable(AzureTenantID),
+					Type:              infrav1.WorkloadIdentity,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
 
 			Log("Waiting for the cluster to be reconciled after moving back to booststrap")
 			clusterResources.Cluster = framework.DiscoveryAndWaitForCluster(ctx, framework.DiscoveryAndWaitForClusterInput{

@@ -35,7 +35,7 @@ func TestIsContextDeadlineExceededOrCanceled(t *testing.T) {
 		{
 			name: "Context deadline exceeded error",
 			err: func() error {
-				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-7*time.Hour))
+				ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-7*time.Hour))
 				defer cancel()
 				return ctx.Err()
 			}(),
@@ -44,7 +44,7 @@ func TestIsContextDeadlineExceededOrCanceled(t *testing.T) {
 		{
 			name: "Context canceled exceeded error",
 			err: func() error {
-				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Hour))
+				ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(1*time.Hour))
 				cancel()
 				return ctx.Err()
 			}(),
@@ -93,7 +93,6 @@ func TestResourceNotFound(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			if got := ResourceNotFound(tc.err); got != tc.success {

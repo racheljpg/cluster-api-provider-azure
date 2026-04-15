@@ -17,7 +17,6 @@ limitations under the License.
 package loadbalancers
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -58,6 +58,34 @@ var (
 			},
 		},
 		APIServerPort: 6443,
+	}
+
+	fakePublicAPILBSpecWithAdditionalPorts = LBSpec{
+		Name:                 "my-publiclb",
+		ResourceGroup:        "my-rg",
+		SubscriptionID:       "123",
+		ClusterName:          "my-cluster",
+		Location:             "my-location",
+		Role:                 infrav1.APIServerRole,
+		Type:                 infrav1.Public,
+		SKU:                  infrav1.SKUStandard,
+		SubnetName:           "my-cp-subnet",
+		BackendPoolName:      "my-publiclb-backendPool",
+		IdleTimeoutInMinutes: ptr.To[int32](4),
+		FrontendIPConfigs: []infrav1.FrontendIP{
+			{
+				Name: "my-publiclb-frontEnd",
+				PublicIP: &infrav1.PublicIPSpec{
+					Name:    "my-publicip",
+					DNSName: "my-cluster.12345.mydomain.com",
+				},
+			},
+		},
+		APIServerPort: 6443,
+		AdditionalPorts: []infrav1.LoadBalancerPort{{
+			Name: "rke2-agent",
+			Port: 9345,
+		}},
 	}
 
 	fakeInternalAPILBSpec = LBSpec{
@@ -181,7 +209,6 @@ func TestReconcileLoadBalancer(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -198,7 +225,7 @@ func TestReconcileLoadBalancer(t *testing.T) {
 				Scope:      scopeMock,
 				Reconciler: asyncMock,
 			}
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -258,7 +285,6 @@ func TestDeleteLoadBalancer(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -276,7 +302,7 @@ func TestDeleteLoadBalancer(t *testing.T) {
 				Reconciler: asyncMock,
 			}
 
-			err := s.Delete(context.TODO())
+			err := s.Delete(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))

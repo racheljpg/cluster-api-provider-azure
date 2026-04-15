@@ -18,9 +18,6 @@ package v1beta1
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"encoding/base64"
 	"fmt"
 	"testing"
 
@@ -28,23 +25,23 @@ import (
 	guuid "github.com/google/uuid"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	utilfeature "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/feature"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capifeature "sigs.k8s.io/cluster-api/feature"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
+	apiinternal "sigs.k8s.io/cluster-api-provider-azure/internal/api/v1beta1"
+	apifixtures "sigs.k8s.io/cluster-api-provider-azure/internal/test/apifixtures"
 )
 
 var (
-	validSSHPublicKey = generateSSHPublicKey(true)
+	validSSHPublicKey = apifixtures.GenerateSSHPublicKey(true)
 	zero              = intstr.FromInt(0)
 	one               = intstr.FromInt(1)
 )
@@ -56,7 +53,7 @@ type mockClient struct {
 }
 
 func (m mockClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	obj.(*expv1.MachinePool).Spec.Template.Spec.Version = &m.Version
+	obj.(*clusterv1.MachinePool).Spec.Template.Spec.Version = m.Version
 	return nil
 }
 
@@ -64,9 +61,9 @@ func (m mockClient) List(ctx context.Context, list client.ObjectList, opts ...cl
 	if m.ReturnError {
 		return errors.New("MachinePool.cluster.x-k8s.io \"mock-machinepool-mp-0\" not found")
 	}
-	mp := &expv1.MachinePool{}
-	mp.Spec.Template.Spec.Version = &m.Version
-	list.(*expv1.MachinePoolList).Items = []expv1.MachinePool{*mp}
+	mp := &clusterv1.MachinePool{}
+	mp.Spec.Template.Spec.Version = m.Version
+	list.(*clusterv1.MachinePoolList).Items = []clusterv1.MachinePool{*mp}
 
 	return nil
 }
@@ -233,6 +230,21 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 			ownerNotFound: true,
 			wantErr:       true,
 		},
+		{
+			name: "azuremachinepool with invalid DiffDiskSettings",
+			amp: createMachinePoolWithDiffDiskSettings(infrav1.DiffDiskSettings{
+				Placement: ptr.To(infrav1.DiffDiskPlacementResourceDisk),
+			}),
+			wantErr: true,
+		},
+		{
+			name: "azuremachinepool with valid DiffDiskSettings",
+			amp: createMachinePoolWithDiffDiskSettings(infrav1.DiffDiskSettings{
+				Option:    string(armcompute.DiffDiskOptionsLocal),
+				Placement: ptr.To(infrav1.DiffDiskPlacementResourceDisk),
+			}),
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -242,7 +254,7 @@ func TestAzureMachinePool_ValidateCreate(t *testing.T) {
 			ampw := &azureMachinePoolWebhook{
 				Client: client,
 			}
-			_, err := ampw.ValidateCreate(context.Background(), tc.amp)
+			_, err := ampw.ValidateCreate(t.Context(), tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -266,7 +278,7 @@ func (m mockDefaultClient) Get(ctx context.Context, key client.ObjectKey, obj cl
 	case *infrav1.AzureCluster:
 		obj.Spec.SubscriptionID = m.SubscriptionID
 	case *clusterv1.Cluster:
-		obj.Spec.InfrastructureRef = &corev1.ObjectReference{
+		obj.Spec.InfrastructureRef = clusterv1.ContractVersionedObjectReference{
 			Kind: infrav1.AzureClusterKind,
 			Name: "test-cluster",
 		}
@@ -277,12 +289,12 @@ func (m mockDefaultClient) Get(ctx context.Context, key client.ObjectKey, obj cl
 }
 
 func (m mockDefaultClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	list.(*expv1.MachinePoolList).Items = []expv1.MachinePool{
+	list.(*clusterv1.MachinePoolList).Items = []clusterv1.MachinePool{
 		{
-			Spec: expv1.MachinePoolSpec{
+			Spec: clusterv1.MachinePoolSpec{
 				Template: clusterv1.MachineTemplateSpec{
 					Spec: clusterv1.MachineSpec{
-						InfrastructureRef: corev1.ObjectReference{
+						InfrastructureRef: clusterv1.ContractVersionedObjectReference{
 							Name: m.Name,
 						},
 					},
@@ -378,7 +390,7 @@ func TestAzureMachinePool_ValidateUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			ampw := &azureMachinePoolWebhook{}
-			_, err := ampw.ValidateUpdate(context.Background(), tc.oldAMP, tc.amp)
+			_, err := ampw.ValidateUpdate(t.Context(), tc.oldAMP, tc.amp)
 			if tc.wantErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -447,31 +459,31 @@ func TestAzureMachinePool_Default(t *testing.T) {
 		Client: mockClient,
 	}
 
-	err := ampw.Default(context.Background(), roleAssignmentExistTest.amp)
+	err := ampw.Default(t.Context(), roleAssignmentExistTest.amp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(roleAssignmentExistTest.amp.Spec.SystemAssignedIdentityRole.Name).To(Equal(existingRoleAssignmentName))
 
-	err = ampw.Default(context.Background(), publicKeyExistTest.amp)
+	err = ampw.Default(t.Context(), publicKeyExistTest.amp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyExistTest.amp.Spec.Template.SSHPublicKey).To(Equal(existingPublicKey))
 
-	err = ampw.Default(context.Background(), publicKeyNotExistTest.amp)
+	err = ampw.Default(t.Context(), publicKeyNotExistTest.amp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(publicKeyNotExistTest.amp.Spec.Template.SSHPublicKey).NotTo(BeEmpty())
 
-	err = ampw.Default(context.Background(), systemAssignedIdentityRoleExistTest.amp)
+	err = ampw.Default(t.Context(), systemAssignedIdentityRoleExistTest.amp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(systemAssignedIdentityRoleExistTest.amp.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal("testroledefinitionid"))
 	g.Expect(systemAssignedIdentityRoleExistTest.amp.Spec.SystemAssignedIdentityRole.Scope).To(Equal("testscope"))
 
-	err = ampw.Default(context.Background(), emptyTest.amp)
+	err = ampw.Default(t.Context(), emptyTest.amp)
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.Name).To(Not(BeEmpty()))
 	_, err = guuid.Parse(emptyTest.amp.Spec.SystemAssignedIdentityRole.Name)
 	g.Expect(err).To(Not(HaveOccurred()))
 	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole).To(Not(BeNil()))
 	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.Scope).To(Equal(fmt.Sprintf("/subscriptions/%s/", fakeSubscriptionID)))
-	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", fakeSubscriptionID, infrav1.ContributorRoleID)))
+	g.Expect(emptyTest.amp.Spec.SystemAssignedIdentityRole.DefinitionID).To(Equal(fmt.Sprintf("/subscriptions/%s/providers/Microsoft.Authorization/roleDefinitions/%s", fakeSubscriptionID, apiinternal.ContributorRoleID)))
 }
 
 func createMachinePoolWithMarketPlaceImage(publisher, offer, sku, version string, terminateNotificationTimeout *int) *AzureMachinePool {
@@ -492,6 +504,10 @@ func createMachinePoolWithMarketPlaceImage(publisher, offer, sku, version string
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
 				TerminateNotificationTimeout: terminateNotificationTimeout,
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
@@ -514,6 +530,10 @@ func createMachinePoolWithSharedImage(subscriptionID, resourceGroup, name, galle
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
 				TerminateNotificationTimeout: terminateNotificationTimeout,
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
@@ -525,6 +545,10 @@ func createMachinePoolWithNetworkConfig(subnetName string, interfaces []infrav1.
 			Template: AzureMachinePoolMachineTemplate{
 				SubnetName:        subnetName,
 				NetworkInterfaces: interfaces,
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
@@ -541,6 +565,10 @@ func createMachinePoolWithImageByID(imageID string, terminateNotificationTimeout
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
 				TerminateNotificationTimeout: terminateNotificationTimeout,
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
@@ -554,6 +582,12 @@ func createMachinePoolWithSystemAssignedIdentity(role string) *AzureMachinePool 
 				Name:         role,
 				Scope:        "scope",
 				DefinitionID: "definitionID",
+			},
+			Template: AzureMachinePoolMachineTemplate{
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
@@ -578,15 +612,19 @@ func createMachinePoolWithDiagnostics(diagnosticsType infrav1.BootDiagnosticsSto
 		Spec: AzureMachinePoolSpec{
 			Template: AzureMachinePoolMachineTemplate{
 				Diagnostics: diagnostics,
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 		},
 	}
 }
 
-func createMachinePoolWithUserAssignedIdentity(providerIds []string) *AzureMachinePool {
-	userAssignedIdentities := make([]infrav1.UserAssignedIdentity, len(providerIds))
+func createMachinePoolWithUserAssignedIdentity(providerIDs []string) *AzureMachinePool {
+	userAssignedIdentities := make([]infrav1.UserAssignedIdentity, len(providerIDs))
 
-	for _, providerID := range providerIds {
+	for _, providerID := range providerIDs {
 		userAssignedIdentities = append(userAssignedIdentities, infrav1.UserAssignedIdentity{
 			ProviderID: providerID,
 		})
@@ -596,23 +634,26 @@ func createMachinePoolWithUserAssignedIdentity(providerIds []string) *AzureMachi
 		Spec: AzureMachinePoolSpec{
 			Identity:               infrav1.VMIdentityUserAssigned,
 			UserAssignedIdentities: userAssignedIdentities,
+			Template: AzureMachinePoolMachineTemplate{
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
+			},
 		},
 	}
-}
-
-func generateSSHPublicKey(b64Enconded bool) string {
-	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-	publicRsaKey, _ := ssh.NewPublicKey(&privateKey.PublicKey)
-	if b64Enconded {
-		return base64.StdEncoding.EncodeToString(ssh.MarshalAuthorizedKey(publicRsaKey))
-	}
-	return string(ssh.MarshalAuthorizedKey(publicRsaKey))
 }
 
 func createMachinePoolWithStrategy(strategy AzureMachinePoolDeploymentStrategy) *AzureMachinePool {
 	return &AzureMachinePool{
 		Spec: AzureMachinePoolSpec{
 			Strategy: strategy,
+			Template: AzureMachinePoolMachineTemplate{
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
+			},
 		},
 	}
 }
@@ -621,6 +662,24 @@ func createMachinePoolWithOrchestrationMode(mode armcompute.OrchestrationMode) *
 	return &AzureMachinePool{
 		Spec: AzureMachinePoolSpec{
 			OrchestrationMode: infrav1.OrchestrationModeType(mode),
+			Template: AzureMachinePoolMachineTemplate{
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
+			},
+		},
+	}
+}
+
+func createMachinePoolWithDiffDiskSettings(settings infrav1.DiffDiskSettings) *AzureMachinePool {
+	return &AzureMachinePool{
+		Spec: AzureMachinePoolSpec{
+			Template: AzureMachinePoolMachineTemplate{
+				OSDisk: infrav1.OSDisk{
+					DiffDiskSettings: &settings,
+				},
+			},
 		},
 	}
 }
@@ -629,29 +688,25 @@ func TestAzureMachinePool_ValidateCreateFailure(t *testing.T) {
 	g := NewWithT(t)
 
 	tests := []struct {
-		name        string
-		amp         *AzureMachinePool
-		deferFunc   func()
-		expectError bool
+		name               string
+		amp                *AzureMachinePool
+		featureGateEnabled *bool
+		expectError        bool
 	}{
 		{
-			name:        "feature gate explicitly disabled",
-			amp:         getKnownValidAzureMachinePool(),
-			deferFunc:   utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, false),
-			expectError: true,
-		},
-		{
-			name:        "feature gate implicitly enabled",
-			amp:         getKnownValidAzureMachinePool(),
-			deferFunc:   func() {},
-			expectError: false,
+			name:               "feature gate implicitly enabled",
+			amp:                getKnownValidAzureMachinePool(),
+			featureGateEnabled: nil,
+			expectError:        false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			defer tc.deferFunc()
+			if tc.featureGateEnabled != nil {
+				utilfeature.SetFeatureGateDuringTest(t, feature.Gates, capifeature.MachinePool, *tc.featureGateEnabled)
+			}
 			ampw := &azureMachinePoolWebhook{}
-			_, err := ampw.ValidateCreate(context.Background(), tc.amp)
+			_, err := ampw.ValidateCreate(t.Context(), tc.amp)
 			if tc.expectError {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -678,6 +733,10 @@ func getKnownValidAzureMachinePool() *AzureMachinePool {
 				Image:                        &image,
 				SSHPublicKey:                 validSSHPublicKey,
 				TerminateNotificationTimeout: ptr.To(10),
+				OSDisk: infrav1.OSDisk{
+					CachingType: "None",
+					OSType:      "Linux",
+				},
 			},
 			Identity: infrav1.VMIdentitySystemAssigned,
 			SystemAssignedIdentityRole: &infrav1.SystemAssignedIdentityRole{

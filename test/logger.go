@@ -29,12 +29,13 @@ import (
 
 	. "github.com/onsi/gomega"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/cluster-api-provider-azure/test/e2e"
 	"sigs.k8s.io/cluster-api/test/framework"
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"sigs.k8s.io/cluster-api-provider-azure/test/e2e"
 )
 
-func Fail(message string, callerSkip ...int) {
+func Fail(message string, _ ...int) {
 	panic(message)
 }
 
@@ -74,28 +75,32 @@ func main() {
 	managementClusterLogPath := filepath.Join(*artifactFolder, "clusters", "bootstrap", "controllers")
 
 	fmt.Printf("Collecting logs for cluster %s in namespace %s and dumping logs to %s\n", *clustername, *namespace, *artifactFolder)
+	ctx := context.TODO()
 	collectManagementClusterLogs(bootstrapClusterProxy, managementClusterLogPath, namespace, resourcesYaml)
-	bootstrapClusterProxy.CollectWorkloadClusterLogs(context.TODO(), *namespace, *clustername, clusterLogPath)
+	bootstrapClusterProxy.CollectWorkloadClusterLogs(ctx, *namespace, *clustername, clusterLogPath)
 }
 
 func collectManagementClusterLogs(bootstrapClusterProxy *e2e.AzureClusterProxy, managementClusterLogPath string, namespace *string, workLoadClusterLogPath string) {
-	controllersDeployments := framework.GetControllerDeployments(context.TODO(), framework.GetControllerDeploymentsInput{
+	ctx := context.TODO()
+	controllersDeployments := framework.GetControllerDeployments(ctx, framework.GetControllerDeploymentsInput{
 		Lister: bootstrapClusterProxy.GetClient(),
 	})
 	for _, deployment := range controllersDeployments {
-		framework.WatchDeploymentLogsByName(context.TODO(), framework.WatchDeploymentLogsByNameInput{
+		framework.WatchDeploymentLogsByName(ctx, framework.WatchDeploymentLogsByNameInput{
 			GetLister:  bootstrapClusterProxy.GetClient(),
-			Cache:      bootstrapClusterProxy.GetCache(context.TODO()),
+			Cache:      bootstrapClusterProxy.GetCache(ctx),
 			ClientSet:  bootstrapClusterProxy.GetClientSet(),
 			Deployment: deployment,
 			LogPath:    managementClusterLogPath,
 		})
 	}
 
-	framework.DumpAllResources(context.TODO(), framework.DumpAllResourcesInput{
-		Lister:    bootstrapClusterProxy.GetClient(),
-		Namespace: *namespace,
-		LogPath:   workLoadClusterLogPath,
+	framework.DumpAllResources(ctx, framework.DumpAllResourcesInput{
+		Lister:               bootstrapClusterProxy.GetClient(),
+		KubeConfigPath:       bootstrapClusterProxy.GetKubeconfigPath(),
+		ClusterctlConfigPath: getClusterctlConfigPath(),
+		Namespace:            *namespace,
+		LogPath:              workLoadClusterLogPath,
 	})
 }
 
@@ -115,4 +120,30 @@ func getArtifactsFolder() string {
 		return "_artifacts"
 	}
 	return artifacts
+}
+
+func getClusterctlConfigPath() string {
+	config := os.Getenv("CLUSTERCTL_CONFIG")
+	if config == "" {
+		config = path.Join(getArtifactsFolder(), "repository", "clusterctl-config.yaml")
+	}
+
+	if _, err := os.Stat(config); os.IsNotExist(err) {
+		// If the file does not exist, create it and the directory structure
+		if err := os.MkdirAll(filepath.Dir(config), 0750); err != nil {
+			fmt.Printf("Error creating directory: %v\n", err)
+			return ""
+		}
+		file, err := os.Create(filepath.Clean(config))
+		if err != nil {
+			fmt.Printf("Error creating file: %v\n", err)
+			return ""
+		}
+		if err = file.Close(); err != nil {
+			fmt.Printf("Error closing file: %v\n", err)
+			return ""
+		}
+	}
+
+	return config
 }

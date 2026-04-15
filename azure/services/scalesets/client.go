@@ -23,6 +23,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
@@ -30,11 +31,11 @@ import (
 
 // Client wraps go-sdk.
 type Client interface {
-	Get(context.Context, azure.ResourceSpecGetter) (interface{}, error)
+	Get(context.Context, azure.ResourceSpecGetter) (any, error)
 	List(context.Context, string) ([]armcompute.VirtualMachineScaleSet, error)
 	ListInstances(context.Context, string, string) ([]armcompute.VirtualMachineScaleSetVM, error)
 
-	CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters interface{}) (result interface{}, poller *runtime.Poller[armcompute.VirtualMachineScaleSetsClientCreateOrUpdateResponse], err error)
+	CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters any) (result any, poller *runtime.Poller[armcompute.VirtualMachineScaleSetsClientCreateOrUpdateResponse], err error)
 	DeleteAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string) (poller *runtime.Poller[armcompute.VirtualMachineScaleSetsClientDeleteResponse], err error)
 }
 
@@ -131,7 +132,7 @@ func (ac *AzureClient) List(ctx context.Context, resourceGroupName string) ([]ar
 }
 
 // Get retrieves information about the model view of a virtual machine scale set.
-func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (interface{}, error) {
+func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (any, error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scalesets.AzureClient.Get")
 	defer done()
 
@@ -145,7 +146,7 @@ func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (
 // CreateOrUpdateAsync creates or updates a virtual machine scale set asynchronously.
 // It sends a PUT request to Azure and if accepted without error, the func will return a poller which can be used to track the ongoing
 // progress of the operation.
-func (ac *AzureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters interface{}) (result interface{}, poller *runtime.Poller[armcompute.VirtualMachineScaleSetsClientCreateOrUpdateResponse], err error) {
+func (ac *AzureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, resumeToken string, parameters any) (result any, poller *runtime.Poller[armcompute.VirtualMachineScaleSetsClientCreateOrUpdateResponse], err error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scalesets.AzureClient.CreateOrUpdateAsync")
 	defer done()
 

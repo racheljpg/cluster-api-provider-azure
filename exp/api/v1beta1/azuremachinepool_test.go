@@ -21,6 +21,7 @@ import (
 
 	"github.com/onsi/gomega"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
 )
@@ -34,7 +35,16 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 		{
 			Name: "HasNoImage",
 			Factory: func(_ *gomega.GomegaWithT) *infrav1exp.AzureMachinePool {
-				return new(infrav1exp.AzureMachinePool)
+				return &infrav1exp.AzureMachinePool{
+					Spec: infrav1exp.AzureMachinePoolSpec{
+						Template: infrav1exp.AzureMachinePoolMachineTemplate{
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
+						},
+					},
+				}
 			},
 			Expect: func(g *gomega.GomegaWithT, actual error) {
 				g.Expect(actual).NotTo(gomega.HaveOccurred())
@@ -55,6 +65,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 									Version:        "1.2.3",
 								},
 							},
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -70,6 +84,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
 							Image: new(infrav1.Image),
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -86,6 +104,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
 							TerminateNotificationTimeout: ptr.To(7),
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -101,6 +123,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
 							TerminateNotificationTimeout: ptr.To(20),
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -117,6 +143,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
 							TerminateNotificationTimeout: ptr.To(3),
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -133,6 +163,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 					Spec: infrav1exp.AzureMachinePoolSpec{
 						Template: infrav1exp.AzureMachinePoolMachineTemplate{
 							Diagnostics: nil,
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
+							},
 						},
 					},
 				}
@@ -151,6 +185,10 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 								Boot: &infrav1.BootDiagnostics{
 									StorageAccountType: infrav1.ManagedDiagnosticsStorage,
 								},
+							},
+							OSDisk: infrav1.OSDisk{
+								OSType:      "Linux",
+								CachingType: "None",
 							},
 						},
 					},
@@ -207,7 +245,6 @@ func TestAzureMachinePool_Validate(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			// Don't add t.Parallel() here or the test will fail.
 			g := gomega.NewGomegaWithT(t)

@@ -17,7 +17,6 @@ limitations under the License.
 package networkinterfaces
 
 import (
-	"context"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
@@ -25,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
 	"k8s.io/utils/ptr"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 )
 
@@ -255,15 +255,15 @@ func TestParameters(t *testing.T) {
 	testcases := []struct {
 		name          string
 		spec          *NICSpec
-		existing      interface{}
-		expect        func(g *WithT, result interface{})
+		existing      any
+		expect        func(g *WithT, result any)
 		expectedError string
 	}{
 		{
 			name:     "error when accelerted networking is nil and no SKU is present",
 			spec:     &fakeMissingSKUNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeNil())
 			},
 			expectedError: "unable to get required network interface SKU from machine cache",
@@ -272,7 +272,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with static private IP",
 			spec:     &fakeStaticPrivateIPNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -306,7 +306,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with dynamic private IP",
 			spec:     &fakeDynamicPrivateIPNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -339,7 +339,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for control plane network interface",
 			spec:     &fakeControlPlaneNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -375,7 +375,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with accelerated networking",
 			spec:     &fakeAcceleratedNetworkingNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -408,7 +408,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface without accelerated networking",
 			spec:     &fakeNonAcceleratedNetworkingNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -441,7 +441,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface ipv6",
 			spec:     &fakeIpv6NICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -482,7 +482,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface default ipconfig",
 			spec:     &fakeDefaultIPconfigNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -515,7 +515,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with one ipconfig",
 			spec:     &fakeOneIPconfigNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -548,7 +548,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with two ipconfigs",
 			spec:     &fakeTwoIPconfigNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -590,7 +590,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for network interface with two ipconfigs and a public ip",
 			spec:     &fakeTwoIPconfigWithPublicNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -635,7 +635,7 @@ func TestParameters(t *testing.T) {
 			name:     "get parameters for control plane network interface with DNS servers",
 			spec:     &fakeControlPlaneCustomDNSSettingsNICSpec,
 			existing: nil,
-			expect: func(g *WithT, result interface{}) {
+			expect: func(g *WithT, result any) {
 				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
 				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
 					Tags: map[string]*string{
@@ -668,15 +668,161 @@ func TestParameters(t *testing.T) {
 			},
 			expectedError: "",
 		},
+		{
+			name: "recreate parameters for network interface when Azure provisioning state is Failed",
+			spec: func() *NICSpec {
+				s := fakeStaticPrivateIPNICSpec // value‑copy
+				return &s                       // pointer to the copy, not the global
+			}(),
+			existing: armnetwork.Interface{
+				ID:       ptr.To(""),
+				Name:     ptr.To("my-net-interface"),
+				Location: ptr.To("fake-location"),
+				Type:     ptr.To("Microsoft.Network/networkInterfaces"),
+				Properties: &armnetwork.InterfacePropertiesFormat{
+					ProvisioningState: ptr.To(armnetwork.ProvisioningStateFailed),
+				},
+			},
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
+				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
+					Tags: map[string]*string{
+						"Name": ptr.To("my-net-interface"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+					},
+					Location: ptr.To("fake-location"),
+					Properties: &armnetwork.InterfacePropertiesFormat{
+						Primary:                     nil,
+						EnableAcceleratedNetworking: ptr.To(true),
+						EnableIPForwarding:          ptr.To(false),
+						DNSSettings:                 &armnetwork.InterfaceDNSSettings{},
+						IPConfigurations: []*armnetwork.InterfaceIPConfiguration{
+							{
+								Name: ptr.To("pipConfig"),
+								Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
+									Primary:                         ptr.To(true),
+									LoadBalancerBackendAddressPools: []*armnetwork.BackendAddressPool{{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/loadBalancers/my-public-lb/backendAddressPools/cluster-name-outboundBackendPool")}},
+									PrivateIPAllocationMethod:       ptr.To(armnetwork.IPAllocationMethodStatic),
+									PrivateIPAddress:                ptr.To("fake.static.ip"),
+									Subnet:                          &armnetwork.Subnet{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet")},
+								},
+							},
+						},
+					},
+				}))
+			},
+			expectedError: "",
+		},
+		{
+			name: "do not recreate parameters for network interface when Azure provisioning state is Deleting",
+			spec: func() *NICSpec {
+				s := fakeStaticPrivateIPNICSpec // value‑copy
+				return &s                       // pointer to the copy, not the global
+			}(),
+			existing: armnetwork.Interface{
+				ID:       ptr.To(""),
+				Name:     ptr.To("my-net-interface"),
+				Location: ptr.To("fake-location"),
+				Type:     ptr.To("Microsoft.Network/networkInterfaces"),
+				Properties: &armnetwork.InterfacePropertiesFormat{
+					ProvisioningState: ptr.To(armnetwork.ProvisioningStateDeleting),
+				},
+			},
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeNil())
+			},
+			expectedError: "",
+		},
+		{
+			name: "do not recreate parameters for network interface when Azure provisioning state is Succeeded",
+			spec: func() *NICSpec {
+				s := fakeStaticPrivateIPNICSpec // value‑copy
+				return &s                       // pointer to the copy, not the global
+			}(),
+			existing: armnetwork.Interface{
+				ID:       ptr.To(""),
+				Name:     ptr.To("my-net-interface"),
+				Location: ptr.To("fake-location"),
+				Type:     ptr.To("Microsoft.Network/networkInterfaces"),
+				Properties: &armnetwork.InterfacePropertiesFormat{
+					ProvisioningState: ptr.To(armnetwork.ProvisioningStateSucceeded),
+				},
+			},
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeNil())
+			},
+			expectedError: "",
+		},
+		{
+			name: "do not recreate parameters for network interface when Azure provisioning state is Updating",
+			spec: func() *NICSpec {
+				s := fakeStaticPrivateIPNICSpec // value‑copy
+				return &s                       // pointer to the copy, not the global
+			}(),
+			existing: armnetwork.Interface{
+				ID:       ptr.To(""),
+				Name:     ptr.To("my-net-interface"),
+				Location: ptr.To("fake-location"),
+				Type:     ptr.To("Microsoft.Network/networkInterfaces"),
+				Properties: &armnetwork.InterfacePropertiesFormat{
+					ProvisioningState: ptr.To(armnetwork.ProvisioningStateUpdating),
+				},
+			},
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeNil())
+			},
+			expectedError: "",
+		},
+		{
+			name: "recreate parameters for network interface when Azure provisioning state nil",
+			spec: func() *NICSpec {
+				s := fakeStaticPrivateIPNICSpec // value‑copy
+				return &s                       // pointer to the copy, not the global
+			}(),
+			existing: armnetwork.Interface{
+				ID:       ptr.To(""),
+				Name:     ptr.To("my-net-interface"),
+				Location: ptr.To("fake-location"),
+				Type:     ptr.To("Microsoft.Network/networkInterfaces"),
+			},
+			expect: func(g *WithT, result any) {
+				g.Expect(result).To(BeAssignableToTypeOf(armnetwork.Interface{}))
+				g.Expect(result.(armnetwork.Interface)).To(Equal(armnetwork.Interface{
+					Tags: map[string]*string{
+						"Name": ptr.To("my-net-interface"),
+						"sigs.k8s.io_cluster-api-provider-azure_cluster_my-cluster": ptr.To("owned"),
+					},
+					Location: ptr.To("fake-location"),
+					Properties: &armnetwork.InterfacePropertiesFormat{
+						Primary:                     nil,
+						EnableAcceleratedNetworking: ptr.To(true),
+						EnableIPForwarding:          ptr.To(false),
+						DNSSettings:                 &armnetwork.InterfaceDNSSettings{},
+						IPConfigurations: []*armnetwork.InterfaceIPConfiguration{
+							{
+								Name: ptr.To("pipConfig"),
+								Properties: &armnetwork.InterfaceIPConfigurationPropertiesFormat{
+									Primary:                         ptr.To(true),
+									LoadBalancerBackendAddressPools: []*armnetwork.BackendAddressPool{{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/loadBalancers/my-public-lb/backendAddressPools/cluster-name-outboundBackendPool")}},
+									PrivateIPAllocationMethod:       ptr.To(armnetwork.IPAllocationMethodStatic),
+									PrivateIPAddress:                ptr.To("fake.static.ip"),
+									Subnet:                          &armnetwork.Subnet{ID: ptr.To("/subscriptions/123/resourceGroups/my-rg/providers/Microsoft.Network/virtualNetworks/my-vnet/subnets/my-subnet")},
+								},
+							},
+						},
+					},
+				}))
+			},
+			expectedError: "",
+		},
 	}
 	format.MaxLength = 10000
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

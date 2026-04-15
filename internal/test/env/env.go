@@ -35,15 +35,16 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/internal/test/record"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	expv1 "sigs.k8s.io/cluster-api/exp/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	infrav1exp "sigs.k8s.io/cluster-api-provider-azure/exp/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/internal/test/record"
 )
 
 var (
@@ -57,7 +58,6 @@ func init() {
 	// Calculate the scheme.
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
-	utilruntime.Must(expv1.AddToScheme(scheme))
 	utilruntime.Must(infrav1.AddToScheme(scheme))
 	utilruntime.Must(infrav1exp.AddToScheme(scheme))
 
@@ -85,10 +85,11 @@ type (
 	TestEnvironment struct {
 		manager.Manager
 		client.Client
-		Config      *rest.Config
-		Log         logr.LogSink
-		LogRecorder *record.Logger
-		doneMgr     chan struct{}
+		Config          *rest.Config
+		Log             logr.LogSink
+		LogRecorder     *record.Logger
+		CredentialCache azure.CredentialCache
+		doneMgr         chan struct{}
 	}
 )
 
@@ -112,12 +113,13 @@ func NewTestEnvironment() *TestEnvironment {
 	}
 
 	return &TestEnvironment{
-		Manager:     mgr,
-		Client:      mgr.GetClient(),
-		Config:      mgr.GetConfig(),
-		LogRecorder: logger,
-		Log:         logger,
-		doneMgr:     make(chan struct{}),
+		Manager:         mgr,
+		Client:          mgr.GetClient(),
+		Config:          mgr.GetConfig(),
+		LogRecorder:     logger,
+		Log:             logger,
+		CredentialCache: azure.NewCredentialCache(),
+		doneMgr:         make(chan struct{}),
 	}
 }
 
@@ -132,13 +134,13 @@ func (t *TestEnvironment) Stop() error {
 }
 
 func getFilePathToCAPICRDs(root string) string {
-	modBits, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	modBits, err := os.ReadFile(filepath.Join(root, "go.mod")) //nolint:gosec // Ignore G304: Potential file inclusion via variable linter error.
 	if err != nil {
 		return ""
 	}
 
 	var clusterAPIVersion string
-	for _, line := range strings.Split(string(modBits), "\n") {
+	for line := range strings.SplitSeq(string(modBits), "\n") {
 		matches := clusterAPIVersionRegex.FindStringSubmatch(line)
 		if len(matches) == 3 {
 			clusterAPIVersion = matches[2]

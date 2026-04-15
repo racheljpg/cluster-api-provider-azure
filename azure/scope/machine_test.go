@@ -17,20 +17,22 @@ limitations under the License.
 package scope
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
-	azureautorest "github.com/Azure/go-autorest/autorest/azure"
-	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/component-base/featuregate"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/utils/ptr"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -41,9 +43,8 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/resourceskus"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/roleassignments"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualmachineimages/mock_virtualmachineimages"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/vmextensions"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/feature"
 )
 
 func TestMachineScope_Name(t *testing.T) {
@@ -286,7 +287,7 @@ func TestMachineScope_PublicIPSpecs(t *testing.T) {
 							Name: "my-cluster",
 						},
 						Status: infrav1.AzureClusterStatus{
-							FailureDomains: map[string]clusterv1.FailureDomainSpec{
+							FailureDomains: map[string]clusterv1beta1.FailureDomainSpec{
 								"failure-domain-id-1": {},
 								"failure-domain-id-2": {},
 								"failure-domain-id-3": {},
@@ -303,7 +304,7 @@ func TestMachineScope_PublicIPSpecs(t *testing.T) {
 								},
 							},
 							NetworkSpec: infrav1.NetworkSpec{
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									LoadBalancerClassSpec: infrav1.LoadBalancerClassSpec{
 										Type: infrav1.Internal,
 									},
@@ -374,11 +375,7 @@ func TestMachineScope_InboundNatSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -387,7 +384,7 @@ func TestMachineScope_InboundNatSpecs(t *testing.T) {
 								SubscriptionID: "123",
 							},
 							NetworkSpec: infrav1.NetworkSpec{
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "foo-loadbalancer",
 									FrontendIPs: []infrav1.FrontendIP{
 										{
@@ -411,7 +408,6 @@ func TestMachineScope_InboundNatSpecs(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := tt.machineScope.InboundNatSpecs(); !reflect.DeepEqual(got, tt.want) {
@@ -456,11 +452,7 @@ func TestMachineScope_RoleAssignmentSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -502,11 +494,7 @@ func TestMachineScope_RoleAssignmentSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -563,11 +551,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.PublicCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.PublicCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -615,11 +599,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.PublicCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.PublicCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -652,11 +632,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.USGovernmentCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.USGovernmentCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -689,11 +665,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.PublicCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.PublicCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -740,11 +712,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.USGovernmentCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.USGovernmentCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -777,11 +745,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.PublicCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.PublicCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -814,11 +778,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.USGovernmentCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.USGovernmentCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -864,11 +824,7 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 				},
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Environment: azureautorest.Environment{
-								Name: azureautorest.PublicCloud.Name,
-							},
-						},
+						cloudEnvironment: azure.PublicCloudName,
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Spec: infrav1.AzureClusterSpec{
@@ -908,6 +864,70 @@ func TestMachineScope_VMExtensionSpecs(t *testing.T) {
 						Version:   "1.0",
 						ProtectedSettings: map[string]string{
 							"commandToExecute": azure.LinuxBootstrapExtensionCommand,
+						},
+					},
+					ResourceGroup: "my-rg",
+					Location:      "westus",
+				},
+			},
+		},
+		{
+			name: "If a custom VM extension is specified and bootstrap extension is disabled, it returns only the custom VM extension",
+			machineScope: MachineScope{
+				Machine: &clusterv1.Machine{},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine-name",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						OSDisk: infrav1.OSDisk{
+							OSType: "Linux",
+						},
+						DisableVMBootstrapExtension: ptr.To(true),
+						VMExtensions: []infrav1.VMExtension{
+							{
+								Name:      "custom-vm-extension",
+								Publisher: "Microsoft.Azure.Extensions",
+								Version:   "2.0",
+								Settings: map[string]string{
+									"timestamp": "1234567890",
+								},
+								ProtectedSettings: map[string]string{
+									"commandToExecute": "echo hello world",
+								},
+							},
+						},
+					},
+				},
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						cloudEnvironment: azure.PublicCloudName,
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+						},
+					},
+				},
+				cache: &MachineCache{
+					VMSKU: resourceskus.SKU{},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&vmextensions.VMExtensionSpec{
+					ExtensionSpec: azure.ExtensionSpec{
+						Name:      "custom-vm-extension",
+						VMName:    "machine-name",
+						Publisher: "Microsoft.Azure.Extensions",
+						Version:   "2.0",
+						Settings: map[string]string{
+							"timestamp": "1234567890",
+						},
+						ProtectedSettings: map[string]string{
+							"commandToExecute": "echo hello world",
 						},
 					},
 					ResourceGroup: "my-rg",
@@ -1051,7 +1071,7 @@ func TestMachineScope_AvailabilityZone(t *testing.T) {
 			machineScope: MachineScope{
 				Machine: &clusterv1.Machine{
 					Spec: clusterv1.MachineSpec{
-						FailureDomain: ptr.To("dummy-failure-domain-from-machine-spec"),
+						FailureDomain: "dummy-failure-domain-from-machine-spec",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1241,8 +1261,8 @@ func TestMachineScope_AvailabilitySet(t *testing.T) {
 					},
 					AzureCluster: &infrav1.AzureCluster{
 						Status: infrav1.AzureClusterStatus{
-							FailureDomains: clusterv1.FailureDomains{
-								"foo-failure-domain": clusterv1.FailureDomainSpec{},
+							FailureDomains: clusterv1beta1.FailureDomains{
+								"foo-failure-domain": clusterv1beta1.FailureDomainSpec{},
 							},
 						},
 					},
@@ -1411,6 +1431,65 @@ func TestMachineScope_AvailabilitySet(t *testing.T) {
 			wantAvailabilitySetName:      "",
 			wantAvailabilitySetExistence: false,
 		},
+		{
+			name: "returns empty and false if machine has failureDomain set",
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Status: infrav1.AzureClusterStatus{},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							clusterv1.MachineDeploymentNameLabel: "foo-machine-deployment",
+						},
+					},
+					Spec: clusterv1.MachineSpec{
+						FailureDomain: "1",
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					Spec: infrav1.AzureMachineSpec{},
+				},
+			},
+			wantAvailabilitySetName:      "",
+			wantAvailabilitySetExistence: false,
+		},
+		{
+			name: "returns empty and false if azureMachine has failureDomain set",
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "cluster",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						Status: infrav1.AzureClusterStatus{},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							clusterv1.MachineDeploymentNameLabel: "foo-machine-deployment",
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					Spec: infrav1.AzureMachineSpec{
+						FailureDomain: ptr.To("1"),
+					},
+				},
+			},
+			wantAvailabilitySetName:      "",
+			wantAvailabilitySetExistence: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1479,7 +1558,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 	clusterMock.EXPECT().SubscriptionID().AnyTimes()
 	clusterMock.EXPECT().CloudEnvironment().AnyTimes()
 	clusterMock.EXPECT().Token().Return(&azidentity.DefaultAzureCredential{}).AnyTimes()
-	svc := virtualmachineimages.Service{Client: mock_virtualmachineimages.NewMockClient(mockCtrl)}
+	svc := virtualmachineimages.Service{}
 
 	tests := []struct {
 		name         string
@@ -1488,7 +1567,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 		expectedErr  string
 	}{
 		{
-			name: "returns AzureMachine image is found if present in the AzureMachine spec",
+			name: "returns AzureMachine image if present in the AzureMachine spec",
 			machineScope: MachineScope{
 				AzureMachine: &infrav1.AzureMachine{
 					ObjectMeta: metav1.ObjectMeta{
@@ -1507,14 +1586,14 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 			expectedErr: "",
 		},
 		{
-			name: "if no image is specified and os specified is windows with version below 1.22, returns windows dockershim image",
+			name: "if no image is specified and os specified is windows, returns windows containerd image",
 			machineScope: MachineScope{
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
 					},
 					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.20.1"),
+						Version: "1.20.1",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1530,49 +1609,20 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 				ClusterScoper: clusterMock,
 			},
 			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.20.1", "dockershim", "")
+				image, _ := svc.GetDefaultWindowsImage(t.Context(), "", "1.20.1", "containerd", "")
 				return image
 			}(),
 			expectedErr: "",
 		},
 		{
-			name: "if no image is specified and os specified is windows with version is 1.22+ with no annotation, returns windows containerd image",
+			name: "if no image is specified and os specified is windows with annotation dockershim, returns error",
 			machineScope: MachineScope{
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
 					},
 					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.22.1"),
-					},
-				},
-				AzureMachine: &infrav1.AzureMachine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-					},
-					Spec: infrav1.AzureMachineSpec{
-						OSDisk: infrav1.OSDisk{
-							OSType: azure.WindowsOS,
-						},
-					},
-				},
-				ClusterScoper: clusterMock,
-			},
-			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.22.1", "containerd", "")
-				return image
-			}(),
-			expectedErr: "",
-		},
-		{
-			name: "if no image is specified and os specified is windows with version is 1.22+ with annotation dockershim, returns windows dockershim image",
-			machineScope: MachineScope{
-				Machine: &clusterv1.Machine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-					},
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.22.1"),
+						Version: "1.22.1",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1591,81 +1641,20 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 				ClusterScoper: clusterMock,
 			},
 			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.22.1", "dockershim", "")
+				image, _ := svc.GetDefaultWindowsImage(t.Context(), "", "1.22.1", "dockershim", "")
 				return image
 			}(),
-			expectedErr: "",
+			expectedErr: "unsupported runtime dockershim",
 		},
 		{
-			name: "if no image is specified and os specified is windows with version is less and 1.22 with annotation dockershim, returns windows dockershim image",
+			name: "if no image is specified and os specified is windows with windowsServerVersion annotation set to 2019, returns error",
 			machineScope: MachineScope{
 				Machine: &clusterv1.Machine{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "machine-name",
 					},
 					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.21.1"),
-					},
-				},
-				AzureMachine: &infrav1.AzureMachine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-						Annotations: map[string]string{
-							"runtime": "dockershim",
-						},
-					},
-					Spec: infrav1.AzureMachineSpec{
-						OSDisk: infrav1.OSDisk{
-							OSType: azure.WindowsOS,
-						},
-					},
-				},
-				ClusterScoper: clusterMock,
-			},
-			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.21.1", "dockershim", "")
-				return image
-			}(),
-			expectedErr: "",
-		},
-		{
-			name: "if no image is specified and os specified is windows with version is less and 1.22 with annotation containerd, returns error",
-			machineScope: MachineScope{
-				Machine: &clusterv1.Machine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-					},
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.21.1"),
-					},
-				},
-				AzureMachine: &infrav1.AzureMachine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-						Annotations: map[string]string{
-							"runtime": "containerd",
-						},
-					},
-					Spec: infrav1.AzureMachineSpec{
-						OSDisk: infrav1.OSDisk{
-							OSType: azure.WindowsOS,
-						},
-					},
-				},
-				ClusterScoper: clusterMock,
-			},
-			want:        nil,
-			expectedErr: "containerd image only supported in 1.22+",
-		},
-		{
-			name: "if no image is specified and os specified is windows with windowsServerVersion annotation set to 2019, retrurns 2019 image",
-			machineScope: MachineScope{
-				Machine: &clusterv1.Machine{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "machine-name",
-					},
-					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.23.3"),
+						Version: "1.23.3",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1684,7 +1673,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 				ClusterScoper: clusterMock,
 			},
 			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.23.3", "", "windows-2019")
+				image, _ := svc.GetDefaultWindowsImage(t.Context(), "", "1.23.3", "", "windows-2019")
 				return image
 			}(),
 			expectedErr: "",
@@ -1697,7 +1686,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 						Name: "machine-name",
 					},
 					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.23.3"),
+						Version: "1.23.3",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1716,7 +1705,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 				ClusterScoper: clusterMock,
 			},
 			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultWindowsImage(context.TODO(), "", "1.23.3", "", "windows-2022")
+				image, _ := svc.GetDefaultWindowsImage(t.Context(), "", "1.23.3", "", "windows-2022")
 				return image
 			}(),
 			expectedErr: "",
@@ -1729,7 +1718,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 						Name: "machine-name",
 					},
 					Spec: clusterv1.MachineSpec{
-						Version: ptr.To("1.20.1"),
+						Version: "1.20.1",
 					},
 				},
 				AzureMachine: &infrav1.AzureMachine{
@@ -1740,7 +1729,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 				ClusterScoper: clusterMock,
 			},
 			want: func() *infrav1.Image {
-				image, _ := svc.GetDefaultUbuntuImage(context.TODO(), "", "1.20.1")
+				image, _ := svc.GetDefaultLinuxImage(t.Context(), "", "1.20.1")
 				return image
 			}(),
 			expectedErr: "",
@@ -1748,7 +1737,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotImage, err := tt.machineScope.GetVMImage(context.TODO())
+			gotImage, err := tt.machineScope.GetVMImage(t.Context())
 			if (err == nil && tt.expectedErr != "") || (err != nil && tt.expectedErr != err.Error()) {
 				t.Errorf("expected error %v, got %v", tt.expectedErr, err)
 			}
@@ -1762,6 +1751,7 @@ func TestMachineScope_GetVMImage(t *testing.T) {
 func TestMachineScope_NICSpecs(t *testing.T) {
 	tests := []struct {
 		name         string
+		featureGate  featuregate.Feature
 		machineScope MachineScope
 		want         []azure.ResourceSpecGetter
 	}{
@@ -1770,11 +1760,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -1877,11 +1863,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -1991,11 +1973,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2100,11 +2078,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2205,11 +2179,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2247,7 +2217,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 									LoadBalancerClassSpec: infrav1.LoadBalancerClassSpec{
 										Type: infrav1.Internal,
@@ -2318,11 +2288,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2360,7 +2326,112 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
+									Name: "api-lb",
+									BackendPool: infrav1.BackendPool{
+										Name: "api-lb-backendPool",
+									},
+								},
+								NodeOutboundLB: &infrav1.LoadBalancerSpec{
+									Name: "outbound-lb",
+								},
+							},
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						ProviderID: ptr.To("azure:///subscriptions/1234-5678/resourceGroups/my-cluster/providers/Microsoft.Compute/virtualMachines/machine-name"),
+						NetworkInterfaces: []infrav1.NetworkInterface{{
+							SubnetName:       "subnet1",
+							PrivateIPConfigs: 1,
+						}},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+						Labels: map[string]string{
+							clusterv1.MachineControlPlaneLabel: "true",
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&networkinterfaces.NICSpec{
+					Name:                    "machine-name-nic",
+					ResourceGroup:           "my-rg",
+					Location:                "westus",
+					SubscriptionID:          "123",
+					MachineName:             "machine-name",
+					SubnetName:              "subnet1",
+					IPConfigs:               []networkinterfaces.IPConfig{{}},
+					VNetName:                "vnet1",
+					VNetResourceGroup:       "rg1",
+					PublicLBName:            "api-lb",
+					PublicLBAddressPoolName: "api-lb-backendPool",
+					PublicLBNATRuleName:     "machine-name",
+					PublicIPName:            "",
+					AcceleratedNetworking:   nil,
+					DNSServers:              nil,
+					IPv6Enabled:             false,
+					EnableIPForwarding:      false,
+					SKU:                     nil,
+					ClusterName:             "cluster",
+					AdditionalTags: infrav1.Tags{
+						"kubernetes.io_cluster_cluster": "owned",
+					},
+				},
+			},
+		},
+		{
+			name:        "Control Plane Machine with public LB with feature gate API Server ILB enabled",
+			featureGate: feature.APIServerILB,
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						subscriptionID: "123",
+					},
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "cluster",
+							Namespace: "default",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "cluster",
+							Namespace: "default",
+							OwnerReferences: []metav1.OwnerReference{
+								{
+									APIVersion: "cluster.x-k8s.io/v1beta1",
+									Kind:       "Cluster",
+									Name:       "cluster",
+								},
+							},
+						},
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+							NetworkSpec: infrav1.NetworkSpec{
+								Vnet: infrav1.VnetSpec{
+									Name:          "vnet1",
+									ResourceGroup: "rg1",
+								},
+								Subnets: []infrav1.SubnetSpec{
+									{
+										SubnetClassSpec: infrav1.SubnetClassSpec{
+											Role: infrav1.SubnetNode,
+											Name: "subnet1",
+										},
+									},
+								},
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 									BackendPool: infrav1.BackendPool{
 										Name: "api-lb-backendPool",
@@ -2408,8 +2479,8 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 					PublicLBName:              "api-lb",
 					PublicLBAddressPoolName:   "api-lb-backendPool",
 					PublicLBNATRuleName:       "machine-name",
-					InternalLBName:            "",
-					InternalLBAddressPoolName: "",
+					InternalLBName:            "api-lb-internal",
+					InternalLBAddressPoolName: "api-lb-backendPool-internal",
 					PublicIPName:              "",
 					AcceleratedNetworking:     nil,
 					DNSServers:                nil,
@@ -2428,11 +2499,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2470,7 +2537,113 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
+									Name: "api-lb",
+									BackendPool: infrav1.BackendPool{
+										Name: "api-lb-backendPool",
+									},
+								},
+								NodeOutboundLB: &infrav1.LoadBalancerSpec{
+									Name: "outbound-lb",
+								},
+							},
+						},
+					},
+				},
+				AzureMachine: &infrav1.AzureMachine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+					},
+					Spec: infrav1.AzureMachineSpec{
+						ProviderID: ptr.To("azure:///subscriptions/1234-5678/resourceGroups/my-cluster/providers/Microsoft.Compute/virtualMachines/machine-name"),
+						NetworkInterfaces: []infrav1.NetworkInterface{{
+							SubnetName:       "subnet1",
+							PrivateIPConfigs: 1,
+						}},
+						DNSServers: []string{"123.123.123.123", "124.124.124.124"},
+					},
+				},
+				Machine: &clusterv1.Machine{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "machine",
+						Labels: map[string]string{
+							clusterv1.MachineControlPlaneLabel: "true",
+						},
+					},
+				},
+			},
+			want: []azure.ResourceSpecGetter{
+				&networkinterfaces.NICSpec{
+					Name:                    "machine-name-nic",
+					ResourceGroup:           "my-rg",
+					Location:                "westus",
+					SubscriptionID:          "123",
+					MachineName:             "machine-name",
+					SubnetName:              "subnet1",
+					IPConfigs:               []networkinterfaces.IPConfig{{}},
+					VNetName:                "vnet1",
+					VNetResourceGroup:       "rg1",
+					PublicLBName:            "api-lb",
+					PublicLBAddressPoolName: "api-lb-backendPool",
+					PublicLBNATRuleName:     "machine-name",
+					PublicIPName:            "",
+					AcceleratedNetworking:   nil,
+					DNSServers:              []string{"123.123.123.123", "124.124.124.124"},
+					IPv6Enabled:             false,
+					EnableIPForwarding:      false,
+					SKU:                     nil,
+					ClusterName:             "cluster",
+					AdditionalTags: infrav1.Tags{
+						"kubernetes.io_cluster_cluster": "owned",
+					},
+				},
+			},
+		},
+		{
+			name:        "Control Plane Machine with public LB and Custom DNS Servers with feature gate API Server ILB enabled",
+			featureGate: feature.APIServerILB,
+			machineScope: MachineScope{
+				ClusterScoper: &ClusterScope{
+					AzureClients: AzureClients{
+						subscriptionID: "123",
+					},
+					Cluster: &clusterv1.Cluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "cluster",
+							Namespace: "default",
+						},
+					},
+					AzureCluster: &infrav1.AzureCluster{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "cluster",
+							Namespace: "default",
+							OwnerReferences: []metav1.OwnerReference{
+								{
+									APIVersion: "cluster.x-k8s.io/v1beta1",
+									Kind:       "Cluster",
+									Name:       "cluster",
+								},
+							},
+						},
+						Spec: infrav1.AzureClusterSpec{
+							ResourceGroup: "my-rg",
+							AzureClusterClassSpec: infrav1.AzureClusterClassSpec{
+								Location: "westus",
+							},
+							NetworkSpec: infrav1.NetworkSpec{
+								Vnet: infrav1.VnetSpec{
+									Name:          "vnet1",
+									ResourceGroup: "rg1",
+								},
+								Subnets: []infrav1.SubnetSpec{
+									{
+										SubnetClassSpec: infrav1.SubnetClassSpec{
+											Role: infrav1.SubnetNode,
+											Name: "subnet1",
+										},
+									},
+								},
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 									BackendPool: infrav1.BackendPool{
 										Name: "api-lb-backendPool",
@@ -2519,8 +2692,8 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 					PublicLBName:              "api-lb",
 					PublicLBAddressPoolName:   "api-lb-backendPool",
 					PublicLBNATRuleName:       "machine-name",
-					InternalLBName:            "",
-					InternalLBAddressPoolName: "",
+					InternalLBName:            "api-lb-internal",
+					InternalLBAddressPoolName: "api-lb-backendPool-internal",
 					PublicIPName:              "",
 					AcceleratedNetworking:     nil,
 					DNSServers:                []string{"123.123.123.123", "124.124.124.124"},
@@ -2539,11 +2712,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2581,7 +2750,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 								},
 								NodeOutboundLB: &infrav1.LoadBalancerSpec{
@@ -2679,11 +2848,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2721,7 +2886,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 								},
 								NodeOutboundLB: &infrav1.LoadBalancerSpec{
@@ -2817,11 +2982,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 			machineScope: MachineScope{
 				ClusterScoper: &ClusterScope{
 					AzureClients: AzureClients{
-						EnvironmentSettings: auth.EnvironmentSettings{
-							Values: map[string]string{
-								auth.SubscriptionID: "123",
-							},
-						},
+						subscriptionID: "123",
 					},
 					Cluster: &clusterv1.Cluster{
 						ObjectMeta: metav1.ObjectMeta{
@@ -2859,7 +3020,7 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 										},
 									},
 								},
-								APIServerLB: infrav1.LoadBalancerSpec{
+								APIServerLB: &infrav1.LoadBalancerSpec{
 									Name: "api-lb",
 								},
 								NodeOutboundLB: &infrav1.LoadBalancerSpec{
@@ -2926,6 +3087,9 @@ func TestMachineScope_NICSpecs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
+			if tt.featureGate == feature.APIServerILB {
+				featuregatetesting.SetFeatureGateDuringTest(t, feature.Gates, tt.featureGate, true)
+			}
 			gotNicSpecs := tt.machineScope.NICSpecs()
 			if !reflect.DeepEqual(gotNicSpecs, tt.want) {
 				g.Expect(gotNicSpecs).To(BeEquivalentTo(tt.want))
@@ -3094,7 +3258,6 @@ func TestDiskSpecs(t *testing.T) {
 	}
 
 	for _, tt := range testcases {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 

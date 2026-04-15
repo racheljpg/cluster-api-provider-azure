@@ -34,7 +34,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	typedappsv1 "k8s.io/client-go/kubernetes/typed/apps/v1"
 	"k8s.io/utils/ptr"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 const (
@@ -241,5 +241,16 @@ func (d *Builder) AddPodAntiAffinity(affinity corev1.PodAntiAffinity) *Builder {
 	}
 
 	d.deployment.Spec.Template.Spec.Affinity.PodAntiAffinity = &affinity
+	return d
+}
+
+// SetResourceRequests sets CPU and memory resource requests for the first container.
+func (d *Builder) SetResourceRequests(cpu, memory string) *Builder {
+	if len(d.deployment.Spec.Template.Spec.Containers) > 0 {
+		d.deployment.Spec.Template.Spec.Containers[0].Resources.Requests = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(cpu),
+			corev1.ResourceMemory: resource.MustParse(memory),
+		}
+	}
 	return d
 }

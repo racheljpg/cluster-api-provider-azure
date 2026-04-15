@@ -17,7 +17,6 @@ limitations under the License.
 package vnetpeerings
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/async/mock_async"
@@ -240,7 +240,6 @@ func TestReconcileVnetPeerings(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -257,7 +256,7 @@ func TestReconcileVnetPeerings(t *testing.T) {
 				Reconciler: asyncMock,
 			}
 
-			err := s.Reconcile(context.TODO())
+			err := s.Reconcile(t.Context())
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -393,7 +392,6 @@ func TestDeleteVnetPeerings(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -410,7 +408,7 @@ func TestDeleteVnetPeerings(t *testing.T) {
 				Reconciler: asyncMock,
 			}
 
-			err := s.Delete(context.TODO())
+			err := s.Delete(t.Context())
 			if tc.expectedError != "" {
 				fmt.Printf("\nExpected error:\t%s\n", tc.expectedError)
 				fmt.Printf("\nActual error:\t%s\n", err.Error())

@@ -26,20 +26,21 @@ import (
 	"go.uber.org/mock/gomock"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aso/mock_aso"
 	gomockinternal "sigs.k8s.io/cluster-api-provider-azure/internal/test/matchers/gomock"
 	reconcilerutils "sigs.k8s.io/cluster-api-provider-azure/util/reconciler"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 const (
 	serviceName   = "test"
-	conditionType = clusterv1.ConditionType("Test")
+	conditionType = clusterv1beta1.ConditionType("Test")
 )
 
 func TestServiceReconcile(t *testing.T) {
@@ -64,7 +65,7 @@ func TestServiceReconcile(t *testing.T) {
 			},
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).To(MatchError(postReconcileErr))
 	})
 
@@ -92,7 +93,7 @@ func TestServiceReconcile(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).To(MatchError(reconcileErr))
 	})
 
@@ -123,7 +124,7 @@ func TestServiceReconcile(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -155,7 +156,7 @@ func TestServiceReconcile(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(azure.IsOperationNotDoneError(err)).To(BeTrue())
 	})
 
@@ -187,7 +188,7 @@ func TestServiceReconcile(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).To(MatchError(reconcileErr))
 	})
 
@@ -232,7 +233,7 @@ func TestServiceReconcile(t *testing.T) {
 			},
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).To(MatchError(postReconcileErr))
 	})
 
@@ -298,7 +299,7 @@ func TestServiceReconcile(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Reconcile(context.Background())
+		err := s.Reconcile(t.Context())
 		g.Expect(err).To(MatchError(deleteErr))
 	})
 }
@@ -323,7 +324,7 @@ func TestServiceDelete(t *testing.T) {
 			},
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -351,7 +352,7 @@ func TestServiceDelete(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(err).To(MatchError(deleteErr))
 	})
 
@@ -382,7 +383,7 @@ func TestServiceDelete(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -414,7 +415,7 @@ func TestServiceDelete(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(azure.IsOperationNotDoneError(err)).To(BeTrue())
 	})
 
@@ -446,7 +447,7 @@ func TestServiceDelete(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(err).To(MatchError(deleteErr))
 	})
 
@@ -480,7 +481,7 @@ func TestServiceDelete(t *testing.T) {
 			},
 		}
 
-		err := s.Delete(context.Background())
+		err := s.Delete(t.Context())
 		g.Expect(err).To(MatchError(postErr))
 	})
 }
@@ -511,7 +512,7 @@ func TestServicePause(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Pause(context.Background())
+		err := s.Pause(t.Context())
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -546,7 +547,7 @@ func TestServicePause(t *testing.T) {
 			ConditionType: conditionType,
 		}
 
-		err := s.Pause(context.Background())
+		err := s.Pause(t.Context())
 		g.Expect(err).To(MatchError(pauseErr))
 	})
 }

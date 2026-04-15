@@ -17,11 +17,11 @@ limitations under the License.
 package v1beta1
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/validation/field"
-	"sigs.k8s.io/cluster-api-provider-azure/feature"
-	capifeature "sigs.k8s.io/cluster-api/feature"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -29,32 +29,32 @@ import (
 
 // SetupWebhookWithManager sets up and registers the webhook with the manager.
 func (ampm *AzureMachinePoolMachine) SetupWebhookWithManager(mgr ctrl.Manager) error {
+	w := new(azureMachinePoolMachineWebhook)
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(ampm).
+		WithValidator(w).
 		Complete()
 }
 
 // +kubebuilder:webhook:verbs=create;update,path=/validate-infrastructure-cluster-x-k8s-io-v1beta1-azuremachinepoolmachine,mutating=false,failurePolicy=fail,groups=infrastructure.cluster.x-k8s.io,resources=azuremachinepoolmachines,versions=v1beta1,name=azuremachinepoolmachine.kb.io,sideEffects=None,admissionReviewVersions=v1;v1beta1
 
-var _ webhook.Validator = &AzureMachinePoolMachine{}
+type azureMachinePoolMachineWebhook struct{}
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
-func (ampm *AzureMachinePoolMachine) ValidateCreate() (admission.Warnings, error) {
+var _ webhook.CustomValidator = &azureMachinePoolMachineWebhook{}
+
+// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type.
+func (*azureMachinePoolMachineWebhook) ValidateCreate(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
-func (ampm *AzureMachinePoolMachine) ValidateUpdate(old runtime.Object) (admission.Warnings, error) {
-	// NOTE: AzureMachinePoolMachine is behind MachinePool feature gate flag; the webhook
-	// must prevent creating new objects new case the feature flag is disabled.
-	if !feature.Gates.Enabled(capifeature.MachinePool) {
-		return nil, field.Forbidden(
-			field.NewPath("spec"),
-			"can be set only if the MachinePool feature flag is enabled",
-		)
+// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type.
+func (*azureMachinePoolMachineWebhook) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
+	ampm, ok := newObj.(*AzureMachinePoolMachine)
+	if !ok {
+		return nil, fmt.Errorf("expected an AzureMachinePoolMachine object but got %T", ampm)
 	}
 
-	oldMachine, ok := old.(*AzureMachinePoolMachine)
+	oldMachine, ok := oldObj.(*AzureMachinePoolMachine)
 	if !ok {
 		return nil, errors.New("expected and AzureMachinePoolMachine")
 	}
@@ -66,7 +66,7 @@ func (ampm *AzureMachinePoolMachine) ValidateUpdate(old runtime.Object) (admissi
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
-func (ampm *AzureMachinePoolMachine) ValidateDelete() (admission.Warnings, error) {
+// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type.
+func (*azureMachinePoolMachineWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }

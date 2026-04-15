@@ -18,6 +18,7 @@ package repository
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -29,7 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
 	yaml "sigs.k8s.io/cluster-api/cmd/clusterctl/client/yamlprocessor"
@@ -40,7 +41,6 @@ import (
 
 const (
 	namespaceKind                      = "Namespace"
-	clusterRoleKind                    = "ClusterRole"
 	clusterRoleBindingKind             = "ClusterRoleBinding"
 	roleBindingKind                    = "RoleBinding"
 	certificateKind                    = "Certificate"
@@ -259,6 +259,22 @@ func NewComponents(input ComponentsInput) (Components, error) {
 	// Add common labels.
 	objs = addCommonLabels(objs, input.Provider)
 
+	// Deploying cert-manager objects and especially Certificates before Mutating-
+	// ValidatingWebhookConfigurations and CRDs ensures cert-manager's ca-injector
+	// receives the event for the objects at the right time to inject the new CA.
+	sort.SliceStable(objs, func(i, j int) bool {
+		// First prioritize Namespaces over everything.
+		if objs[i].GetKind() == "Namespace" {
+			return true
+		}
+		if objs[j].GetKind() == "Namespace" {
+			return false
+		}
+
+		// Second prioritize cert-manager objects.
+		return objs[i].GroupVersionKind().Group == "cert-manager.io"
+	})
+
 	return &components{
 		Provider:        input.Provider,
 		version:         input.Options.Version,
@@ -300,7 +316,8 @@ func addNamespaceIfMissing(objs []unstructured.Unstructured, targetNamespace str
 	if !namespaceObjectFound {
 		objs = append(objs, unstructured.Unstructured{
 			Object: map[string]interface{}{
-				"kind": namespaceKind,
+				"apiVersion": "v1",
+				"kind":       namespaceKind,
 				"metadata": map[string]interface{}{
 					"name": targetNamespace,
 				},

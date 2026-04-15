@@ -29,6 +29,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
@@ -36,7 +37,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/scheme"
 	"sigs.k8s.io/cluster-api/version"
@@ -82,6 +83,7 @@ type proxy struct {
 	kubeconfig         Kubeconfig
 	timeout            time.Duration
 	configLoadingRules *clientcmd.ClientConfigLoadingRules
+	warningHandler     rest.WarningHandler
 }
 
 var _ Proxy = &proxy{}
@@ -142,16 +144,19 @@ func (k *proxy) GetConfig() (*rest.Config, error) {
 	}
 	restConfig, err := clientcmd.NewDefaultClientConfig(*config, configOverrides).ClientConfig()
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "invalid configuration:") {
-			return nil, errors.New(strings.Replace(err.Error(), "invalid configuration:", "invalid kubeconfig file; clusterctl requires a valid kubeconfig file to connect to the management cluster:", 1))
+		var inClusterErr error
+		restConfig, inClusterErr = rest.InClusterConfig()
+		if inClusterErr != nil {
+			return nil, errors.Wrapf(kerrors.NewAggregate([]error{err, inClusterErr}), "clusterctl requires either a valid kubeconfig or in cluster config to connect to the management cluster")
 		}
-		return nil, err
 	}
 	restConfig.UserAgent = fmt.Sprintf("clusterctl/%s (%s)", version.Get().GitVersion, version.Get().Platform)
 
 	// Set QPS and Burst to a threshold that ensures the controller runtime client/client go doesn't generate throttling log messages
 	restConfig.QPS = 20
 	restConfig.Burst = 100
+
+	restConfig.WarningHandler = k.warningHandler
 
 	return restConfig, nil
 }
@@ -374,7 +379,15 @@ func InjectKubeconfigPaths(paths []string) ProxyOption {
 	}
 }
 
-func newProxy(kubeconfig Kubeconfig, opts ...ProxyOption) Proxy {
+// InjectWarningHandler sets the handler for warnings returned by the Kubernetes API server.
+func InjectWarningHandler(handler rest.WarningHandler) ProxyOption {
+	return func(p *proxy) {
+		p.warningHandler = handler
+	}
+}
+
+// NewProxy returns a proxy used for operating objects in a cluster.
+func NewProxy(kubeconfig Kubeconfig, opts ...ProxyOption) Proxy {
 	// If a kubeconfig file isn't provided, find one in the standard locations.
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	if kubeconfig.Path != "" {

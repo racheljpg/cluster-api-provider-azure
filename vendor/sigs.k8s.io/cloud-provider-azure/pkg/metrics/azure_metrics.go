@@ -25,7 +25,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
-	"sigs.k8s.io/cloud-provider-azure/pkg/retry"
 )
 
 var (
@@ -60,6 +59,8 @@ type operationCallMetrics struct {
 type MetricContext struct {
 	start      time.Time
 	attributes []string
+	// log level in ObserveOperationWithResult
+	LogLevel int32
 }
 
 // NewMetricContext creates a new MetricContext.
@@ -67,6 +68,7 @@ func NewMetricContext(prefix, request, resourceGroup, subscriptionID, source str
 	return &MetricContext{
 		start:      time.Now(),
 		attributes: []string{prefix + "_" + request, strings.ToLower(resourceGroup), subscriptionID, source},
+		LogLevel:   3,
 	}
 }
 
@@ -78,18 +80,6 @@ func (mc *MetricContext) RateLimitedCount() {
 // ThrottledCount records the metrics for throttled request count.
 func (mc *MetricContext) ThrottledCount() {
 	apiMetrics.throttledCount.WithLabelValues(mc.attributes...).Inc()
-}
-
-// Observe observes the request latency and failed requests.
-func (mc *MetricContext) Observe(rerr *retry.Error, labelAndValues ...interface{}) {
-	latency := time.Since(mc.start).Seconds()
-	apiMetrics.latency.WithLabelValues(mc.attributes...).Observe(latency)
-	if rerr != nil {
-		errorCode := rerr.ServiceErrorCode()
-		attributes := append(mc.attributes, errorCode)
-		apiMetrics.errors.WithLabelValues(attributes...).Inc()
-	}
-	mc.logLatency(6, latency, append(labelAndValues, "error_code", rerr.ServiceErrorCode())...)
 }
 
 // ObserveOperationWithResult observes the request latency and failed requests of an operation.
@@ -104,7 +94,7 @@ func (mc *MetricContext) ObserveOperationWithResult(isOperationSucceeded bool, l
 		}
 		mc.CountFailedOperation()
 	}
-	mc.logLatency(3, latency, append(labelAndValues, "result_code", resultCode)...)
+	mc.logLatency(mc.LogLevel, latency, append(labelAndValues, "result_code", resultCode)...)
 }
 
 func (mc *MetricContext) logLatency(logLevel int32, latency float64, additionalKeysAndValues ...interface{}) {

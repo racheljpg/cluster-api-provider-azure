@@ -17,7 +17,6 @@ limitations under the License.
 package bastionhosts
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -26,6 +25,7 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
@@ -45,12 +45,12 @@ var (
 			IpConfigurations: []asonetworkv1.BastionHostIPConfiguration{
 				{
 					Name: ptr.To(fmt.Sprintf("%s-%s", fakeAzureBastionSpec1.Name, "bastionIP")),
-					Subnet: &asonetworkv1.BastionHostSubResource{
+					Subnet: &asonetworkv1.SubResource{
 						Reference: &genruntime.ResourceReference{
 							ARMID: fakeAzureBastionSpec1.SubnetID,
 						},
 					},
-					PublicIPAddress: &asonetworkv1.BastionHostSubResource{
+					PublicIPAddress: &asonetworkv1.SubResource{
 						Reference: &genruntime.ResourceReference{
 							ARMID: fakeAzureBastionSpec1.PublicIPID,
 						},
@@ -182,12 +182,11 @@ func TestAzureBastionSpec_Parameters(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.TODO(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err).To(MatchError(tc.expectedError))

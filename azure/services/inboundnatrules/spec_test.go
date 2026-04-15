@@ -17,7 +17,6 @@ limitations under the License.
 package inboundnatrules
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -31,8 +30,8 @@ func TestParameters(t *testing.T) {
 	testcases := []struct {
 		name     string
 		spec     InboundNatSpec
-		existing interface{}
-		expected interface{}
+		existing any
+		expected any
 		errorMsg string
 	}{
 		{
@@ -61,12 +60,11 @@ func TestParameters(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
 
-			result, err := tc.spec.Parameters(context.Background(), tc.existing)
+			result, err := tc.spec.Parameters(t.Context(), tc.existing)
 			if tc.errorMsg != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.errorMsg))
@@ -148,7 +146,6 @@ func TestGetAvailablePort(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()

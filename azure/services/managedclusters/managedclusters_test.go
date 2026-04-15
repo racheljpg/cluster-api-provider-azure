@@ -17,22 +17,22 @@ limitations under the License.
 package managedclusters
 
 import (
-	"context"
 	"errors"
 	"testing"
 
-	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20230202preview"
 	asocontainerservicev1 "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231001"
+	asocontainerservicev1preview "github.com/Azure/azure-service-operator/v2/api/containerservice/v1api20231102preview"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters/mock_managedclusters"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
 	"sigs.k8s.io/cluster-api/util/secret"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/managedclusters/mock_managedclusters"
 )
 
 func TestPostCreateOrUpdateResourceHook(t *testing.T) {
@@ -41,7 +41,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		scope := mock_managedclusters.NewMockManagedClusterScope(mockCtrl)
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, nil, errors.New("an error"))
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, nil, errors.New("an error"))
 		g.Expect(err).To(HaveOccurred())
 	})
 
@@ -70,7 +70,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, managedCluster, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -99,7 +99,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, managedCluster, nil)
 		g.Expect(err).NotTo(HaveOccurred())
 	})
 
@@ -114,7 +114,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			Build()
 		scope.EXPECT().GetClient().Return(kclient).AnyTimes()
 
-		scope.EXPECT().SetControlPlaneEndpoint(clusterv1.APIEndpoint{
+		scope.EXPECT().SetControlPlaneEndpoint(clusterv1beta1.APIEndpoint{
 			Host: "private fqdn",
 			Port: 443,
 		})
@@ -135,7 +135,7 @@ func TestPostCreateOrUpdateResourceHook(t *testing.T) {
 			},
 		}
 
-		err := postCreateOrUpdateResourceHook(context.Background(), scope, managedCluster, nil)
+		err := postCreateOrUpdateResourceHook(t.Context(), scope, managedCluster, nil)
 		g.Expect(err).To(HaveOccurred())
 	})
 }
@@ -170,7 +170,7 @@ func setupMockScope(t *testing.T) *mock_managedclusters.MockManagedClusterScope 
 		Build()
 	scope.EXPECT().GetClient().Return(kclient).AnyTimes()
 
-	scope.EXPECT().SetControlPlaneEndpoint(clusterv1.APIEndpoint{
+	scope.EXPECT().SetControlPlaneEndpoint(clusterv1beta1.APIEndpoint{
 		Host: "fdqn",
 		Port: 443,
 	})

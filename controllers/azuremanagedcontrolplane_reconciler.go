@@ -22,6 +22,11 @@ import (
 
 	"github.com/pkg/errors"
 	"k8s.io/client-go/tools/clientcmd"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/util/secret"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/scope"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aksextensions"
@@ -33,9 +38,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/subnets"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	"sigs.k8s.io/cluster-api/util/secret"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // azureManagedControlPlaneService contains the services required by the cluster controller.
@@ -136,6 +138,15 @@ func (r *azureManagedControlPlaneService) reconcileKubeconfig(ctx context.Contex
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.kubeclient, &kubeConfigSecret, func() error {
 			kubeConfigSecret.Data = map[string][]byte{
 				secret.KubeconfigDataName: kubeConfigData,
+			}
+
+			// When upgrading from an older version of CAPI, the kubeconfig secret may not have the required
+			// cluster name label. Add it here to avoid kubeconfig issues during upgrades.
+			if _, ok := kubeConfigSecret.Labels[clusterv1.ClusterNameLabel]; !ok {
+				if kubeConfigSecret.Labels == nil {
+					kubeConfigSecret.Labels = make(map[string]string)
+				}
+				kubeConfigSecret.Labels[clusterv1.ClusterNameLabel] = r.scope.ClusterName()
 			}
 			return nil
 		}); err != nil {

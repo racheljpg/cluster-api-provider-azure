@@ -38,6 +38,15 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	bootstrapapi "k8s.io/cluster-bootstrap/token/api"
 	"k8s.io/utils/ptr"
+	clusterv1beta1 "sigs.k8s.io/cluster-api/api/core/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/cluster-api/controllers/remote"
+	v1beta1conditions "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/conditions"
+	v1beta1patch "sigs.k8s.io/cluster-api/util/deprecated/v1beta1/patch"
+	"sigs.k8s.io/cluster-api/util/secret"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/aksextensions"
@@ -49,13 +58,6 @@ import (
 	"sigs.k8s.io/cluster-api-provider-azure/azure/services/virtualnetworks"
 	"sigs.k8s.io/cluster-api-provider-azure/util/futures"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
-	"sigs.k8s.io/cluster-api/controllers/remote"
-	"sigs.k8s.io/cluster-api/util/conditions"
-	"sigs.k8s.io/cluster-api/util/patch"
-	"sigs.k8s.io/cluster-api/util/secret"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const (
@@ -74,6 +76,7 @@ type ManagedControlPlaneScopeParams struct {
 	ManagedMachinePools []ManagedMachinePool
 	Cache               *ManagedControlPlaneCache
 	Timeouts            azure.AsyncReconciler
+	CredentialCache     azure.CredentialCache
 }
 
 // NewManagedControlPlaneScope creates a new Scope from the supplied parameters.
@@ -90,7 +93,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 		return nil, errors.New("failed to generate new scope from nil ControlPlane")
 	}
 
-	credentialsProvider, err := NewManagedControlPlaneCredentialsProvider(ctx, params.Client, params.ControlPlane)
+	credentialsProvider, err := NewAzureCredentialsProvider(ctx, params.CredentialCache, params.Client, params.ControlPlane.Spec.IdentityRef, params.ControlPlane.Namespace)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init credentials provider")
 	}
@@ -103,7 +106,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 		params.Cache = &ManagedControlPlaneCache{}
 	}
 
-	helper, err := patch.NewHelper(params.ControlPlane, params.Client)
+	helper, err := v1beta1patch.NewHelper(params.ControlPlane, params.Client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to init patch helper")
 	}
@@ -123,7 +126,7 @@ func NewManagedControlPlaneScope(ctx context.Context, params ManagedControlPlane
 // ManagedControlPlaneScope defines the basic context for an actuator to operate upon.
 type ManagedControlPlaneScope struct {
 	Client              client.Client
-	PatchHelper         *patch.Helper
+	PatchHelper         *v1beta1patch.Helper
 	adminKubeConfigData []byte
 	userKubeConfigData  []byte
 	cache               *ManagedControlPlaneCache
@@ -233,13 +236,13 @@ func (s *ManagedControlPlaneScope) PatchObject(ctx context.Context) error {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "scope.ManagedControlPlaneScope.PatchObject")
 	defer done()
 
-	conditions.SetSummary(s.ControlPlane)
+	v1beta1conditions.SetSummary(s.ControlPlane)
 
 	return s.PatchHelper.Patch(
 		ctx,
 		s.ControlPlane,
-		patch.WithOwnedConditions{Conditions: []clusterv1.ConditionType{
-			clusterv1.ReadyCondition,
+		v1beta1patch.WithOwnedConditions{Conditions: []clusterv1beta1.ConditionType{
+			clusterv1beta1.ReadyCondition,
 			infrav1.ResourceGroupReadyCondition,
 			infrav1.VNetReadyCondition,
 			infrav1.SubnetsReadyCondition,
@@ -579,13 +582,11 @@ func (s *ManagedControlPlaneScope) ManagedClusterSpec() azure.ASOResourceSpecGet
 		managedClusterSpec.LoadBalancerSKU = strings.ToLower(*s.ControlPlane.Spec.LoadBalancerSKU)
 	}
 
-	if clusterNetwork := s.Cluster.Spec.ClusterNetwork; clusterNetwork != nil {
-		if clusterNetwork.Services != nil && len(clusterNetwork.Services.CIDRBlocks) == 1 {
-			managedClusterSpec.ServiceCIDR = clusterNetwork.Services.CIDRBlocks[0]
-		}
-		if clusterNetwork.Pods != nil && len(clusterNetwork.Pods.CIDRBlocks) == 1 {
-			managedClusterSpec.PodCIDR = clusterNetwork.Pods.CIDRBlocks[0]
-		}
+	if len(s.Cluster.Spec.ClusterNetwork.Services.CIDRBlocks) == 1 {
+		managedClusterSpec.ServiceCIDR = s.Cluster.Spec.ClusterNetwork.Services.CIDRBlocks[0]
+	}
+	if len(s.Cluster.Spec.ClusterNetwork.Pods.CIDRBlocks) == 1 {
+		managedClusterSpec.PodCIDR = s.Cluster.Spec.ClusterNetwork.Pods.CIDRBlocks[0]
 	}
 
 	if s.ControlPlane.Spec.AADProfile != nil {
@@ -734,8 +735,8 @@ func (s *ManagedControlPlaneScope) GetAllAgentPoolSpecs() ([]azure.ASOResourceSp
 	)
 	for _, pool := range s.ManagedMachinePools {
 		// TODO: this should be in a webhook: https://github.com/kubernetes-sigs/cluster-api/issues/6040
-		if pool.MachinePool != nil && pool.MachinePool.Spec.Template.Spec.Version != nil {
-			version := *pool.MachinePool.Spec.Template.Spec.Version
+		if pool.MachinePool != nil && pool.MachinePool.Spec.Template.Spec.Version != "" {
+			version := pool.MachinePool.Spec.Template.Spec.Version
 			if semver.Compare(version, s.ControlPlane.Spec.Version) > 0 {
 				return nil, errors.New("MachinePool version cannot be greater than the AzureManagedControlPlane version")
 			}
@@ -757,7 +758,7 @@ func (s *ManagedControlPlaneScope) GetAllAgentPoolSpecs() ([]azure.ASOResourceSp
 }
 
 // SetControlPlaneEndpoint sets a control plane endpoint.
-func (s *ManagedControlPlaneScope) SetControlPlaneEndpoint(endpoint clusterv1.APIEndpoint) {
+func (s *ManagedControlPlaneScope) SetControlPlaneEndpoint(endpoint clusterv1beta1.APIEndpoint) {
 	s.ControlPlane.Spec.ControlPlaneEndpoint.Host = endpoint.Host
 	s.ControlPlane.Spec.ControlPlaneEndpoint.Port = endpoint.Port
 }
@@ -871,44 +872,44 @@ func (s *ManagedControlPlaneScope) DeleteLongRunningOperationState(name, service
 }
 
 // UpdateDeleteStatus updates a condition on the AzureManagedControlPlane status after a DELETE operation.
-func (s *ManagedControlPlaneScope) UpdateDeleteStatus(condition clusterv1.ConditionType, service string, err error) {
+func (s *ManagedControlPlaneScope) UpdateDeleteStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletedReason, clusterv1.ConditionSeverityInfo, "%s successfully deleted", service)
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletedReason, clusterv1beta1.ConditionSeverityInfo, "%s successfully deleted", service)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletingReason, clusterv1.ConditionSeverityInfo, "%s deleting", service)
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletingReason, clusterv1beta1.ConditionSeverityInfo, "%s deleting", service)
 	default:
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletionFailedReason, clusterv1.ConditionSeverityError, "%s failed to delete. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.DeletionFailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to delete. err: %s", service, err.Error())
 	}
 }
 
 // UpdatePutStatus updates a condition on the AzureManagedControlPlane status after a PUT operation.
-func (s *ManagedControlPlaneScope) UpdatePutStatus(condition clusterv1.ConditionType, service string, err error) {
+func (s *ManagedControlPlaneScope) UpdatePutStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkTrue(s.ControlPlane, condition)
+		v1beta1conditions.MarkTrue(s.ControlPlane, condition)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.CreatingReason, clusterv1.ConditionSeverityInfo, "%s creating or updating", service)
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.CreatingReason, clusterv1beta1.ConditionSeverityInfo, "%s creating or updating", service)
 	default:
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.FailedReason, clusterv1.ConditionSeverityError, "%s failed to create or update. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.FailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to create or update. err: %s", service, err.Error())
 	}
 }
 
 // UpdatePatchStatus updates a condition on the AzureManagedControlPlane status after a PATCH operation.
-func (s *ManagedControlPlaneScope) UpdatePatchStatus(condition clusterv1.ConditionType, service string, err error) {
+func (s *ManagedControlPlaneScope) UpdatePatchStatus(condition clusterv1beta1.ConditionType, service string, err error) {
 	switch {
 	case err == nil:
-		conditions.MarkTrue(s.ControlPlane, condition)
+		v1beta1conditions.MarkTrue(s.ControlPlane, condition)
 	case azure.IsOperationNotDoneError(err):
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.UpdatingReason, clusterv1.ConditionSeverityInfo, "%s updating", service)
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.UpdatingReason, clusterv1beta1.ConditionSeverityInfo, "%s updating", service)
 	default:
-		conditions.MarkFalse(s.ControlPlane, condition, infrav1.FailedReason, clusterv1.ConditionSeverityError, "%s failed to update. err: %s", service, err.Error())
+		v1beta1conditions.MarkFalse(s.ControlPlane, condition, infrav1.FailedReason, clusterv1beta1.ConditionSeverityError, "%s failed to update. err: %s", service, err.Error())
 	}
 }
 
 // AnnotationJSON returns a map[string]interface from a JSON annotation.
-func (s *ManagedControlPlaneScope) AnnotationJSON(annotation string) (map[string]interface{}, error) {
-	out := map[string]interface{}{}
+func (s *ManagedControlPlaneScope) AnnotationJSON(annotation string) (map[string]any, error) {
+	out := map[string]any{}
 	jsonAnnotation := s.ControlPlane.GetAnnotations()[annotation]
 	if jsonAnnotation == "" {
 		return out, nil
@@ -924,7 +925,7 @@ func (s *ManagedControlPlaneScope) AnnotationJSON(annotation string) (map[string
 // `content`. `content` in this case should be a `map[string]interface{}`
 // suitable for turning into JSON. This `content` map will be marshalled into a
 // JSON string before being set as the given `annotation`.
-func (s *ManagedControlPlaneScope) UpdateAnnotationJSON(annotation string, content map[string]interface{}) error {
+func (s *ManagedControlPlaneScope) UpdateAnnotationJSON(annotation string, content map[string]any) error {
 	b, err := json.Marshal(content)
 	if err != nil {
 		return err
@@ -942,7 +943,7 @@ func (s *ManagedControlPlaneScope) SetAnnotation(key, value string) {
 }
 
 // AvailabilityStatusResource refers to the AzureManagedControlPlane.
-func (s *ManagedControlPlaneScope) AvailabilityStatusResource() conditions.Setter {
+func (s *ManagedControlPlaneScope) AvailabilityStatusResource() v1beta1conditions.Setter {
 	return s.ControlPlane
 }
 
@@ -953,10 +954,10 @@ func (s *ManagedControlPlaneScope) AvailabilityStatusResourceURI() string {
 
 // AvailabilityStatusFilter ignores the health metrics connection error that
 // occurs on startup for every AKS cluster.
-func (s *ManagedControlPlaneScope) AvailabilityStatusFilter(cond *clusterv1.Condition) *clusterv1.Condition {
+func (s *ManagedControlPlaneScope) AvailabilityStatusFilter(cond *clusterv1beta1.Condition) *clusterv1beta1.Condition {
 	if time.Since(s.ControlPlane.CreationTimestamp.Time) < resourceHealthWarningInitialGracePeriod &&
-		cond.Severity == clusterv1.ConditionSeverityWarning {
-		return conditions.TrueCondition(infrav1.AzureResourceAvailableCondition)
+		cond.Severity == clusterv1beta1.ConditionSeverityWarning {
+		return v1beta1conditions.TrueCondition(infrav1.AzureResourceAvailableCondition)
 	}
 	return cond
 }

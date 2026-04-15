@@ -28,10 +28,11 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
-	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	"sigs.k8s.io/cluster-api/test/framework"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 )
 
 // AzureSecurityGroupsSpecInput is the input for AzureSecurityGroupsSpec.
@@ -98,7 +99,7 @@ func AzureSecurityGroupsSpec(ctx context.Context, inputGetter func() AzureSecuri
 
 	azureCluster := &infrav1.AzureCluster{}
 	err = mgmtClient.Get(ctx, client.ObjectKey{
-		Namespace: input.Cluster.Spec.InfrastructureRef.Namespace,
+		Namespace: input.Cluster.Namespace,
 		Name:      input.Cluster.Spec.InfrastructureRef.Name,
 	}, azureCluster)
 	Expect(err).NotTo(HaveOccurred())

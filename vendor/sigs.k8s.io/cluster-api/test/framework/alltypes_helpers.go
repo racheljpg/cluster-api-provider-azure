@@ -34,19 +34,21 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	. "sigs.k8s.io/cluster-api/test/framework/ginkgoextensions"
 )
 
 // GetCAPIResourcesInput is the input for GetCAPIResources.
 type GetCAPIResourcesInput struct {
-	Lister    Lister
-	Namespace string
+	Lister       Lister
+	Namespace    string
+	IncludeTypes []metav1.TypeMeta
 }
 
 // GetCAPIResources reads all the CAPI resources in a namespace.
@@ -57,16 +59,20 @@ func GetCAPIResources(ctx context.Context, input GetCAPIResourcesInput) []*unstr
 	Expect(input.Namespace).NotTo(BeEmpty(), "input.Namespace is required for GetCAPIResources")
 
 	types := getClusterAPITypes(ctx, input.Lister)
+	types.Insert(input.IncludeTypes...)
 
 	objList := []*unstructured.Unstructured{}
-	for i := range types {
-		typeMeta := types[i]
+	for _, typ := range types.UnsortedList() {
 		typeList := new(unstructured.UnstructuredList)
-		typeList.SetAPIVersion(typeMeta.APIVersion)
-		typeList.SetKind(typeMeta.Kind)
+		typeList.SetAPIVersion(typ.APIVersion)
+		typeList.SetKind(typ.Kind)
 
 		if err := input.Lister.List(ctx, typeList, client.InNamespace(input.Namespace)); err != nil {
 			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if apierrors.IsForbidden(err) {
+				fmt.Printf("Warning: failed to list %s resources due to a rbac issue: %v", typeList.GroupVersionKind(), err)
 				continue
 			}
 			Fail(fmt.Sprintf("failed to list %q resources: %v", typeList.GroupVersionKind(), err))
@@ -82,8 +88,8 @@ func GetCAPIResources(ctx context.Context, input GetCAPIResourcesInput) []*unstr
 
 // getClusterAPITypes returns the list of TypeMeta to be considered for the move discovery phase.
 // This list includes all the types belonging to CAPI providers.
-func getClusterAPITypes(ctx context.Context, lister Lister) []metav1.TypeMeta {
-	discoveredTypes := []metav1.TypeMeta{}
+func getClusterAPITypes(ctx context.Context, lister Lister) sets.Set[metav1.TypeMeta] {
+	discoveredTypes := sets.New[metav1.TypeMeta]()
 
 	crdList := &apiextensionsv1.CustomResourceDefinitionList{}
 	Eventually(func() error {
@@ -96,7 +102,7 @@ func getClusterAPITypes(ctx context.Context, lister Lister) []metav1.TypeMeta {
 				continue
 			}
 
-			discoveredTypes = append(discoveredTypes, metav1.TypeMeta{
+			discoveredTypes.Insert(metav1.TypeMeta{
 				Kind: crd.Spec.Names.Kind,
 				APIVersion: metav1.GroupVersion{
 					Group:   crd.Spec.Group,
@@ -110,9 +116,12 @@ func getClusterAPITypes(ctx context.Context, lister Lister) []metav1.TypeMeta {
 
 // DumpAllResourcesInput is the input for DumpAllResources.
 type DumpAllResourcesInput struct {
-	Lister    Lister
-	Namespace string
-	LogPath   string
+	Lister               Lister
+	KubeConfigPath       string
+	ClusterctlConfigPath string
+	Namespace            string
+	LogPath              string
+	IncludeTypes         []metav1.TypeMeta
 }
 
 // DumpAllResources dumps Cluster API related resources to YAML
@@ -120,11 +129,26 @@ type DumpAllResourcesInput struct {
 func DumpAllResources(ctx context.Context, input DumpAllResourcesInput) {
 	Expect(ctx).NotTo(BeNil(), "ctx is required for DumpAllResources")
 	Expect(input.Lister).NotTo(BeNil(), "input.Lister is required for DumpAllResources")
+	Expect(input.KubeConfigPath).NotTo(BeEmpty(), "input.KubeConfigPath is required for DumpAllResources")
+	Expect(input.ClusterctlConfigPath).NotTo(BeEmpty(), "input.ClusterctlConfigPath is required for DumpAllResources")
 	Expect(input.Namespace).NotTo(BeEmpty(), "input.Namespace is required for DumpAllResources")
+	Expect(input.LogPath).NotTo(BeEmpty(), "input.LogPath is required for DumpAllResources")
 
 	resources := GetCAPIResources(ctx, GetCAPIResourcesInput{
-		Lister:    input.Lister,
-		Namespace: input.Namespace,
+		Lister:       input.Lister,
+		Namespace:    input.Namespace,
+		IncludeTypes: input.IncludeTypes,
+	})
+
+	// Describe all clusters (this is a sort of summary of all the resources being bumped).
+	// Note: intentionally calling GetCAPIResources first as DescribeAllCluster is more likely to fail
+	// and then we wouldn't have the CAPI resources available.
+	DescribeAllCluster(ctx, DescribeAllClusterInput{
+		Lister:               input.Lister,
+		KubeConfigPath:       input.KubeConfigPath,
+		ClusterctlConfigPath: input.ClusterctlConfigPath,
+		LogFolder:            filepath.Join(input.LogPath, input.Namespace, "Cluster"),
+		Namespace:            input.Namespace,
 	})
 
 	for i := range resources {

@@ -30,9 +30,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	clusterctlv1 "sigs.k8s.io/cluster-api/cmd/clusterctl/api/v1alpha3"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/internal/util"
 	logf "sigs.k8s.io/cluster-api/cmd/clusterctl/log"
@@ -64,10 +65,6 @@ type ComponentsClient interface {
 	// it is required to explicitly opt-in for the deletion of the namespace where the provider components are hosted
 	// and for the deletion of the provider's CRDs.
 	Delete(ctx context.Context, options DeleteOptions) error
-
-	// DeleteWebhookNamespace deletes the core provider webhook namespace (eg. capi-webhook-system).
-	// This is required when upgrading to v1alpha4 where webhooks are included in the controller itself.
-	DeleteWebhookNamespace(ctx context.Context) error
 
 	// ValidateNoObjectsExist checks if custom resources of the custom resource definitions exist and returns an error if so.
 	ValidateNoObjectsExist(ctx context.Context, provider clusterctlv1.Provider) error
@@ -135,7 +132,7 @@ func (p *providerComponents) createObj(ctx context.Context, obj unstructured.Uns
 
 func (p *providerComponents) Delete(ctx context.Context, options DeleteOptions) error {
 	log := logf.Log
-	log.Info("Deleting", "Provider", options.Provider.Name, "Version", options.Provider.Version, "Namespace", options.Provider.Namespace)
+	log.Info("Deleting", "Provider", klog.KObj(&options.Provider), "providerVersion", options.Provider.Version)
 
 	// Fetch all the components belonging to a provider.
 	// We want that the delete operation is able to clean-up everything.
@@ -264,7 +261,7 @@ func (p *providerComponents) DeleteWebhookNamespace(ctx context.Context) error {
 
 func (p *providerComponents) ValidateNoObjectsExist(ctx context.Context, provider clusterctlv1.Provider) error {
 	log := logf.Log
-	log.Info("Checking for CRs", "Provider", provider.Name, "Version", provider.Version, "Namespace", provider.Namespace)
+	log.Info("Checking for CRs", "Provider", klog.KObj(&provider), "providerVersion", provider.Version)
 
 	proxyClient, err := p.proxy.NewClient(ctx)
 	if err != nil {
@@ -286,7 +283,6 @@ func (p *providerComponents) ValidateNoObjectsExist(ctx context.Context, provide
 	// Filter the resources according to the delete options
 	crsHavingObjects := []string{}
 	for _, crd := range customResources.Items {
-		crd := crd
 		storageVersion, err := storageVersionForCRD(&crd)
 		if err != nil {
 			return err

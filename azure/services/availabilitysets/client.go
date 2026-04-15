@@ -22,6 +22,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/runtime"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v5"
 	"github.com/pkg/errors"
+
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/util/tele"
 )
@@ -45,7 +46,7 @@ func NewClient(auth azure.Authorizer) (*AzureClient, error) {
 }
 
 // Get gets an availability set.
-func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result interface{}, err error) {
+func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (result any, err error) {
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "availabilitysets.AzureClient.Get")
 	defer done()
 
@@ -59,7 +60,7 @@ func (ac *AzureClient) Get(ctx context.Context, spec azure.ResourceSpecGetter) (
 // CreateOrUpdateAsync creates or updates an availability set asynchronously.
 // It sends a PUT request to Azure and if accepted without error, the func will return a Poller which can be used to track the ongoing
 // progress of the operation.
-func (ac *AzureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, _resumeToken string, parameters interface{}) (result interface{}, poller *runtime.Poller[armcompute.AvailabilitySetsClientCreateOrUpdateResponse], err error) {
+func (ac *AzureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.ResourceSpecGetter, _ string, parameters any) (result any, poller *runtime.Poller[armcompute.AvailabilitySetsClientCreateOrUpdateResponse], err error) { // ignore the resumeToken (3rd arg) as availability sets do not support polling in the same way as other resources
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "availabilitySets.AzureClient.CreateOrUpdateAsync")
 	defer done()
 
@@ -81,7 +82,7 @@ func (ac *AzureClient) CreateOrUpdateAsync(ctx context.Context, spec azure.Resou
 // DeleteAsync deletes a availability set asynchronously. DeleteAsync sends a DELETE
 // request to Azure and if accepted without error, the func will return a Poller which can be used to track the ongoing
 // progress of the operation.
-func (ac *AzureClient) DeleteAsync(ctx context.Context, spec azure.ResourceSpecGetter, _resumeToken string) (poller *runtime.Poller[armcompute.AvailabilitySetsClientDeleteResponse], err error) {
+func (ac *AzureClient) DeleteAsync(ctx context.Context, spec azure.ResourceSpecGetter, _ string) (poller *runtime.Poller[armcompute.AvailabilitySetsClientDeleteResponse], err error) { // ignore the resumeToken (3rd arg) as availability sets do not support polling in the same way as other resources
 	ctx, _, done := tele.StartSpanWithLogger(ctx, "availabilitysets.AzureClient.DeleteAsync")
 	defer done()
 

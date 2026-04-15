@@ -17,7 +17,6 @@ limitations under the License.
 package groups
 
 import (
-	"context"
 	"testing"
 
 	asoresourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
@@ -27,11 +26,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/cluster-api-provider-azure/azure"
-	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups/mock_groups"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	fakeclient "sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"sigs.k8s.io/cluster-api-provider-azure/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/azure/services/groups/mock_groups"
 )
 
 func TestIsManaged(t *testing.T) {
@@ -168,7 +168,7 @@ func TestIsManaged(t *testing.T) {
 			scopeMock.EXPECT().ASOOwner().Return(newOwner()).AnyTimes()
 			test.expect(scopeMock.EXPECT())
 
-			actual, err := New(scopeMock).IsManaged(context.Background())
+			actual, err := New(scopeMock).IsManaged(t.Context())
 			if test.expectedError {
 				g.Expect(err).To(HaveOccurred())
 			} else {

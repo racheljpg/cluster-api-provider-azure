@@ -32,6 +32,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	. "github.com/onsi/gomega"
 	"go.uber.org/mock/gomock"
+
 	infrav1 "sigs.k8s.io/cluster-api-provider-azure/api/v1beta1"
 	"sigs.k8s.io/cluster-api-provider-azure/azure"
 	"sigs.k8s.io/cluster-api-provider-azure/azure/mock_azure"
@@ -45,7 +46,7 @@ func TestServiceCreateOrUpdateResource(t *testing.T) {
 		name           string
 		serviceName    string
 		expectedError  string
-		expectedResult interface{}
+		expectedResult any
 		expect         func(g *WithT, s *mock_async.MockFutureScopeMockRecorder, c *mock_async.MockCreatorMockRecorder[MockCreator], r *mock_azure.MockResourceSpecGetterMockRecorder)
 	}{
 		{
@@ -168,7 +169,6 @@ func TestServiceCreateOrUpdateResource(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -182,7 +182,7 @@ func TestServiceCreateOrUpdateResource(t *testing.T) {
 
 			tc.expect(g, scopeMock.EXPECT(), creatorMock.EXPECT(), specMock.EXPECT())
 
-			result, err := svc.CreateOrUpdateResource(context.TODO(), specMock, serviceName)
+			result, err := svc.CreateOrUpdateResource(t.Context(), specMock, serviceName)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -203,7 +203,7 @@ func TestServiceDeleteResource(t *testing.T) {
 		name           string
 		serviceName    string
 		expectedError  string
-		expectedResult interface{}
+		expectedResult any
 		expect         func(g *GomegaWithT, s *mock_async.MockFutureScopeMockRecorder, d *mock_async.MockDeleterMockRecorder[MockDeleter], r *mock_azure.MockResourceSpecGetterMockRecorder)
 	}{
 		{
@@ -265,7 +265,6 @@ func TestServiceDeleteResource(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -279,7 +278,7 @@ func TestServiceDeleteResource(t *testing.T) {
 
 			tc.expect(g, scopeMock.EXPECT(), deleterMock.EXPECT(), specMock.EXPECT())
 
-			err := svc.DeleteResource(context.TODO(), specMock, tc.serviceName)
+			err := svc.DeleteResource(t.Context(), specMock, tc.serviceName)
 			if tc.expectedError != "" {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tc.expectedError))
@@ -329,7 +328,7 @@ var (
 	}
 	fakeResource            = armresources.GenericResource{}
 	fakeParameters          = armresources.GenericResource{}
-	azureResourceGetterType = reflect.TypeOf((*azure.ResourceSpecGetter)(nil)).Elem()
+	azureResourceGetterType = reflect.TypeFor[azure.ResourceSpecGetter]()
 )
 
 func fakePoller[T any](g *GomegaWithT, statusCode int) *runtime.Poller[T] {
